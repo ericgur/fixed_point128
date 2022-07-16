@@ -53,7 +53,7 @@ public:
     }
     fixed_point128(const fixed_point128& other) {
         low = other.low;
-        high = other.low;
+        high = other.high;
         sign = other.sign;
     }
     fixed_point128(double val) {
@@ -129,32 +129,32 @@ public:
     }
     
     // math operators
-    inline fixed_point128& operator+(const fixed_point128& other) const {
+    inline fixed_point128 operator+(const fixed_point128& other) const {
         throw std::exception("Not implemented!");
         return *this;
     }
 
-    inline fixed_point128& operator-(const fixed_point128& other) const {
+    inline fixed_point128 operator-(const fixed_point128& other) const {
         throw std::exception("Not implemented!");
         return *this;
     }
 
-    inline fixed_point128& operator*(const fixed_point128& other) const {
+    inline fixed_point128 operator*(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp *= other;
     }
 
-    inline fixed_point128& operator/(const fixed_point128& other) const {
+    inline fixed_point128 operator/(const fixed_point128& other) const {
         throw std::exception("Not implemented!");
         return *this;
     }
 
-    inline fixed_point128& operator>>(int shift) const {
+    inline fixed_point128 operator>>(int shift) const {
         fixed_point128 temp(*this);
         return temp >> shift;
     }
 
-    inline fixed_point128& operator<<(int shift) const {
+    inline fixed_point128 operator<<(int shift) const {
         fixed_point128 temp(*this);
         return temp << shift;
     }
@@ -187,25 +187,26 @@ public:
         carry = _addcarry_u64(0, res[2], temp[1], &res[2]);
         res[3] += carry;
 
-        // multiply high QWORDs
+        // multiply high QWORDs (overflow can happen)
         temp[0] = _umul128(high, other.high, &temp[1]);
         carry = _addcarry_u64(0, res[2], temp[0], &res[2]);
         res[2] += carry;
-        carry = _addcarry_u64(0, res[3], temp[1], &res[3]);
-        res[3] += carry;
+        res[3] += temp[1];
 
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by frac_bits
         static constexpr int index = frac_bits >> 6; // / 64;
         static constexpr int lsb = frac_bits & MAX_BITS_VALUE_64(6);
         static constexpr int lsb_comp = 64 - lsb;
-        
+        //printf("index %i, lsb %i, lsb_comp %i", index, lsb, lsb_comp);
         // copy block #1 (lowest)
         low = res[index] >> lsb;
         low |= GET_BITS(res[index + 1], 0, lsb) << lsb_comp;
         high = res[index + 1] >> lsb;
         high |= GET_BITS(res[index + 2], 0, lsb) << lsb_comp;
 
+        // set the sign
+        sign ^= other.sign;
         return *this;
     }
 

@@ -49,10 +49,25 @@ void test_shift()
     printf("f2 <<= 66 --> %0.15lf\n", (double)f2);
 }
 
+void test_multiplication()
+{
+    printf("\nTest Multiplication\n");
+    fixed_point128<4> f1 = 1.0;
+    fixed_point128<4> f2 = 1.4142135623730951; // == sqrt of 2
+    fixed_point128<4> f1_sq = f1 * f1;
+    fixed_point128<4> f2_sq = f2 * f2;
+    printf("f1: %0.15lf\n", (double)f1);
+    printf("f1 * f1: %0.15lf\n", (double)f1_sq);
+    printf("f2: %0.15lf\n", (double)f2);
+    printf("f2 * f2: %0.15lf\n", (double)f2_sq);
+
+}
+
 int main()
 {
     test_conversion();
     test_addition();
     test_shift();
+    test_multiplication();
 }
 
