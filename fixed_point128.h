@@ -30,16 +30,11 @@ class fixed_point128
 
 private:
     // members
-    union
-    {
-        char bytes[16];
-        struct
-        {
-            uint64 low;
-            uint64 high;
-            unsigned sign; // 0 = positive, 1 negative
-        };
-    };
+    uint64 low;
+    uint64 high;
+    unsigned sign; // 0 = positive, 1 negative
+
+    // useful const calculations
     static constexpr int frac_bits = 128 - int_bits;
     static constexpr int upper_frac_bits = (frac_bits <= 64) ? 0 : frac_bits - 64;
     static constexpr uint64 unity = 1ull << (64 - int_bits);
@@ -58,6 +53,13 @@ public:
     }
     fixed_point128(double val) {
         uint64 i = *((uint64*)(&val));
+        // very common case
+        if (i == 0) {
+            low = high = 0;
+            sign = 0;
+            return;
+        }
+
         sign = GET_BIT(i, 63);
         int e = GET_BITS(i, 52, 11) - 1023;
         uint64 f = (i & MAX_BITS_VALUE_64(52));
@@ -167,12 +169,12 @@ public:
 
     inline fixed_point128 operator>>(int shift) const {
         fixed_point128 temp(*this);
-        return temp >> shift;
+        return temp >>= shift;
     }
 
     inline fixed_point128 operator<<(int shift) const {
         fixed_point128 temp(*this);
-        return temp << shift;
+        return temp <<= shift;
     }
 
     inline fixed_point128 operator&(const fixed_point128& other) const {
@@ -306,25 +308,25 @@ public:
         }
         // 0-64 bit shift
         else {
-            low = __shiftright128(low, high, shift);
+            low = __shiftright128(low, high, (unsigned char)shift);
             high >>= shift;
         }
         return *this;
     }
 
     inline fixed_point128& operator<<=(int shift) {
-        if (shift >= 128) {
-            low = high = 0;
-            sign = 0;
+        // 0-64 bit shift - most common
+        if (shift <= 64) {
+            high = __shiftleft128(low, high, (unsigned char)shift);
+            low <<= shift;
         }
-        else if (shift >= 64) {
+        else if (shift < 128) {
             high = low << (shift - 64);
             low = 0;
         }
-        // 0-64 bit shift
         else {
-            high = __shiftleft128(low, high, shift);
-            low <<= shift;
+            low = high = 0;
+            sign = 0;
         }
 
         return *this;
