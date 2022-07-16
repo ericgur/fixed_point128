@@ -25,11 +25,23 @@ void test_addition()
 {
     printf("\nTest Addition\n");
     fixed_point128<4> f1 = 5.123456789012345;
+    fixed_point128<4> f2 =  7.0 - 5.123456789012345;
     printf("f1: %0.15lf\n", (double)f1);
+    printf("f2: %0.15lf\n", (double)f2);
     ++f1;
     printf("++f1 --> %0.15lf\n", (double)f1);
     f1++;
     printf("f1++ --> %0.15lf\n", (double)f1);
+    fixed_point128<4> f3 = f1 + f2;
+    printf("f1+f2 --> %0.15lf\n", (double)f3);
+    f3 = f2 + f1;
+    printf("f2+f1 --> %0.15lf\n", (double)f3);
+    f1 = -f1;
+    printf("f1 = -f1 --> %0.15lf\n", (double)f1);
+    f3 = f1 + f2;
+    printf("f1+f2 --> %0.15lf\n", (double)f3);
+    f3 = f1 - f2;
+    printf("f1-f2 --> %0.15lf\n", (double)f3);
 }
 
 void test_shift()
