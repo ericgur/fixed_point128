@@ -72,7 +72,11 @@ void test_multiplication()
     printf("f1 * f1: %0.15lf\n", (double)f1_sq);
     printf("f2: %0.15lf\n", (double)f2);
     printf("f2 * f2: %0.15lf\n", (double)f2_sq);
-
+    f1 = 0.00001;
+    printf("f1: %0.15lf\n", (double)f1);
+    f1 *= 100;
+    printf("f1 *= 100: %0.15lf\n", (double)f1);
+    f1 = f1 * 100;
 }
 
 int main()

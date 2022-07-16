@@ -88,7 +88,7 @@ public:
                 if (bits_to_shift <= 53) {
                     high = f >> bits_to_shift;
                     low = GET_BITS(f, 0, bits_to_shift);
-                    low <<= (64 - bits_to_shift);
+                    low <<= (int64)(64 - bits_to_shift);
                 }
                 // shift f into low QWORD
                 else {
@@ -148,6 +148,16 @@ public:
     inline fixed_point128 operator*(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp *= other;
+    }
+
+    inline fixed_point128 operator*(int64 val) const {
+        fixed_point128 temp(*this);
+        return temp *= val;
+    }
+
+    inline fixed_point128 operator*(int val) const {
+        fixed_point128 temp(*this);
+        return temp *= (int64)val;
     }
 
     inline fixed_point128 operator/(const fixed_point128& other) const {
@@ -221,7 +231,6 @@ public:
     }
 
     inline fixed_point128& operator*=(const fixed_point128& other) {
-                // use _mul128
         uint64 res[4] = {0}; // 256 bit of result
         uint64 temp[2] = {0};
         unsigned char carry;
@@ -261,6 +270,22 @@ public:
 
         // set the sign
         sign ^= other.sign;
+        return *this;
+    }
+
+    inline fixed_point128& operator*=(int64 val) {
+        // alway do positive multiplication
+        if (val < 0) {
+            val = -val;
+            sign ^= 1;
+        }
+        uint64 uval = uint64(val);
+        uint64 temp;
+
+        // multiply low QWORDs
+        low = _umul128(low, uval, &temp);
+        high = high * uval + temp;
+
         return *this;
     }
 
@@ -378,4 +403,59 @@ public:
         temp.sign ^= 1;
         return temp;
     }
+
+    //
+    // Comparison operators
+    //
+    inline bool operator==(const fixed_point128& other) const {
+        return sign == sign && high == high && low == low;
+    }
+    inline bool operator!=(const fixed_point128& other) const {
+        return sign != sign || high != high || low != low;
+    }
+    inline bool operator<(const fixed_point128& other) const {
+        // signs are different
+        if (sign != other.sign)
+            return sign > other.sign; // true when sign is 1 and other.sign is 0
+
+        // MSB is the same, check the LSB
+        if (high == other.high)
+            return (sign) ? low > other.low : low < other.low;
+
+        return (sign) ? high > other.high : high < other.high;
+    }
+    inline bool operator<=(const fixed_point128& other) const {
+        // signs are different
+        if (sign != other.sign)
+            return sign > other.sign; // true when sign is 1 and other.sign is 0
+
+        // MSB is the same, check the LSB
+        if (high == other.high)
+            return (sign) ? low >= other.low : low <= other.low;
+
+        return (sign) ? high >= other.high : high <= other.high;
+    }
+    inline bool operator>(const fixed_point128& other) const {
+        // signs are different
+        if (sign != other.sign)
+            return sign < other.sign; // true when sign is 0 and other.sign is 1
+
+        // MSB is the same, check the LSB
+        if (high == other.high)
+            return (sign) ? low < other.low : low > other.low;
+
+        return (sign) ? high < other.high : high > other.high;
+    }
+    inline bool operator>=(const fixed_point128& other) const {
+        // signs are different
+        if (sign != other.sign)
+            return sign < other.sign; // true when sign is 0 and other.sign is 1
+
+        // MSB is the same, check the LSB
+        if (high == other.high)
+            return (sign) ? low <= other.low : low >= other.low;
+
+        return (sign) ? high <= other.high : high >= other.high;
+    }
+
 };
