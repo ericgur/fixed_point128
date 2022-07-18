@@ -117,7 +117,19 @@ public:
     fixed_point128(int64 val) {
         low = 0;
         sign = GET_BIT(val, 63);
-        high = (sign != 0) ? (-val) << upper_frac_bits : val << upper_frac_bits;
+        high = ((sign != 0) ? (-val) : val) << upper_frac_bits;
+    }
+
+    fixed_point128(unsigned val) {
+        low = 0;
+        sign = 0;
+        high = (uint64)val << upper_frac_bits;
+    }
+
+    fixed_point128(int val) {
+        low = 0;
+        sign = GET_BIT(val, 31);
+        high = (uint64)((sign != 0) ? (-val) : val) << upper_frac_bits;
     }
 
     // conversion operators
@@ -149,6 +161,11 @@ public:
     inline fixed_point128 operator*(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp *= other;
+    }
+
+    inline fixed_point128 operator*(double val) const {
+        fixed_point128 temp(*this);
+        return temp *= fixed_point128(val);
     }
 
     inline fixed_point128 operator*(int64 val) const {
