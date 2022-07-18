@@ -38,8 +38,8 @@ private:
     static constexpr int frac_bits = 128 - int_bits;
     static constexpr int upper_frac_bits = (frac_bits <= 64) ? 0 : frac_bits - 64;
     static constexpr uint64 unity = 1ull << (64 - int_bits);
-    static constexpr double upper_unity = (0 != upper_frac_bits) ? (1.0 / (double)(1ull << upper_frac_bits)) : 0;
-    static constexpr double lower_unity = upper_unity / (double)(1ull << (32)) / (double)(1ull << (32));
+    static inline double upper_unity = pow(2, -upper_frac_bits);
+    static inline double lower_unity = pow(2, -frac_bits);
     static constexpr unsigned max_dword_value = (unsigned)(-1);
     static constexpr uint64 max_qword_value = (uint64)(-1);
 public:
@@ -130,10 +130,9 @@ public:
     }
 
     inline operator double() const {
-        double res = (double)(high * upper_unity); // high 64 bit part - bits 64-127
-        res += (double)(low * lower_unity);
-        if (sign) res = -res;
-        return res;
+        double res = (double)(high * upper_unity); // bits [64:127]
+        res += (double)(low * lower_unity);        // bits [0:63]
+        return (sign) ? -res : res;
     }
     
     // math operators
@@ -239,7 +238,10 @@ public:
 
         // multiply low QWORDs
         res[0] = _umul128(low, other.low, &res[1]);
-        
+
+        // multiply high QWORDs (overflow can happen)
+        res[2] = _umul128(high, other.high, &res[3]);
+
         // multiply low this and high other
         temp[0] = _umul128(low, other.high, &temp[1]);
         carry = _addcarry_u64(0, res[1], temp[0], &res[1]);
@@ -252,12 +254,6 @@ public:
         carry = _addcarry_u64(carry, res[2], temp[1], &res[2]);
         res[3] += carry;
 
-        // multiply high QWORDs (overflow can happen)
-        temp[0] = _umul128(high, other.high, &temp[1]);
-        carry = _addcarry_u64(0, res[2], temp[0], &res[2]);
-        res[2] += carry;
-        res[3] += temp[1];
-
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by frac_bits
         static constexpr int index = frac_bits >> 6; // / 64;
@@ -265,10 +261,11 @@ public:
         static constexpr int lsb_comp = 64 - lsb;
         //printf("index %i, lsb %i, lsb_comp %i", index, lsb, lsb_comp);
         // copy block #1 (lowest)
-        low = res[index] >> lsb;
-        low |= GET_BITS(res[index + 1], 0, lsb) << lsb_comp;
-        high = res[index + 1] >> lsb;
-        high |= GET_BITS(res[index + 2], 0, lsb) << lsb_comp;
+        low = res[index + 1] << lsb_comp;
+        low |= (res[index] >> lsb) & MAX_BITS_VALUE_64(lsb_comp);
+
+        high = res[index + 2] << lsb_comp;
+        high |= (res[index + 1] >> lsb) & MAX_BITS_VALUE_64(lsb_comp);
 
         // set the sign
         sign ^= other.sign;
@@ -287,7 +284,6 @@ public:
         // multiply low QWORDs
         low = _umul128(low, uval, &temp);
         high = high * uval + temp;
-
         return *this;
     }
 
