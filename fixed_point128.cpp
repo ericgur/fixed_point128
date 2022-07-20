@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "fixed_point128.h" 
 
+
 void test_conversion()
 {
     printf("\nTest Conversion\n");
@@ -79,11 +80,27 @@ void test_multiplication()
     f1 = f1 * 100;
 }
 
+void test_division()
+{
+    printf("\nTest Division\n");
+    fixed_point128<10> f1 = 1.0 / 3.0;
+    printf("f1: %0.15lf\n", (double)f1);
+    fixed_point128<10> f2 = f1 / 2.0;
+    printf("f2 = f1 / 2.0: %0.15lf\n", (double)f2);
+    f2 /= 32.0;
+    printf("f2 = f1 / 32.0: %0.15lf\n", (double)f2);
+    f1 = 0.01 / 3.0;
+    f2 = 1.0;
+    f2 /= f1;
+    printf("f2 /= (1.0 / 3.0): %0.15lf\n", (double)f2);
+}
+
 int main()
 {
     test_conversion();
     test_addition();
     test_shift();
     test_multiplication();
+    test_division();
 }
 
