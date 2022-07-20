@@ -1,3 +1,6 @@
+#ifndef FIXED_POINT128_H
+#define FIXED_POINT128_H
+
 #include <intrin.h>
 #include <exception>
 #include <stdexcept>
@@ -522,7 +525,7 @@ public:
 };
 
 
-int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n)
+inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n)
 {
     const uint64 b = 1ull << 32; // Number base (32 bits).
     const uint64 mask = b - 1;
@@ -607,7 +610,7 @@ int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, i
     return 0;
 }
 
-int div_short(unsigned short* q, unsigned short* r, const unsigned short* u, const unsigned short* v, int m, int n)
+inline int div_short(unsigned short* q, unsigned short* r, const unsigned short* u, const unsigned short* v, int m, int n)
 {
     const unsigned b = 65536; // Number base (16 bits).
     const unsigned mask = b - 1;
@@ -693,3 +696,5 @@ int div_short(unsigned short* q, unsigned short* r, const unsigned short* u, con
     }
     return 0;
 }
+
+#endif // #ifndef FIXED_POINT128_H
