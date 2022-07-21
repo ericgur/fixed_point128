@@ -15,7 +15,6 @@ typedef unsigned short uint16;
 int div_short(unsigned short* q, unsigned short* r, const unsigned short* u, const unsigned short* v, int m, int n);
 int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
 
-#pragma once
 #ifndef ONE_SHIFT
 #define ONE_SHIFT(x)  (1ull << (x))
 #endif
@@ -30,6 +29,14 @@ int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, i
 
 #ifndef GET_BITS
 #define GET_BITS(x, b, count)   (((x) >> (b)) & MAX_BITS_VALUE_64(count))
+#endif
+
+#ifndef INT_DIVIDE_BY_ZERO_EXCEPTION
+#define INT_DIVIDE_BY_ZERO_EXCEPTION   throw std::logic_error("Integer divide by zero!")
+#endif
+
+#ifndef FLOAT_DIVIDE_BY_ZERO_EXCEPTION 
+#define FLOAT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Floating point divide by zero!")
 #endif
 
 #define USE32BIT_DIVISION
@@ -47,21 +54,24 @@ private:
 
     // useful const calculations
     static constexpr int frac_bits = 128 - int_bits;
-    static constexpr int upper_frac_bits = (frac_bits <= 64) ? 0 : frac_bits - 64;
+    static constexpr int upper_frac_bits = frac_bits - 64;
     static constexpr uint64 unity = 1ull << (64 - int_bits);
-    static inline double upper_unity = pow(2, -upper_frac_bits);
-    static inline double lower_unity = pow(2, -frac_bits);
+    static inline const double upper_unity = pow(2, -upper_frac_bits);
+    static inline const double lower_unity = pow(2, -frac_bits);
     static constexpr unsigned max_dword_value = (unsigned)(-1);
     static constexpr uint64 max_qword_value = (uint64)(-1);
 public:
+    // ctors
     fixed_point128() { 
         low = high = 0ull; sign = 0; 
     }
+
     fixed_point128(const fixed_point128& other) {
         low = other.low;
         high = other.high;
         sign = other.sign;
     }
+
     fixed_point128(double val) {
         uint64 i = *((uint64*)(&val));
         // very common case
@@ -142,13 +152,31 @@ public:
         high = (uint64)((sign != 0) ? (-val) : val) << upper_frac_bits;
     }
 
+    // assignment operators
+    inline fixed_point128& operator=(const fixed_point128& other) {
+        high = other.high;
+        low = other.low;
+        sign = other.sign;
+        return *this;
+    }
+
     // conversion operators
-    inline operator unsigned int() const {
+    inline operator uint64() const {
+        return (high >> upper_frac_bits) & max_qword_value;
+    }
+
+    inline operator int64() const {
+        int64 res = (sign) ? -1ll : 1ll;
+        return res * ((high >> upper_frac_bits) & max_qword_value);
+    }
+
+    inline operator uint32() const {
         return (high >> upper_frac_bits) & max_dword_value;
     }
 
-    inline operator int() const {
-        return (int)((int64)high >> upper_frac_bits) & (max_dword_value);
+    inline operator int32() const {
+        int res = (sign) ? -1 : 1;
+        return res * ((int)((int64)high >> upper_frac_bits) & (max_dword_value));
     }
 
     inline operator double() const {
@@ -193,6 +221,7 @@ public:
         return temp /= other;
     }
     inline fixed_point128 operator/(double val) const {
+        if (val == 0) FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
         fixed_point128 temp(*this);
         temp /= val;
         return temp;
@@ -245,16 +274,16 @@ public:
         }
         
         // equal sign: simple case
+        // convert other high/low to 2's complement (flip bits, add +1)
         uint64 other_low, other_high = ~other.high;
-        carry = _addcarry_u64(0, ~other.low, 1, &other_low); // convert low to 2's complement
-        other_high += carry;
+        other_high += _addcarry_u64(0, ~other.low, 1, &other_low);
         
         //add the other value
         carry = _addcarry_u64(0, low, other_low, &low); // convert low to 2's complement
         _addcarry_u64(carry, high, other_high, &high); // convert low to 2's complement
 
         // if result is is negative, invert it along with the sign.
-        if (1 == GET_BIT(high, 63)) {
+        if (0 != (high >> 63)) {
             sign ^= 1;
             carry = _addcarry_u64(0, ~low, 1, &low);
             high = ~high + carry;
@@ -264,8 +293,8 @@ public:
     }
 
     inline fixed_point128& operator*=(const fixed_point128& other) {
-        uint64 res[4] = {0}; // 256 bit of result
-        uint64 temp[2] = {0};
+        uint64 res[4]; // 256 bit of result
+        uint64 temp1[2], temp2[2];
         unsigned char carry;
 
         // multiply low QWORDs
@@ -275,32 +304,56 @@ public:
         res[2] = _umul128(high, other.high, &res[3]);
 
         // multiply low this and high other
-        temp[0] = _umul128(low, other.high, &temp[1]);
-        carry = _addcarry_u64(0, res[1], temp[0], &res[1]);
-        carry = _addcarry_u64(carry, res[2], temp[1], &res[2]);
-        res[3] += carry;
+        temp1[0] = _umul128(low, other.high, &temp1[1]);
+        carry = _addcarry_u64(0, res[1], temp1[0], &res[1]);
+        res[3] += _addcarry_u64(carry, res[2], temp1[1], &res[2]);
 
         // multiply high this and low other
-        temp[0] = _umul128(high, other.low, &temp[1]);
-        carry = _addcarry_u64(0, res[1], temp[0], &res[1]);
-        carry = _addcarry_u64(carry, res[2], temp[1], &res[2]);
-        res[3] += carry;
+        temp2[0] = _umul128(high, other.low, &temp2[1]);
+        carry = _addcarry_u64(0, res[1], temp2[0], &res[1]);
+        res[3] += _addcarry_u64(carry, res[2], temp2[1], &res[2]);
 
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by frac_bits
         static constexpr int index = frac_bits >> 6; // / 64;
         static constexpr int lsb = frac_bits & MAX_BITS_VALUE_64(6);
         static constexpr int lsb_comp = 64 - lsb;
+        static constexpr uint64 lsb_comp_mask = MAX_BITS_VALUE_64(lsb_comp);
+
         //printf("index %i, lsb %i, lsb_comp %i", index, lsb, lsb_comp);
         // copy block #1 (lowest)
         low = res[index + 1] << lsb_comp;
-        low |= (res[index] >> lsb) & MAX_BITS_VALUE_64(lsb_comp);
+        low |= (res[index] >> lsb) & lsb_comp_mask;
 
         high = res[index + 2] << lsb_comp;
-        high |= (res[index + 1] >> lsb) & MAX_BITS_VALUE_64(lsb_comp);
+        high |= (res[index + 1] >> lsb) & lsb_comp_mask;
 
         // set the sign
         sign ^= other.sign;
+        return *this;
+    }
+
+    inline fixed_point128& operator*=(int32 val) {
+        // alway do positive multiplication
+        if (val < 0) {
+            val = -val;
+            sign ^= 1;
+        }
+        uint64 uval = (uint64)val;
+        uint64 temp;
+
+        // multiply low QWORDs
+        low = _umul128(low, uval, &temp);
+        high = high * uval + temp;
+        return *this;
+    }
+
+    inline fixed_point128& operator*=(uint32 val) {
+        uint64 temp;
+
+        // multiply low QWORDs
+        low = _umul128(low, val, &temp);
+        high = high * val + temp;
         return *this;
     }
 
@@ -310,12 +363,21 @@ public:
             val = -val;
             sign ^= 1;
         }
-        uint64 uval = uint64(val);
+        uint64 uval = (uint64)val;
         uint64 temp;
 
         // multiply low QWORDs
         low = _umul128(low, uval, &temp);
         high = high * uval + temp;
+        return *this;
+    }
+
+    inline fixed_point128& operator*=(uint64 val) {
+        uint64 temp;
+
+        // multiply low QWORDs
+        low = _umul128(low, val, &temp);
+        high = high * val + temp;
         return *this;
     }
 
@@ -334,7 +396,7 @@ public:
             sign ^= other.sign;
         }
         else { // error
-            throw std::logic_error("Divide by zero!");
+            INT_DIVIDE_BY_ZERO_EXCEPTION;
         }
         return *this;
     }
@@ -342,11 +404,7 @@ public:
     inline fixed_point128& operator/=(double val) {
         uint64 i = *((uint64*)(&val));
         // infinity
-        if (i == 0) {
-            low = high = max_qword_value;
-            sign = 0;
-            return *this;
-        }
+        if (0 == i) FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
 
         uint64 f = (i & MAX_BITS_VALUE_64(52));
         // simple and common case, the value is an exponent of 2
@@ -355,12 +413,18 @@ public:
             int e = GET_BITS(i, 52, 11) - 1023;
             return (e >= 0) ? *this >>= e  : *this <<= e;
         }
+
         *this /= fixed_point128(val);
         return *this;
     }
 
     inline fixed_point128& operator>>=(int shift) {
-        if (shift >= 128) {
+        // 0-64 bit shift - most common
+        if (shift <= 64) {
+            low = __shiftright128(low, high, (unsigned char)shift);
+            high >>= shift;
+        }
+        else if (shift >= 128) {
             low = high = 0;
             sign = 0;
         }
@@ -368,16 +432,11 @@ public:
             low = high >> (shift - 64);
             high = 0;
         }
-        // 0-64 bit shift
-        else {
-            low = __shiftright128(low, high, (unsigned char)shift);
-            high >>= shift;
-        }
+
         return *this;
     }
 
     inline fixed_point128& operator<<=(int shift) {
-        // 0-64 bit shift - most common
         if (shift <= 64) {
             high = __shiftleft128(low, high, (unsigned char)shift);
             low <<= shift;
