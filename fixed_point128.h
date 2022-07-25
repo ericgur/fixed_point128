@@ -250,6 +250,11 @@ public:
         return temp |= other;
     }
 
+    inline fixed_point128 operator^(const fixed_point128& other) const {
+        fixed_point128 temp(*this);
+        return temp ^= other;
+    }
+
     inline fixed_point128& operator+=(const fixed_point128& other) {
         unsigned char carry;
         // different sign: convert other to negative and use operator -=
@@ -484,6 +489,12 @@ public:
         high |= other.high;
         sign |= other.sign;
         return *this;
+    }
+
+    inline fixed_point128& operator^=(const fixed_point128& other) {
+        low ^= other.low;
+        high ^= other.high;
+        sign ^= other.sign;
     }
 
     // prefix ++ operation
