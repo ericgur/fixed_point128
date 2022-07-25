@@ -90,9 +90,22 @@ void test_division()
     f2 /= 32.0;
     printf("f2 = f1 / 32.0: %0.15lf\n", (double)f2);
     f1 = 0.01 / 3.0;
+    printf("f1 = 0.01 / 3.0 %0.15lf\n", (double)f1);
     f2 = 1.0;
+    printf("f2: %0.15lf\n", (double)f2);
     f2 /= f1;
-    printf("f2 /= (1.0 / 3.0): %0.15lf\n", (double)f2);
+    printf("f2 /= f1: %0.15lf\n", (double)f2);
+}
+
+void test_precision()
+{
+    printf("\nTest Precision\n");
+    fixed_point128<10> f = 1;
+    for (int i = 0; i < 118; ++i)         {
+        f /= 2;
+        printf("1: %0.30lf\n", (double)f);
+    }
+
 }
 
 int main()
@@ -102,5 +115,6 @@ int main()
     test_shift();
     test_multiplication();
     test_division();
+    test_precision();
 }
 
