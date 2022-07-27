@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "fixed_point128.h" 
 
+using namespace fp128;
 
 void test_conversion()
 {
@@ -20,6 +21,7 @@ void test_conversion()
     printf("a1: %0.15lf --> %0.15lf\n", a1, r1);
     printf("a2: %0.15lf --> %0.15lf\n", a2, r2);
     printf("a3: %0.15lf --> %0.15lf\n", a3, r3);
+    f3 = fp128::abs(-f3);
 }
 
 void test_addition()
@@ -95,6 +97,24 @@ void test_division()
     printf("f2: %0.15lf\n", (double)f2);
     f2 /= f1;
     printf("f2 /= f1: %0.15lf\n", (double)f2);
+
+    f1 = 8;
+    printf("f1: %0.15lf\n", (double)f1);
+    f1 %= 5;
+    printf("f1 %%= 5: %0.15lf\n", (double)f1);
+    f1 = 8;
+    printf("f1: %0.15lf\n", (double)f1);
+    f1 %= -5;
+    printf("f1 %%= -5: %0.15lf\n", (double)f1);
+    f1 = -8;
+    printf("f1: %0.15lf\n", (double)f1);
+    f1 %= 5;
+    printf("f1 %%= 5: %0.15lf\n", (double)f1);
+    f1 = 11;
+    printf("f1: %0.15lf\n", (double)f1);
+    f1 %= 0.7;
+    printf("f1 %%= 0.7: %0.15lf\n", (double)f1);
+
 }
 
 void test_precision()
@@ -103,9 +123,17 @@ void test_precision()
     fixed_point128<10> f = 1;
     for (int i = 0; i < 118; ++i)         {
         f /= 2;
-        printf("1: %0.30lf\n", (double)f);
+        printf("exp = -%d, f: %0.38lf\n", i, (double)f);
     }
+}
 
+
+void test_string()
+{
+    printf("\nTest string\n");
+    fixed_point128<5> f1 = 1.0 / (3.0 * (1 << 21));
+    std::string s = f1;
+    printf("f1: %s\n", s.c_str());
 }
 
 int main()
@@ -116,5 +144,6 @@ int main()
     test_multiplication();
     test_division();
     test_precision();
+    test_string();
 }
 

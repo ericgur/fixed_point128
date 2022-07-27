@@ -2,6 +2,7 @@
 #define FIXED_POINT128_H
 
 #include <intrin.h>
+#include <string>
 #include <exception>
 #include <stdexcept>
 
@@ -11,8 +12,6 @@ typedef int int32;
 typedef unsigned int uint32;
 typedef short int16;
 typedef unsigned short uint16;
-
-int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
 
 #ifndef ONE_SHIFT
 #define ONE_SHIFT(x)  (1ull << (x))
@@ -38,8 +37,18 @@ int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, i
 #define FLOAT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Floating point divide by zero!")
 #endif
 
-#define USE32BIT_DIVISION
+#ifndef NOT_IMPLEMENTED_EXCEPTION 
+#define NOT_IMPLEMENTED_EXCEPTION throw std::exception("Not implemented!")
+#endif
 
+namespace fp128 {
+    
+// Forward declarations
+inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
+template<int int_bits> class fixed_point128;
+template<int int_bits> inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& other) noexcept;
+
+// Main fixed point type template
 template<int int_bits = 16>
 class fixed_point128
 {
@@ -63,17 +72,17 @@ private:
     static constexpr int dbl_frac_bits = 52;
 public:
     // ctors
-    fixed_point128() { 
+    fixed_point128() noexcept { 
         low = high = 0ull; sign = 0; 
     }
 
-    fixed_point128(const fixed_point128& other) {
+    fixed_point128(const fixed_point128& other) noexcept {
         low = other.low;
         high = other.high;
         sign = other.sign;
     }
 
-    fixed_point128(double val) {
+    fixed_point128(double val) noexcept {
         uint64 i = *((uint64*)(&val));
         // very common case
         if (i == 0) {
@@ -129,25 +138,25 @@ public:
         }
     }
 
-    fixed_point128(uint64 val) {
+    fixed_point128(uint64 val) noexcept {
         low = 0;
         sign = 0;
         high = val << upper_frac_bits;
     }
 
-    fixed_point128(int64 val) {
+    fixed_point128(int64 val) noexcept {
         low = 0;
         sign = GET_BIT(val, 63);
         high = ((sign != 0) ? -val : val) << upper_frac_bits;
     }
 
-    fixed_point128(unsigned val) {
+    fixed_point128(unsigned val) noexcept {
         low = 0;
         sign = 0;
         high = (uint64)val << upper_frac_bits;
     }
 
-    fixed_point128(int val) {
+    fixed_point128(int val) noexcept {
         low = 0;
         sign = GET_BIT(val, 31);
         high = (uint64)((sign != 0) ? -val : val) << upper_frac_bits;
@@ -162,30 +171,37 @@ public:
     }
 
     // conversion operators
-    inline operator uint64() const {
+    inline operator uint64() const noexcept {
         return (high >> upper_frac_bits) & max_qword_value;
     }
 
-    inline operator int64() const {
+    inline operator int64() const noexcept {
         int64 res = (sign) ? -1ll : 1ll;
         return res * ((high >> upper_frac_bits) & max_qword_value);
     }
 
-    inline operator uint32() const {
+    inline operator uint32() const noexcept {
         return (high >> upper_frac_bits) & max_dword_value;
     }
 
-    inline operator int32() const {
+    inline operator int32() const noexcept {
         int res = (sign) ? -1 : 1;
         return res * ((int)((int64)high >> upper_frac_bits) & (max_dword_value));
     }
 
-    inline operator double() const {
+    inline operator double() const noexcept {
         double res = (double)(high * upper_unity); // bits [64:127]
         res += (double)(low * lower_unity);        // bits [0:63]
         return (sign) ? -res : res;
     }
-    
+
+    inline operator std::string() const {
+        char str[256];
+        snprintf(str, sizeof(str), "%0.40lf", (double)*this);
+        std::string res = str;
+        return res;
+    }
+
     // math operators
     inline fixed_point128 operator+(const fixed_point128& other) const {
         fixed_point128 temp(*this);
@@ -221,6 +237,7 @@ public:
         fixed_point128 temp(*this);
         return temp /= other;
     }
+
     inline fixed_point128 operator/(double val) const {
         if (val == 0)
             FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
@@ -228,6 +245,11 @@ public:
         fixed_point128 temp(*this);
         temp /= val;
         return temp;
+    }
+
+    inline fixed_point128 operator%(const fixed_point128& other) const {
+        fixed_point128 temp(*this);
+        return temp %= other;
     }
 
     inline fixed_point128 operator>>(int shift) const {
@@ -271,7 +293,6 @@ public:
         
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
         sign &= (0 != low || 0 != high);
-
         return *this;
     }
 
@@ -301,8 +322,8 @@ public:
             high = ~high + carry;
         }
         
+        // set sign to 0 when both low and high are zero (avoid having negative zero value)
         sign &= (0 != low || 0 != high);
-
         return *this;
     }
 
@@ -441,6 +462,30 @@ public:
         return *this;
     }
 
+    inline fixed_point128& operator%=(const fixed_point128& other) {
+        uint64 nom[4] = {0, 0, low, high};
+        uint64 denom[2] = {other.low, other.high};
+        uint64 q[4] = {0}, r[4] = {0};
+        
+        //do the division in with positive numbers
+        if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, sizeof(nom) / sizeof(uint32), sizeof(denom) / sizeof(uint32))) {
+            // result is in r (remainder) needs to shift left by frac_bits
+            low = r[0];
+            high = r[1];
+            if (sign != other.sign) {
+                // the remainder + denominator
+                *this += other;
+            }
+            // Note if signs are the same, for nom/denom, the result keeps the sign.
+            // set sign to 0 when both low and high are zero (avoid having negative zero value)
+            sign &= (0 != low || 0 != high);
+        }
+        else { // error
+            INT_DIVIDE_BY_ZERO_EXCEPTION;
+        }
+        return *this;
+    }
+
     inline fixed_point128& operator>>=(int shift) {
         // 0-64 bit shift - most common
         if (shift <= 64) {
@@ -484,6 +529,7 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
+
     inline fixed_point128& operator|=(const fixed_point128& other) {
         low |= other.low;
         high |= other.high;
@@ -623,8 +669,10 @@ public:
         return (sign) ? high <= other.high : high >= other.high;
     }
 
-};
+    friend fixed_point128<int_bits> fp128::abs(const fixed_point128<int_bits>&) noexcept;
 
+private:
+};
 
 inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n)
 {
@@ -635,11 +683,15 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
     uint64 rhat;                 // A remainder.
     uint64 p;                    // Product of two digits.
     int64 s, s_comp, i, j, t, k;
+    // shrink the arrays to avoid extra work on small numbers
+    while (m >= 0 && u[m - 1] == 0) --m;
+    while (n >= 0 && v[n - 1] == 0) --n;
+
     if (m < n || n <= 0 || v[n - 1] == 0)
         return 1; // Return if invalid param.
 
     // Take care of the case of a single-digit divisor here.
-    if (n == 1) {                            
+    if (n == 1) {
         k = 0;
         for (j = m - 1; j >= 0; j--) {
             q[j] = (uint32)((k * b + u[j]) / v[0]);
@@ -713,4 +765,14 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
     return 0;
 }
 
+
+template<int int_bits>
+inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& other) noexcept
+{
+    fixed_point128 temp = other;
+    temp.sign = 0;
+    return temp;
+}
+
+}
 #endif // #ifndef FIXED_POINT128_H
