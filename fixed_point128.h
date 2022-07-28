@@ -40,14 +40,22 @@ typedef unsigned short uint16;
 #ifndef NOT_IMPLEMENTED_EXCEPTION 
 #define NOT_IMPLEMENTED_EXCEPTION throw std::exception("Not implemented!")
 #endif
+#ifndef ASSERT
+#ifdef _DEBUG 
+#define ASSERT(x) { if (!(x)) std::exception("ASSERT failed: "#x); } 
+#else
+#define ASSERT(x)
+#endif // _DEBUG
+#endif // ASSERT
 
 namespace fp128 {
-    
+
 // Forward declarations
 inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
 template<int int_bits> class fixed_point128;
 template<int int_bits> inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& other) noexcept;
-
+template<int int_bits> inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& other) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& other) noexcept;
 // Main fixed point type template
 template<int int_bits = 16>
 class fixed_point128
@@ -68,6 +76,7 @@ private:
     static inline const double lower_unity = pow(2, -frac_bits);
     static constexpr unsigned max_dword_value = (unsigned)(-1);
     static constexpr uint64 max_qword_value = (uint64)(-1);
+    static constexpr uint64 int_mask = max_qword_value << upper_frac_bits;
     static constexpr int dbl_exp_bits = 11;
     static constexpr int dbl_frac_bits = 52;
 public:
@@ -469,13 +478,22 @@ public:
         
         //do the division in with positive numbers
         if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, sizeof(nom) / sizeof(uint32), sizeof(denom) / sizeof(uint32))) {
-            // result is in r (remainder) needs to shift left by frac_bits
-            low = r[0];
-            high = r[1];
-            if (sign != other.sign) {
-                // the remainder + denominator
-                *this += other;
+            // simple case, both are integers (fractions is zero)
+            if (is_int() && other.is_int()) {
+                // result is in r (remainder) needs to shift left by frac_bits
+                low = r[0];
+                high = r[1];
+                if (sign != other.sign) {
+                    // the remainder + denominator
+                    *this += other;
+                }
             }
+            // nom or denom are fractions
+            // x mod y =  x - y * floor(x/y)
+            else { //TODO:
+
+            }
+    
             // Note if signs are the same, for nom/denom, the result keeps the sign.
             // set sign to 0 when both low and high are zero (avoid having negative zero value)
             sign &= (0 != low || 0 != high);
@@ -669,7 +687,20 @@ public:
         return (sign) ? high <= other.high : high >= other.high;
     }
 
+    // useful public functions
+    inline bool is_int() const
+    {
+        return 0 == low && 0 == (high >> upper_frac_bits);
+    }
+    inline bool is_positive() const
+    {
+        return 0 == sign;
+    }
+
+    // friends
     friend fixed_point128<int_bits> fp128::abs(const fixed_point128<int_bits>&) noexcept;
+    friend fixed_point128<int_bits> fp128::floor(const fixed_point128<int_bits>&) noexcept;
+    friend fixed_point128<int_bits> fp128::ciel(const fixed_point128<int_bits>&) noexcept;
 
 private:
 };
@@ -774,5 +805,32 @@ inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& other) noexc
     return temp;
 }
 
+template<int int_bits>
+inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& other) noexcept
+{
+    auto temp = other;
+    temp.low = 0;
+    temp.high &= temp.int_mask;
+    // floor always rounds towards -infinity
+    if (0 != temp.sign) {
+        ++temp;
+    }
+    return temp;
 }
+
+template<int int_bits>
+inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& other) noexcept
+{
+    auto temp = other;
+    temp.low = 0;
+    temp.high &= temp.int_mask;
+    // ciel always rounds towards infinity
+    if (0 == temp.sign) {
+        ++temp;
+    }
+    return temp;
+}
+
+
+} //namespace fp128
 #endif // #ifndef FIXED_POINT128_H

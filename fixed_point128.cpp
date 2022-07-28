@@ -135,6 +135,19 @@ void test_string()
     std::string s = f1;
     printf("f1: %s\n", s.c_str());
 }
+void test_functions()
+{
+    printf("\nTest functions\n");
+    double values[] = {3.45, -7.5};
+    for (int i = 0; i < 2; ++i) {
+        fixed_point128<5> f1 = values[i];
+        printf("f1: %0.15lf\n", (double)f1);
+        printf("floor(f1): %0.15lf\n", (double)floor(f1));
+        printf("ciel(f1): %0.15lf\n", (double)ciel(f1));
+        printf("abs(f1): %0.15lf\n", (double)abs(f1));
+    }
+}
+
 
 int main()
 {
@@ -144,6 +157,7 @@ int main()
     test_multiplication();
     test_division();
     test_precision();
+    test_functions();
     test_string();
 }
 
