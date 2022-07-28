@@ -45,6 +45,11 @@ void test_addition()
     printf("f1+f2 --> %0.15lf\n", (double)f3);
     f3 = f1 - f2;
     printf("f1-f2 --> %0.15lf\n", (double)f3);
+    f1 = 2.25; f2 = 4.54;
+    printf("f1: %0.15lf\n", (double)f1);
+    printf("f2: %0.15lf\n", (double)f2);
+    f3 = f1 - f2;
+    printf("f1-f2 --> %0.15lf\n", (double)f3);
 }
 
 void test_shift()
@@ -85,9 +90,9 @@ void test_multiplication()
 void test_division()
 {
     printf("\nTest Division\n");
-    fixed_point128<10> f1 = 1.0 / 3.0;
+    fixed_point128<20> f1 = 1.0 / 3.0;
     printf("f1: %0.15lf\n", (double)f1);
-    fixed_point128<10> f2 = f1 / 2.0;
+    fixed_point128<20> f2 = f1 / 2.0;
     printf("f2 = f1 / 2.0: %0.15lf\n", (double)f2);
     f2 /= 32.0;
     printf("f2 = f1 / 32.0: %0.15lf\n", (double)f2);
@@ -114,7 +119,9 @@ void test_division()
     printf("f1: %0.15lf\n", (double)f1);
     f1 %= 0.7;
     printf("f1 %%= 0.7: %0.15lf\n", (double)f1);
-
+    f1 = 11; 
+    f1 %= -0.7;
+    printf("f1 %%= -0.7: %0.15lf\n", (double)f1);
 }
 
 void test_precision()
@@ -151,12 +158,12 @@ void test_functions()
 
 int main()
 {
+    test_precision();
     test_conversion();
     test_addition();
     test_shift();
     test_multiplication();
     test_division();
-    test_precision();
     test_functions();
     test_string();
 }

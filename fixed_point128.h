@@ -483,17 +483,23 @@ public:
                 // result is in r (remainder) needs to shift left by frac_bits
                 low = r[0];
                 high = r[1];
-                if (sign != other.sign) {
-                    // the remainder + denominator
-                    *this += other;
-                }
             }
             // nom or denom are fractions
             // x mod y =  x - y * floor(x/y)
-            else { //TODO:
-
+            else { 
+                fixed_point128 x_div_y; // x / y. 
+                x_div_y.high = (q[2] << upper_frac_bits) | (q[1] >> int_bits);
+                x_div_y.low = (q[1] << upper_frac_bits) | (q[0] >> int_bits);
+                x_div_y.sign = sign ^ other.sign;
+                *this -= other * floor(x_div_y);
             }
-    
+            
+            // common case (fractions and integers) where one of the values is negative
+            if (sign != other.sign) {
+                // the remainder + denominator
+                *this += other;
+            }
+
             // Note if signs are the same, for nom/denom, the result keeps the sign.
             // set sign to 0 when both low and high are zero (avoid having negative zero value)
             sign &= (0 != low || 0 != high);
@@ -690,7 +696,7 @@ public:
     // useful public functions
     inline bool is_int() const
     {
-        return 0 == low && 0 == (high >> upper_frac_bits);
+        return 0 == low && 0 == (high << int_bits);
     }
     inline bool is_positive() const
     {
