@@ -72,18 +72,18 @@ void test_shift()
 void test_multiplication()
 {
     printf("\nTest Multiplication\n");
-    fixed_point128<4> f1 = 1.0;
-    fixed_point128<4> f2 = 1.4142135623730951; // == sqrt of 2
-    fixed_point128<4> f1_sq = f1 * f1;
-    fixed_point128<4> f2_sq = f2 * f2;
+    fixed_point128<16> f1 = 1.0;
+    fixed_point128<16> f2 = 1.4142135623730951; // == sqrt of 2
+    fixed_point128<16> f1_sq = f1 * f1;
+    fixed_point128<16> f2_sq = f2 * f2;
     printf("f1: %0.15lf\n", (double)f1);
     printf("f1 * f1: %0.15lf\n", (double)f1_sq);
     printf("f2: %0.15lf\n", (double)f2);
     printf("f2 * f2: %0.15lf\n", (double)f2_sq);
     f1 = 0.00001;
     printf("f1: %0.15lf\n", (double)f1);
-    f1 *= 100;
-    printf("f1 *= 100: %0.15lf\n", (double)f1);
+    f1 *= -100;
+    printf("f1 *= -100: %0.15lf\n", (double)f1);
     f1 = f1 * 100;
 }
 
@@ -138,8 +138,15 @@ void test_precision()
 void test_string()
 {
     printf("\nTest string\n");
-    fixed_point128<5> f1 = 1.0 / (3.0 * (1 << 21));
+    double val = 1.0 / (3.0 * (1 << 21));
+    fixed_point128<5> f1 = val;
     std::string s = f1;
+    printf("double val: %lf\n", val);
+    printf("f1: %s\n", s.c_str());
+    val = 5.12345678901234567890;
+    f1 = val;
+    s = f1;
+    printf("double val: %lf\n", val);
     printf("f1: %s\n", s.c_str());
 }
 void test_functions()

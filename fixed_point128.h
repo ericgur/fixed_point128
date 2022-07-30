@@ -53,9 +53,9 @@ namespace fp128 {
 // Forward declarations
 inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
 template<int int_bits> class fixed_point128;
-template<int int_bits> inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& other) noexcept;
-template<int int_bits> inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& other) noexcept;
-template<int int_bits> inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& other) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& val) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& val) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& val) noexcept;
 // Main fixed point type template
 template<int int_bits = 16>
 class fixed_point128
@@ -205,10 +205,29 @@ public:
     }
 
     inline operator std::string() const {
-        char str[256];
-        snprintf(str, sizeof(str), "%0.40lf", (double)*this);
-        std::string res = str;
-        return res;
+        char str[64]; // need roughly a digit per 3.5 bits
+        char* p = str;
+        fixed_point128 temp = *this;
+        
+        //number is negative
+        if (temp.sign)
+            *p++ = '-';
+
+        uint64 integer = GET_BITS(temp.high, upper_frac_bits, 63);
+        p += snprintf(p, sizeof(str) + p - str, "%lld", integer);
+        temp.high &= ~int_mask; // remove the integer part
+        // check if temp has additional digits (not zero)
+        if (temp) {
+            *p++ = '.';
+        }
+        while (temp) {
+            temp *= 10; // move another digit to the integer area
+            integer = GET_BITS(temp.high, upper_frac_bits, 63);
+            *p++ = '0' + (char)integer;
+            temp.high &= ~int_mask;
+        }
+        *p = '\0';
+        return str;
     }
 
     // math operators
@@ -365,11 +384,9 @@ public:
         static constexpr uint64 lsb_comp_mask = MAX_BITS_VALUE_64(lsb_comp);
         static_assert(lsb <= 64);
 
-        //printf("index %i, lsb %i, lsb_comp %i", index, lsb, lsb_comp);
         // copy block #1 (lowest)
         low = res[index + 1] << lsb_comp;
         low |= (res[index] >> lsb) & lsb_comp_mask;
-
         high = res[index + 2] << lsb_comp;
         high |= (res[index + 1] >> lsb) & lsb_comp_mask;
 
@@ -439,7 +456,7 @@ public:
     inline fixed_point128& operator/=(const fixed_point128& other) {
         uint64 nom[4] = {0, 0, low, high};
         uint64 denom[2] = {other.low, other.high};
-        uint64 q[4] = {0}, r = NULL; // don't need the reminder
+        uint64 q[4] = {0}, *r = nullptr; // don't need the reminder
         if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, sizeof(nom) / sizeof(uint32), sizeof(denom) / sizeof(uint32))) {
             // result in q needs to shift left by frac_bits
             high = (q[2] << upper_frac_bits) | (q[1] >> int_bits);
@@ -707,10 +724,18 @@ public:
     friend fixed_point128<int_bits> fp128::abs(const fixed_point128<int_bits>&) noexcept;
     friend fixed_point128<int_bits> fp128::floor(const fixed_point128<int_bits>&) noexcept;
     friend fixed_point128<int_bits> fp128::ciel(const fixed_point128<int_bits>&) noexcept;
-
-private:
 };
 
+/**
+ * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
+ * @param q - (output) Pointer to receive the quote
+ * @param r - (output, optional) Pointer to receive the remainder. Can be nullptr
+ * @param u - Pointer nominator, an array of uint32
+ * @param v - Pointer denominator, an array of uint32
+ * @param m - count of elements in u
+ * @param n - count of elements in v
+ * @return 0 for success
+*/
 inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n)
 {
     const uint64 b = 1ull << 32; // Number base (32 bits).
@@ -735,7 +760,7 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
             k = (k * b + u[j]) - (uint64)q[j] * v[0];
         }
 
-        if (r != NULL)
+        if (r != nullptr)
             r[0] = (uint32)k;
         return 0;
     }
@@ -746,13 +771,13 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
     s = (uint64)__lzcnt(v[n - 1]); // 0 <= s <= 32. 
     s_comp = 32 - s;
     vn = (uint32*)_malloca(sizeof(uint32) * n);
-    if (NULL == vn) return 1;
+    if (nullptr == vn) return 1;
 
     for (i = n - 1; i > 0; i--)
         vn[i] = (uint32)(v[i] << s) | (v[i - 1] >> s_comp);
     vn[0] = v[0] << s;
     un = (uint32*)_malloca(sizeof(uint32) * (m + 1));
-    if (NULL == un) return 1;
+    if (nullptr == un) return 1;
 
     un[m] = u[m - 1] >> s_comp;
     for (i = m - 1; i > 0; i--)
@@ -793,28 +818,36 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
     } // End j.
       // If the caller wants the remainder, unnormalize 
       // it and pass it back. 
-    if (r != NULL) {
+    if (r != nullptr) {
         for (i = 0; i < n; i++) {
             r[i] = (un[i] >> s) | (un[i + 1] << s_comp);
         }
-
     }
     return 0;
 }
 
-
+/**
+ * @brief returns the absolute value (sets sign to 0)
+ * @param val - fixed_point128 element
+ * @return - a copy of val with sign removed
+*/
 template<int int_bits>
-inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& other) noexcept
+inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& val) noexcept
 {
-    fixed_point128 temp = other;
+    fixed_point128 temp = val;
     temp.sign = 0;
     return temp;
 }
 
+/**
+ * @brief peforms the floor() function, similar to libc's floor(), rounds down towards -infinity.
+ * @param val - input value
+ * @return a fixed_point128 holding the integer value. Overflow is not reported.
+*/
 template<int int_bits>
-inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& other) noexcept
+inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& val) noexcept
 {
-    auto temp = other;
+    auto temp = val;
     temp.low = 0;
     temp.high &= temp.int_mask;
     // floor always rounds towards -infinity
@@ -824,10 +857,15 @@ inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& other) noe
     return temp;
 }
 
+/**
+ * @brief peforms the ciel() function, similar to libc's ciel(), rounds up towards infinity.
+ * @param val - input value
+ * @return a fixed_point128 holding the integer value. Overflow is not reported.
+*/
 template<int int_bits>
-inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& other) noexcept
+inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& val) noexcept
 {
-    auto temp = other;
+    auto temp = val;
     temp.low = 0;
     temp.high &= temp.int_mask;
     // ciel always rounds towards infinity
