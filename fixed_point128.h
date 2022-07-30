@@ -205,7 +205,7 @@ public:
     }
 
     inline operator std::string() const {
-        char str[64]; // need roughly a digit per 3.5 bits
+        char str[128]; // need roughly a digit per 3.5 bits
         char* p = str;
         fixed_point128 temp = *this;
         
@@ -220,9 +220,20 @@ public:
         if (temp) {
             *p++ = '.';
         }
+        // the faster way, requires temp *= 10 not overflowing
         while (temp) {
-            temp *= 10; // move another digit to the integer area
-            integer = GET_BITS(temp.high, upper_frac_bits, 63);
+            if constexpr (int_bits < 4) {
+                uint64 res[2];
+                // multiply by 10
+                res[0] = _umul128(high, 10ull, &res[1]);
+                // extract the integer part
+                integer = __shiftright128(res[0], res[1], (unsigned char)upper_frac_bits);
+                temp *= 10; // move another digit to the integer area
+            }
+            else {
+                temp *= 10; // move another digit to the integer area
+                integer = GET_BITS(temp.high, upper_frac_bits, 63);
+            }
             *p++ = '0' + (char)integer;
             temp.high &= ~int_mask;
         }

@@ -141,14 +141,16 @@ void test_string()
     double val = 1.0 / (3.0 * (1 << 21));
     fixed_point128<5> f1 = val;
     std::string s = f1;
-    printf("double val: %lf\n", val);
-    printf("f1: %s\n", s.c_str());
-    val = 5.12345678901234567890;
+    printf("double val:\n%0.80lf\n", val);
+    printf("f1:\n%s\n", s.c_str());
+    val = -5.12345678901234567890;
     f1 = val;
     s = f1;
-    printf("double val: %lf\n", val);
-    printf("f1: %s\n", s.c_str());
+    printf("double val:\n%0.80lf\n", val);
+    printf("f1:\n%s\n", s.c_str());
 }
+
+
 void test_functions()
 {
     printf("\nTest functions\n");
