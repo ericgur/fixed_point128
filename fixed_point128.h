@@ -53,17 +53,27 @@ namespace fp128 {
 // Forward declarations
 inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
 template<int int_bits> class fixed_point128;
-template<int int_bits> inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& val) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> fabs(const fixed_point128<int_bits>& val) noexcept;
 template<int int_bits> inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& val) noexcept;
 template<int int_bits> inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& val) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> fmod(const fixed_point128<int_bits>& x, const fixed_point128<int_bits>& y) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> modf(const fixed_point128<int_bits>& x, fixed_point128<int_bits>* iptr) noexcept;
+
 // Main fixed point type template
 template<int int_bits = 16>
 class fixed_point128
 {
     static_assert(1 <= int_bits && int_bits <= 64, "Template parameter <int_bits> must be in the [1,64] range!");
-
-private:
+    // friends
+    friend fixed_point128<int_bits> fp128::fabs(const fixed_point128<int_bits>&) noexcept;
+    friend fixed_point128<int_bits> fp128::floor(const fixed_point128<int_bits>&) noexcept;
+    friend fixed_point128<int_bits> fp128::ciel(const fixed_point128<int_bits>&) noexcept;
+    friend fixed_point128<int_bits> fp128::fmod(const fixed_point128<int_bits>&, const fixed_point128<int_bits>&) noexcept;
+    friend fixed_point128<int_bits> fp128::modf(const fixed_point128<int_bits>&, fixed_point128<int_bits>*) noexcept;
+    friend class fixed_point128; // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
+    //
     // members
+    //
     uint64 low;
     uint64 high;
     unsigned sign; // 0 = positive, 1 negative
@@ -80,6 +90,7 @@ private:
     static constexpr int dbl_exp_bits = 11;
     static constexpr int dbl_frac_bits = 52;
 public:
+
     // ctors
     fixed_point128() noexcept { 
         low = high = 0ull; sign = 0; 
@@ -171,6 +182,45 @@ public:
         high = (uint64)((sign != 0) ? -val : val) << upper_frac_bits;
     }
 
+    fixed_point128(const char* val) noexcept {
+        low = high = 0;
+        sign = 0;
+        if (val == nullptr) return;
+        
+        char* str = _strdup(val);
+
+        char* p = str;
+        if (p[0] == '-') {
+            sign = 1;
+            ++p;
+        }
+        char* dec = strchr(p, '.');
+        // number is an integer
+        if (dec == nullptr) {
+            uint64 int_val = atoll(p);
+            high = int_val << upper_frac_bits;
+            free(str);
+            return;
+        }
+        // number is a float, get the integer part using atoll()
+        *dec = '\0';
+        uint64 int_val = atoll(p);
+        high = int_val << upper_frac_bits;
+        p = dec + 1;
+        fixed_point128<1> base = 0.1, step = 0.1;
+        while (*p != '\0' && base) {
+            fixed_point128<1> temp = base * (p[0] - '0');
+            // make them the same precision
+            temp >>= (int_bits - 1);
+            unsigned char carry = _addcarry_u64(0, low, temp.low, &low);
+            _addcarry_u64(carry, high, temp.high, &high);
+            base *= step;
+            ++p;
+        }        
+
+        free(str);
+    }
+
     // assignment operators
     inline fixed_point128& operator=(const fixed_point128& other) {
         high = other.high;
@@ -198,9 +248,21 @@ public:
         return res * ((int)((int64)high >> upper_frac_bits) & (max_dword_value));
     }
 
+    inline operator float() const noexcept {
+        double res = (double)(high * upper_unity); // bits [64:127]
+        res += (double)(low * lower_unity);        // bits [0:63]
+        return (float)((sign) ? -res : res);
+    }
+
     inline operator double() const noexcept {
         double res = (double)(high * upper_unity); // bits [64:127]
         res += (double)(low * lower_unity);        // bits [0:63]
+        return (sign) ? -res : res;
+    }
+
+    inline operator long double() const noexcept {
+        double res = (long double)(high * upper_unity); // bits [64:127]
+        res += (long double)(low * lower_unity);        // bits [0:63]
         return (sign) ? -res : res;
     }
 
@@ -224,8 +286,7 @@ public:
         while (temp) {
             if constexpr (int_bits < 4) {
                 uint64 res[2];
-                // multiply by 10
-                res[0] = _umul128(high, 10ull, &res[1]);
+                res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
                 // extract the integer part
                 integer = __shiftright128(res[0], res[1], (unsigned char)upper_frac_bits);
                 temp *= 10; // move another digit to the integer area
@@ -730,11 +791,6 @@ public:
     {
         return 0 == sign;
     }
-
-    // friends
-    friend fixed_point128<int_bits> fp128::abs(const fixed_point128<int_bits>&) noexcept;
-    friend fixed_point128<int_bits> fp128::floor(const fixed_point128<int_bits>&) noexcept;
-    friend fixed_point128<int_bits> fp128::ciel(const fixed_point128<int_bits>&) noexcept;
 };
 
 /**
@@ -843,7 +899,7 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
  * @return - a copy of val with sign removed
 */
 template<int int_bits>
-inline fixed_point128<int_bits> abs(const fixed_point128<int_bits>& val) noexcept
+inline fixed_point128<int_bits> fabs(const fixed_point128<int_bits>& val) noexcept
 {
     fixed_point128 temp = val;
     temp.sign = 0;
@@ -860,9 +916,10 @@ inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& val) noexc
 {
     auto temp = val;
     temp.low = 0;
+    uint64 frac = temp.high & ~temp.int_mask;
     temp.high &= temp.int_mask;
     // floor always rounds towards -infinity
-    if (0 != temp.sign) {
+    if (0 != temp.sign and 0 != frac) {
         ++temp;
     }
     return temp;
@@ -878,14 +935,48 @@ inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& val) noexce
 {
     auto temp = val;
     temp.low = 0;
+    uint64 frac = temp.high & ~temp.int_mask;
     temp.high &= temp.int_mask;
     // ciel always rounds towards infinity
-    if (0 == temp.sign) {
+    if (0 != temp.sign and 0 != frac) {
         ++temp;
     }
     return temp;
 }
 
+/**
+ * @brief peforms the fmod() function, similar to libc's fmod(), returns the remainder of a division x/y.
+ * @param x - nominator
+ * @param y - denominator
+ * @return a fixed_point128 holding the modulo value.
+*/
+template<int int_bits>
+inline fixed_point128<int_bits> fmod(const fixed_point128<int_bits>& x, const fixed_point128<int_bits>& y) noexcept
+{
+    return x % y;
+}
+
+/**
+ * @brief Split into integer and fraction parts.
+ * @param x - input value
+ * @param iptr - pointer to fixed_point128 holding the integer part of x
+ * @return the fraction part of x. Undefined when iptr is nullptr.
+*/
+template<int int_bits>
+inline fixed_point128<int_bits> modf(const fixed_point128<int_bits>& x, fixed_point128<int_bits>* iptr) noexcept
+{
+    if (iptr == nullptr) {
+        return 0;
+    }
+    iptr->high = x.high & x.int_mask; // lose the fraction
+    iptr->low = 0;
+    iptr->sign = x.sign;
+
+    fixed_point128 res = x;
+    res.high &= ~x.int_mask; // lose the integer part
+    return res;
+}
 
 } //namespace fp128
+
 #endif // #ifndef FIXED_POINT128_H

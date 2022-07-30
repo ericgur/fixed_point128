@@ -21,7 +21,7 @@ void test_conversion()
     printf("a1: %0.15lf --> %0.15lf\n", a1, r1);
     printf("a2: %0.15lf --> %0.15lf\n", a2, r2);
     printf("a3: %0.15lf --> %0.15lf\n", a3, r3);
-    f3 = fp128::abs(-f3);
+    f3 = fp128::fabs(-f3);
 }
 
 void test_addition()
@@ -50,6 +50,11 @@ void test_addition()
     printf("f2: %0.15lf\n", (double)f2);
     f3 = f1 - f2;
     printf("f1-f2 --> %0.15lf\n", (double)f3);
+    printf("Pi (double): %0.40lf\n", 3.14159265358979323846264338327950288419716939937510);
+    printf("f1 = \"3.14159265358979323846264338327950288419716939937510\"\n"),
+    f1 = "3.14159265358979323846264338327950288419716939937510"; // 50 first digits of pi
+    std::string s = f1;
+    printf("f1: %s\n", s.c_str());
 }
 
 void test_shift()
@@ -128,9 +133,9 @@ void test_precision()
 {
     printf("\nTest Precision\n");
     fixed_point128<10> f = 1;
-    for (int i = 0; i < 118; ++i)         {
+    for (int i = 1; i <= 118; ++i)         {
         f /= 2;
-        printf("exp = -%d, f: %0.38lf\n", i, (double)f);
+        printf("exp = -%d, f: %0.40lf\n", i, (double)f);
     }
 }
 
@@ -156,11 +161,19 @@ void test_functions()
     printf("\nTest functions\n");
     double values[] = {3.45, -7.5};
     for (int i = 0; i < 2; ++i) {
-        fixed_point128<5> f1 = values[i];
+        fixed_point128<10> f1 = values[i];
         printf("f1: %0.15lf\n", (double)f1);
         printf("floor(f1): %0.15lf\n", (double)floor(f1));
         printf("ciel(f1): %0.15lf\n", (double)ciel(f1));
-        printf("abs(f1): %0.15lf\n", (double)abs(f1));
+        printf("fabs(f1): %0.15lf\n", (double)fabs(f1));
+        fixed_point128<10> int_part;
+        fixed_point128<10> f2 = modf(f1, &int_part);
+        printf("modf(f1): int: %lf fraction %0.15lf\n", (double)int_part, (double)f2);
+       
+        f2 = 0.25;
+        printf("f2: %0.15lf\n", (double)f2);
+        printf("fmod(f1, f2): %0.15lf\n", (double)fmod(f1, f2));
+        printf("\n");
     }
 }
 
