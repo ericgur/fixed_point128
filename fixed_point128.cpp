@@ -46,7 +46,7 @@ void test_conversion()
     printf("a1: %0.15lf --> %0.15lf\n", a1, r1);
     printf("a2: %0.15lf --> %0.15lf\n", a2, r2);
     printf("a3: %0.15lf --> %0.15lf\n", a3, r3);
-    f3 = fp128::fabs(-f3);
+    f3 = fabs(-f3);
 }
 
 void test_addition()
