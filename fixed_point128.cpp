@@ -24,6 +24,7 @@
 
 // fixed_point128.cpp : test executable for the fixed_point128 class template
 //
+
 #include <stdio.h>
 #include "fixed_point128.h" 
 
@@ -183,8 +184,8 @@ void test_string()
 void test_functions()
 {
     printf("\nTest functions\n");
-    double values[] = {3.45, -7.5};
-    for (int i = 0; i < 2; ++i) {
+    double values[] = {3.45, -7.5, 0.27};
+    for (int i = 0; i < 3; ++i) {
         fixed_point128<10> f1 = values[i];
         printf("f1: %0.15lf\n", (double)f1);
         printf("floor(f1): %0.15lf\n", (double)floor(f1));
@@ -197,6 +198,7 @@ void test_functions()
         f2 = 0.25;
         printf("f2: %0.15lf\n", (double)f2);
         printf("fmod(f1, f2): %0.15lf\n", (double)fmod(f1, f2));
+        printf("sqrt(f1): %0.15lf\n", (double)sqrt(f1));
         printf("\n");
     }
 }

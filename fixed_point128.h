@@ -22,6 +22,16 @@
     SOFTWARE.
 ************************************************************************************/
 
+/***********************************************************************************
+                                Acknologements 
+    The function div_32bit is derived from the book "Hacker's Delight" 2nd Edition by 
+    Henry S. Warren Jr. It was converted to 32 bit operations + a bugfix.
+
+    The sin, cos, exp and sqrt functions were adapted from the Fixed Point Math 
+    Library. Copyright (c) 2007-2009: Peter Schregle
+
+************************************************************************************/
+
 #ifndef FIXED_POINT128_H
 #define FIXED_POINT128_H
 
@@ -37,6 +47,7 @@ typedef unsigned int uint32;
 typedef short int16;
 typedef unsigned short uint16;
 
+// useful macros
 #ifndef ONE_SHIFT
 #define ONE_SHIFT(x)  (1ull << (x))
 #endif
@@ -77,11 +88,12 @@ namespace fp128 {
 // Forward declarations
 inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
 template<int int_bits> class fixed_point128;
-template<int int_bits> inline fixed_point128<int_bits> fabs(const fixed_point128<int_bits>& val) noexcept;
-template<int int_bits> inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& val) noexcept;
-template<int int_bits> inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& val) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> fabs(const fixed_point128<int_bits>& x) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& x) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> ciel(const fixed_point128<int_bits>& x) noexcept;
 template<int int_bits> inline fixed_point128<int_bits> fmod(const fixed_point128<int_bits>& x, const fixed_point128<int_bits>& y) noexcept;
 template<int int_bits> inline fixed_point128<int_bits> modf(const fixed_point128<int_bits>& x, fixed_point128<int_bits>* iptr) noexcept;
+template<int int_bits> inline fixed_point128<int_bits> sqrt(const fixed_point128<int_bits>& x) noexcept;
 
 // Main fixed point type template
 template<int int_bits = 16>
@@ -94,6 +106,7 @@ class fixed_point128
     friend fixed_point128<int_bits> fp128::ciel(const fixed_point128<int_bits>&) noexcept;
     friend fixed_point128<int_bits> fp128::fmod(const fixed_point128<int_bits>&, const fixed_point128<int_bits>&) noexcept;
     friend fixed_point128<int_bits> fp128::modf(const fixed_point128<int_bits>&, fixed_point128<int_bits>*) noexcept;
+    friend fixed_point128<int_bits> fp128::sqrt(const fixed_point128<int_bits>&) noexcept;
     friend class fixed_point128; // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
     //
     // members
@@ -243,6 +256,12 @@ public:
         }        
 
         free(str);
+    }
+
+    fixed_point128(uint64 l, uint64 h, int s) {
+        low = l;
+        high = h;
+        sign = s;
     }
 
     // assignment operators
@@ -754,11 +773,11 @@ public:
     // Comparison operators
     //
     inline bool operator==(const fixed_point128& other) const {
-        return sign == sign && high == high && low == low;
+        return sign == other.sign && high == other.high && low == other.low;
     }
 
     inline bool operator!=(const fixed_point128& other) const {
-        return sign != sign || high != high || low != low;
+        return sign != other.sign || high != other.high || low != other.low;
     }
 
     inline bool operator<(const fixed_point128& other) const {
@@ -772,6 +791,7 @@ public:
 
         return (sign) ? high > other.high : high < other.high;
     }
+
     inline bool operator<=(const fixed_point128& other) const {
         // signs are different
         if (sign != other.sign)
@@ -919,8 +939,8 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
 
 /**
  * @brief returns the absolute value (sets sign to 0)
- * @param val - fixed_point128 element
- * @return - a copy of val with sign removed
+ * @param x - fixed_point128 element
+ * @return - a copy of x with sign removed
 */
 template<int int_bits>
 inline fixed_point128<int_bits> fabs(const fixed_point128<int_bits>& val) noexcept
@@ -932,7 +952,7 @@ inline fixed_point128<int_bits> fabs(const fixed_point128<int_bits>& val) noexce
 
 /**
  * @brief peforms the floor() function, similar to libc's floor(), rounds down towards -infinity.
- * @param val - input value
+ * @param x - input value
  * @return a fixed_point128 holding the integer value. Overflow is not reported.
 */
 template<int int_bits>
@@ -951,7 +971,7 @@ inline fixed_point128<int_bits> floor(const fixed_point128<int_bits>& val) noexc
 
 /**
  * @brief peforms the ciel() function, similar to libc's ciel(), rounds up towards infinity.
- * @param val - input value
+ * @param x - input value
  * @return a fixed_point128 holding the integer value. Overflow is not reported.
 */
 template<int int_bits>
@@ -1000,6 +1020,65 @@ inline fixed_point128<int_bits> modf(const fixed_point128<int_bits>& x, fixed_po
     res.high &= ~x.int_mask; // lose the integer part
     return res;
 }
+
+
+/// Calculates the square root.
+//! 
+//! The sqrt function computes the nonnegative square root of its argument.
+//! A domain error results if the argument is negative.
+//!
+//! Calculates an approximation of the square root using an integer 
+//! algorithm. The algorithm is described in Wikipedia: 
+//! http://en.wikipedia.org/wiki/Methods_of_computing_square_roots
+//!
+//! The algorithm seems to have originated in a book on programming abaci by 
+//! Mr C. Woo.
+//!
+//! /return The square root of the argument. If the argument is negative, 
+//! the function returns 0.
+
+template<int int_bits>
+inline fixed_point128<int_bits> sqrt(const fixed_point128<int_bits>& x) noexcept
+{
+    if (x.sign || !x)
+        return 0;
+
+    fixed_point128<int_bits> ul = 0, ll = 0, t = 0, e(1, 0, 0);
+    int s = 0;
+    ul.low = 1ull;
+    s =  (x.high != 0) ? 128 - (int)__lzcnt64(x.high) : 64 - (int)__lzcnt64(x.low);
+
+    // x >= 1
+    if (s >= x.frac_bits) {
+        ul = x;     // upper limit
+        ll.low = 1; // lower limit
+        ll <<= x.frac_bits + ((s - x.frac_bits - 1) >> 1);
+    }
+    // x < 1
+    else {
+        ul.low = 1; // upper limit
+        ul <<= x.frac_bits;
+        ll = x;     // lower limit
+    }
+
+    // yeh old binary search
+    t = (ul + ll) >> 1;
+    while (ul > ll + e) {
+        // printf("g0: %0.15lf\n", (double)ul);
+        // printf("g1: %0.15lf\n", (double)ll);
+        // printf("t: %0.15lf\n", (double)t);
+        if (t * t > x) {
+            ul = (ll + ul) >> 1; // decrease upper limit
+        }
+        else {
+            ll = (ll + ul) >> 1; // increase lower limit
+        }
+        t = (ul + ll) >> 1;
+    }
+    
+    return ul;
+}
+
 
 } //namespace fp128
 
