@@ -245,7 +245,8 @@ public:
 
         free(str);
     }
-
+    
+    // Construct from base elements.
     fixed_point128(uint64 l, uint64 h, int s) {
         low = l;
         high = h;
@@ -409,53 +410,23 @@ public:
     }
 
     inline fixed_point128& operator+=(const fixed_point128& other) {
-        unsigned char carry;
         // different sign: convert other to negative and use operator -=
         if (other.sign != sign) {
-            fixed_point128 temp(other);
-            temp.sign ^= 1;
-            *this -= temp;
-            return *this;
+            fixed_point128 temp = -other;
+            return subtract(temp);
         }
 
-        // equal sign: simple case
-        carry = _addcarry_u64(0, low, other.low, &low);
-        _addcarry_u64(carry, high, other.high, &high);
-        
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
-        return *this;
+        return add(other);
     }
 
     inline fixed_point128& operator-=(const fixed_point128& other) {
-        unsigned char carry;
         // different sign: convert other to negative and use operator +=
         if (other.sign != sign) {
-            fixed_point128 temp(other);
-            temp.sign ^= 1;
-            *this += temp;
-            return *this;
+            fixed_point128 temp = -other;
+            return add(temp);
         }
-        
-        // equal sign: simple case
-        // convert other high/low to 2's complement (flip bits, add +1)
-        uint64 other_low, other_high = ~other.high;
-        other_high += _addcarry_u64(0, ~other.low, 1, &other_low);
-        
-        //add the other value
-        carry = _addcarry_u64(0, low, other_low, &low); // convert low to 2's complement
-        _addcarry_u64(carry, high, other_high, &high); // convert low to 2's complement
 
-        // if result is is negative, invert it along with the sign.
-        if (0 != (high >> 63)) {
-            sign ^= 1;
-            carry = _addcarry_u64(0, ~low, 1, &low);
-            high = ~high + carry;
-        }
-        
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
-        return *this;
+        return subtract(other);
     }
 
     inline fixed_point128& operator*=(const fixed_point128& other) {
@@ -827,7 +798,45 @@ public:
     {
         return 0 == low && 0 == high;
     }
+private:
+    inline fixed_point128& add(const fixed_point128& other) {
+        unsigned char carry;
+        ASSERT(other.sign == sign);
+        // equal sign: simple case
+        carry = _addcarry_u64(0, low, other.low, &low);
+        _addcarry_u64(carry, high, other.high, &high);
 
+        // set sign to 0 when both low and high are zero (avoid having negative zero value)
+        sign &= (0 != low || 0 != high);
+        return *this;
+    }
+
+    inline fixed_point128& subtract(const fixed_point128& other) {
+        unsigned char carry;
+        ASSERT(other.sign == sign);
+
+        // convert other high/low to 2's complement (flip bits, add +1)
+        uint64 other_low, other_high = ~other.high;
+        other_high += _addcarry_u64(0, ~other.low, 1, &other_low);
+
+        //add the other value
+        carry = _addcarry_u64(0, low, other_low, &low); // convert low to 2's complement
+        carry = _addcarry_u64(carry, high, other_high, &high); // convert low to 2's complement
+
+        // if result is is negative, invert it along with the sign.
+        //if (0 != (high >> 63)) {
+        if (high & ONE_SHIFT(63)) {
+            sign ^= 1;
+            carry = _addcarry_u64(0, ~low, 1, &low);
+            high = ~high + carry;
+        }
+
+        // set sign to 0 when both low and high are zero (avoid having negative zero value)
+        sign &= (0 != low || 0 != high);
+        return *this;
+    }
+
+public:
     /**
      * @brief returns the absolute value (sets sign to 0)
      * @param x - fixed_point128 element
