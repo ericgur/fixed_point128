@@ -410,6 +410,10 @@ public:
     }
 
     inline fixed_point128& operator+=(const fixed_point128& other) {
+        if (!other) {
+            return *this;
+        }
+
         // different sign: convert other to negative and use operator -=
         if (other.sign != sign) {
             fixed_point128 temp = -other;
@@ -420,6 +424,10 @@ public:
     }
 
     inline fixed_point128& operator-=(const fixed_point128& other) {
+        if (!other) {
+            return *this;
+        }
+
         // different sign: convert other to negative and use operator +=
         if (other.sign != sign) {
             fixed_point128 temp = -other;
@@ -430,6 +438,7 @@ public:
     }
 
     inline fixed_point128& operator*=(const fixed_point128& other) {
+    //__declspec(noinline) fixed_point128& operator*=(const fixed_point128& other) {
         uint64 res[4]; // 256 bit of result
         uint64 temp1[2], temp2[2];
         unsigned char carry;
@@ -459,10 +468,8 @@ public:
         static_assert(lsb <= 64);
 
         // copy block #1 (lowest)
-        low = res[index + 1] << lsb_comp;
-        low |= (res[index] >> lsb) & lsb_comp_mask;
-        high = res[index + 2] << lsb_comp;
-        high |= (res[index + 1] >> lsb) & lsb_comp_mask;
+        low = __shiftright128(res[index], res[index + 1], lsb);
+        high = __shiftright128(res[index+1], res[index + 2], lsb);
 
         // set the sign
         sign ^= other.sign;
@@ -533,8 +540,8 @@ public:
         uint64 q[4] = {0}, *r = nullptr; // don't need the reminder
         if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, sizeof(nom) / sizeof(uint32), sizeof(denom) / sizeof(uint32))) {
             // result in q needs to shift left by frac_bits
-            high = (q[2] << upper_frac_bits) | (q[1] >> int_bits);
-            low  = (q[1] << upper_frac_bits) | (q[0] >> int_bits);
+            high = __shiftright128(q[1], q[2], int_bits);
+            low = __shiftright128(q[0], q[1], int_bits);
             sign ^= other.sign;
             // set sign to 0 when both low and high are zero (avoid having negative zero value)
             sign &= (0 != low || 0 != high);
