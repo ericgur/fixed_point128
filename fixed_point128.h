@@ -760,12 +760,6 @@ public:
             return (sign) ? low > other.low : low < other.low;
 
         return (sign) ? high > other.high : high < other.high;
-        //bool high_equal = high == other.high; 
-        //return (sign > other.sign) ||
-        //    ((sign == other.sign) && (
-        //        ((!high_equal) && (sign != (unsigned)(high < other.high))) ||
-        //        ((high_equal && low != other.low) && (sign != (unsigned)(low < other.low)))
-        //    ));
     }
 
     inline bool operator<=(const fixed_point128& other) const {
@@ -782,12 +776,6 @@ public:
             return (sign) ? low <= other.low : low >= other.low;
 
         return (sign) ? high <= other.high : high >= other.high;
-        //bool high_equal = high == other.high;
-        //return (sign < other.sign) ||
-        //    ((sign == other.sign) && (
-        //        ((!high_equal) && (sign != (unsigned)(high > other.high))) ||
-        //        ((high_equal && low != other.low) && (sign != (unsigned)(low > other.low)))
-        //    ));
     }
 
     inline bool operator>=(const fixed_point128& other) const {
