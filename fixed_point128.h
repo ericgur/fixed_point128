@@ -87,10 +87,16 @@ namespace fp128 {
 
 // Forward declarations
 inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
-template<int int_bits> class fixed_point128;
 
-// Main fixed point type template
-template<int int_bits = 16>
+/**
+ * @brief Main fixed point type template.
+ * The only template parameter int_bits is the bit count of the integer part. The fraction part complements int_bits to 128 bit.
+ * int_bits is limited to the range [1,64] in order to simplify the implementation and increase preformance. This restriction is enforced at compile time.
+ * All of fixed_point128's methods are inline for maximum performance.
+ * Overflow is handled silently, similar to builtin integer operations.
+ * Unlike integer operations, the sign is held in a separate data member which simplifies the implementation.
+*/
+template<int int_bits>
 class fixed_point128
 {
     static_assert(1 <= int_bits && int_bits <= 64, "Template parameter <int_bits> must be in the [1,64] range!");
@@ -215,6 +221,7 @@ public:
         char* str = _strdup(val);
 
         char* p = str;
+        // set negative sign if needed
         if (p[0] == '-') {
             sign = 1;
             ++p;
@@ -238,7 +245,7 @@ public:
             // make them the same precision
             temp >>= (int_bits - 1);
             unsigned char carry = _addcarry_u64(0, low, temp.low, &low);
-            _addcarry_u64(carry, high, temp.high, &high);
+            high += temp.high + carry;
             base *= step;
             ++p;
         }        
@@ -463,9 +470,6 @@ public:
         // shift result by frac_bits
         static constexpr int index = frac_bits >> 6; // / 64;
         static constexpr int lsb = frac_bits & MAX_BITS_VALUE_64(6);
-        static constexpr int lsb_comp = 64 - lsb;
-        static constexpr uint64 lsb_comp_mask = MAX_BITS_VALUE_64(lsb_comp);
-        static_assert(lsb <= 64);
 
         // copy block #1 (lowest)
         low = __shiftright128(res[index], res[index + 1], lsb);
@@ -806,36 +810,44 @@ public:
         return 0 == low && 0 == high;
     }
 private:
+    /**
+     * @brief adds 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
+     * @param other the right side of the addition operation
+     * @return *this
+    */
     inline fixed_point128& add(const fixed_point128& other) {
         unsigned char carry;
-        ASSERT(other.sign == sign);
+        ASSERT(other.sign == sign); // bug if asserted, calling method should take care of this
         // equal sign: simple case
         carry = _addcarry_u64(0, low, other.low, &low);
-        _addcarry_u64(carry, high, other.high, &high);
+        high += other.high + carry;
 
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief subtracts 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
+     * @param other the right side of the subtraction operation.
+     * @return *this
+    */
     inline fixed_point128& subtract(const fixed_point128& other) {
         unsigned char carry;
-        ASSERT(other.sign == sign);
+        ASSERT(other.sign == sign); // bug if asserted, calling method should take care of this
 
         // convert other high/low to 2's complement (flip bits, add +1)
-        uint64 other_low, other_high = ~other.high;
-        other_high += _addcarry_u64(0, ~other.low, 1, &other_low);
+        uint64 other_low = static_cast<uint64>(-(int64)other.low);
+        uint64 other_high = ~other.high + (other_low == 0);
 
         //add the other value
-        carry = _addcarry_u64(0, low, other_low, &low); // convert low to 2's complement
-        carry = _addcarry_u64(carry, high, other_high, &high); // convert low to 2's complement
+        carry = _addcarry_u64(0, low, other_low, &low);
+        high += other_high + carry;
 
         // if result is is negative, invert it along with the sign.
-        //if (0 != (high >> 63)) {
         if (high & ONE_SHIFT(63)) {
             sign ^= 1;
-            carry = _addcarry_u64(0, ~low, 1, &low);
-            high = ~high + carry;
+            low = static_cast<uint64>(-(int64)low);
+            high = ~high + (low == 0);
         }
 
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
@@ -953,7 +965,7 @@ public:
             ll = x;     // lower limit
         }
 
-        // yeh old binary search
+        // yeh old binary search - need an int256 type to use Newton-Raphson or similar methods
         t = (ul + ll) >> 1;
         while (ul > ll + e) {
             // printf("g0: %0.15lf\n", (double)ul);
