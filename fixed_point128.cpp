@@ -185,7 +185,8 @@ void test_functions()
 {
     printf("\nTest functions\n");
     double values[] = {3.45, -7.5, 0.27};
-    for (int i = 0; i < 3; ++i) {
+    int len = sizeof(values) / sizeof(double);
+    for (int i = 0; i < len; ++i) {
         fixed_point128<10> f1 = values[i];
         printf("f1: %0.15lf\n", (double)f1);
         printf("floor(f1): %0.15lf\n", (double)floor(f1));
@@ -203,6 +204,33 @@ void test_functions()
     }
 }
 
+void test_comparison()
+{
+    printf("\nTest comparison\n");
+    double values[][2] = {
+            {2, 1},
+            {-2, 1},
+            {1.0000000001, 1.0000000002},
+            {-1.0000000001, 1.0000000002},
+            {-1.00000000000001, 1.00000000000002},
+            { 1.00000000000002, -1.00000000000001},
+            { 1.0000000001, 1.0000000001 }
+    };
+    constexpr int len = sizeof(values) / sizeof(double) / 2;
+    for (int i = 0; i < len; ++i) {
+        fixed_point128<16> f1 = values[i][0];
+        fixed_point128<16> f2 = values[i][1];
+        printf("f1: %0.15lf\n", (double)f1);
+        printf("f2: %0.15lf\n", (double)f2);
+        printf("f1 < f2: %s\n", (f1 < f2) ? "True" : "False");
+        printf("f1 <= f2: %s\n", (f1 <= f2) ? "True" : "False");
+        printf("f1 > f2: %s\n", (f1 > f2) ? "True" : "False");
+        printf("f1 >= f2: %s\n", (f1 >= f2) ? "True" : "False");
+        printf("f1 == f2: %s\n", (f1 == f2) ? "True" : "False");
+        printf("f1 != f2: %s\n", (f1 != f2) ? "True" : "False");
+        printf("\n");
+    }
+}
 
 int main()
 {
@@ -214,5 +242,6 @@ int main()
     test_division();
     test_functions();
     test_string();
+    test_comparison();
 }
 

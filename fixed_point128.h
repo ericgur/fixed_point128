@@ -760,31 +760,19 @@ public:
             return (sign) ? low > other.low : low < other.low;
 
         return (sign) ? high > other.high : high < other.high;
+        //bool high_equal = high == other.high; 
+        //return (sign > other.sign) ||
+        //    ((sign == other.sign) && (
+        //        ((!high_equal) && (sign != (unsigned)(high < other.high))) ||
+        //        ((high_equal && low != other.low) && (sign != (unsigned)(low < other.low)))
+        //    ));
     }
 
     inline bool operator<=(const fixed_point128& other) const {
-        // signs are different
-        if (sign != other.sign)
-            return sign > other.sign; // true when sign is 1 and other.sign is 0
-
-        // MSB is the same, check the LSB
-        if (high == other.high)
-            return (sign) ? low >= other.low : low <= other.low;
-
-        return (sign) ? high >= other.high : high <= other.high;
+        return !(*this > other);
     }
+
     inline bool operator>(const fixed_point128& other) const {
-        // signs are different
-        if (sign != other.sign)
-            return sign < other.sign; // true when sign is 0 and other.sign is 1
-
-        // MSB is the same, check the LSB
-        if (high == other.high)
-            return (sign) ? low < other.low : low > other.low;
-
-        return (sign) ? high < other.high : high > other.high;
-    }
-    inline bool operator>=(const fixed_point128& other) const {
         // signs are different
         if (sign != other.sign)
             return sign < other.sign; // true when sign is 0 and other.sign is 1
@@ -794,6 +782,16 @@ public:
             return (sign) ? low <= other.low : low >= other.low;
 
         return (sign) ? high <= other.high : high >= other.high;
+        //bool high_equal = high == other.high;
+        //return (sign < other.sign) ||
+        //    ((sign == other.sign) && (
+        //        ((!high_equal) && (sign != (unsigned)(high > other.high))) ||
+        //        ((high_equal && low != other.low) && (sign != (unsigned)(low > other.low)))
+        //    ));
+    }
+
+    inline bool operator>=(const fixed_point128& other) const {
+        return !(*this < other);
     }
 
     // useful public functions
@@ -971,18 +969,19 @@ public:
             // printf("g0: %0.15lf\n", (double)ul);
             // printf("g1: %0.15lf\n", (double)ll);
             // printf("t: %0.15lf\n", (double)t);
+            
+            // check if the guess (t) is too big
             if (t * t > x) {
-                ul = (ll + ul) >> 1; // decrease upper limit
+                ul = t; // decrease upper limit
             }
             else {
-                ll = (ll + ul) >> 1; // increase lower limit
+                ll = t; // increase lower limit
             }
             t = (ul + ll) >> 1;
         }
 
-        return ul;
+        return t;
     }
-
 };
 
 /**
