@@ -89,7 +89,7 @@ namespace fp128 {
 inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
 
 /**
- * @brief Main fixed point type template.
+ * @brief 128 bit fixed point type template.
  * The only template parameter int_bits is the bit count of the integer part. The fraction part complements int_bits to 128 bit.
  * int_bits is limited to the range [1,64] in order to simplify the implementation and increase preformance. This restriction is enforced at compile time.
  * All of fixed_point128's methods are inline for maximum performance.
