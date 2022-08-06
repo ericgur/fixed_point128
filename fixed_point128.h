@@ -121,18 +121,27 @@ class fixed_point128
     static constexpr int dbl_exp_bits = 11;
     static constexpr int dbl_frac_bits = 52;
 public:
-
+    //
     // ctors
+    //
+
+    /**
+     * @brief Default constructor
+    */
     fixed_point128() noexcept { 
         low = high = 0ull; sign = 0; 
     }
-
+    /**
+     * @brief Copy constructor
+    */
     fixed_point128(const fixed_point128& other) noexcept {
         low = other.low;
         high = other.high;
         sign = other.sign;
     }
-
+    /**
+     * @brief Constructor from double type
+    */
     fixed_point128(double val) noexcept {
         uint64 i = *((uint64*)(&val));
         // very common case
@@ -188,31 +197,42 @@ public:
             sign = 0;
         }
     }
-
+    /**
+     * @brief Constructor from uint64 type
+    */
     fixed_point128(uint64 val) noexcept {
         low = 0;
         sign = 0;
         high = val << upper_frac_bits;
     }
-
+    /**
+     * @brief Constructor from int64 type
+    */
     fixed_point128(int64 val) noexcept {
         low = 0;
         sign = GET_BIT(val, 63);
         high = ((sign != 0) ? -val : val) << upper_frac_bits;
     }
-
-    fixed_point128(unsigned val) noexcept {
+    /**
+     * @brief Constructor from uint32 type
+    */
+    fixed_point128(uint32 val) noexcept {
         low = 0;
         sign = 0;
         high = (uint64)val << upper_frac_bits;
     }
-
-    fixed_point128(int val) noexcept {
+    /**
+     * @brief Constructor from int32 type
+    */
+    fixed_point128(int32 val) noexcept {
         low = 0;
         sign = GET_BIT(val, 31);
         high = (uint64)((sign != 0) ? -val : val) << upper_frac_bits;
     }
-
+    /**
+     * @brief Constructor from const char* (C string).
+     * Allows creating very high precision values. Much slower than the other constructors.
+    */
     fixed_point128(const char* val) noexcept {
         low = high = 0;
         sign = 0;
@@ -252,59 +272,91 @@ public:
 
         free(str);
     }
-    
-    // Construct from base elements.
+    /**
+     * @brief Constructor from the 3 fixed_point128 base elements, useful for creating very small constants.
+    */
     fixed_point128(uint64 l, uint64 h, int s) {
         low = l;
         high = h;
         sign = s;
     }
 
-    // assignment operators
+    /**
+     * @brief assignment operator
+     * @param other: object to copy from 
+     * @return this
+    */
     inline fixed_point128& operator=(const fixed_point128& other) {
         high = other.high;
         low = other.low;
         sign = other.sign;
         return *this;
     }
-
+    //
     // conversion operators
+    //
+    /**
+     * @brief operator uint64 - converts to a uint64
+     * @return object value
+    */
     inline operator uint64() const noexcept {
         return (high >> upper_frac_bits) & max_qword_value;
     }
-
+    /**
+     * @brief operator int64 - converts to a int64
+     * @return object value
+    */
     inline operator int64() const noexcept {
         int64 res = (sign) ? -1ll : 1ll;
         return res * ((high >> upper_frac_bits) & max_qword_value);
     }
-
+    /**
+     * @brief operator uint32 - converts to a uint32
+     * @return object value
+    */
     inline operator uint32() const noexcept {
         return (high >> upper_frac_bits) & max_dword_value;
     }
-
+    /**
+     * @brief operator int32 - converts to a int32
+     * @return object value
+    */
     inline operator int32() const noexcept {
         int res = (sign) ? -1 : 1;
         return res * ((int)((int64)high >> upper_frac_bits) & (max_dword_value));
     }
-
+    /**
+     * @brief operator float - converts to a float
+     * @return object value
+    */
     inline operator float() const noexcept {
         double res = (double)(high * upper_unity); // bits [64:127]
         res += (double)(low * lower_unity);        // bits [0:63]
         return (float)((sign) ? -res : res);
     }
-
+    /**
+     * @brief operator double - converts to a double
+     * @return object value
+    */
     inline operator double() const noexcept {
         double res = (double)(high * upper_unity); // bits [64:127]
         res += (double)(low * lower_unity);        // bits [0:63]
         return (sign) ? -res : res;
     }
-
+    /**
+     * @brief operator long double - converts to a long double
+     * @return object value
+    */
     inline operator long double() const noexcept {
         double res = (long double)(high * upper_unity); // bits [64:127]
         res += (long double)(low * lower_unity);        // bits [0:63]
         return (sign) ? -res : res;
     }
-
+    /**
+     * @brief operator std::string - converts to a std::string (slow)
+     *                 string holds all fraction bits.
+     * @return object string representation
+    */
     inline operator std::string() const {
         char str[128]; // need roughly a digit per 3.5 bits
         char* p = str;
@@ -340,43 +392,77 @@ public:
         *p = '\0';
         return str;
     }
-
+    //
     // math operators
+    //
+    /**
+     * @brief adds the right hand side operand to this object to and returns the result.
+     * @param other: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator+(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp += other;
     }
-
+    /**
+     * @brief subtracts the right hand side operand to this object to and returns the result.
+     * @param other: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator-(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp -= other;
     }
-
+    /**
+     * @brief multiplies the right hand side operand with this object to and returns the result.
+     * @param other: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator*(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp *= other;
     }
-
+    /**
+     * @brief multiplies the right hand side operand with this object to and returns the result.
+     * @param val: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator*(double val) const {
         fixed_point128 temp(*this);
         return temp *= fixed_point128(val);
     }
-
+    /**
+     * @brief multiplies the right hand side operand with this object to and returns the result.
+     * @param val: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator*(int64 val) const {
         fixed_point128 temp(*this);
         return temp *= val;
     }
-
+    /**
+     * @brief multiplies the right hand side operand with this object to and returns the result.
+     * @param val: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator*(int val) const {
         fixed_point128 temp(*this);
         return temp *= (int64)val;
     }
-
+    /**
+     * @brief divides this object by the right hand side operand and returns the result.
+     * @param other: right hand side operand (denominator)
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator/(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp /= other;
     }
-
+    /**
+     * @brief divides this object by the right hand side operand and returns the result.
+     * @param val: right hand side operand (denominator)
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator/(double val) const {
         if (val == 0)
             FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
@@ -385,37 +471,65 @@ public:
         temp /= val;
         return temp;
     }
-
+    /**
+     * @brief calculates modulo.
+     * @param other: right hand side operand (denominator)
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator%(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp %= other;
     }
-
+    /**
+     * @brief performs right shift operation.
+     * @param shift: bits to shift
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator>>(int shift) const {
         fixed_point128 temp(*this);
         return temp >>= shift;
     }
-
+    /**
+     * @brief performs left shift operation.
+     * @param shift: bits to shift
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator<<(int shift) const {
         fixed_point128 temp(*this);
         return temp <<= shift;
     }
-
+    /**
+     * @brief performs bitwise AND (&)
+     * @param other: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator&(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp &= other;
     }
-
+    /**
+     * @brief performs bitwise OR (|)
+     * @param other: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator|(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp |= other;
     }
-
+    /**
+     * @brief performs bitwise XOR (^)
+     * @param other: right hand side operand
+     * @return temporary object with the result of the operation
+    */
     inline fixed_point128 operator^(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp ^= other;
     }
-
+    /**
+     * @brief add a value to this object
+     * @param other: right hand side operand
+     * @return this
+    */
     inline fixed_point128& operator+=(const fixed_point128& other) {
         if (!other) {
             return *this;
@@ -429,7 +543,11 @@ public:
 
         return add(other);
     }
-
+    /**
+     * @brief subtract a value to this object
+     * @param other: right hand side operand
+     * @return this
+    */
     inline fixed_point128& operator-=(const fixed_point128& other) {
         if (!other) {
             return *this;
@@ -443,9 +561,13 @@ public:
 
         return subtract(other);
     }
-
+    /**
+     * @brief multiplies a value to this object
+     * @param other: right hand side operand
+     * @return this
+    */
     inline fixed_point128& operator*=(const fixed_point128& other) {
-    //__declspec(noinline) fixed_point128& operator*=(const fixed_point128& other) {
+    //__declspec(noinline) fixed_point128& operator*=(const fixed_point128& other) { // use this line instead when profiling this function
         uint64 res[4]; // 256 bit of result
         uint64 temp1[2], temp2[2];
         unsigned char carry;
@@ -481,7 +603,11 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief multiplies a value to this object
+     * @param val: right hand side operand
+     * @return this
+    */
     inline fixed_point128& operator*=(int32 val) {
         // alway do positive multiplication
         if (val < 0) {
@@ -498,7 +624,11 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief multiplies a value to this object
+     * @param val: right hand side operand
+     * @return this
+    */
     inline fixed_point128& operator*=(uint32 val) {
         uint64 temp;
 
@@ -509,7 +639,11 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief multiplies a value to this object
+     * @param val: right hand side operand
+     * @return this
+    */
     inline fixed_point128& operator*=(int64 val) {
         // alway do positive multiplication
         if (val < 0) {
@@ -526,7 +660,11 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief multiplies a value to this object
+     * @param val: right hand side operand
+     * @return this
+    */
     inline fixed_point128& operator*=(uint64 val) {
         uint64 temp;
 
@@ -537,7 +675,11 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief divide this object by val.
+     * @param other: right hand side operator (denominator)
+     * @return this object.
+    */
     inline fixed_point128& operator/=(const fixed_point128& other) {
         uint64 nom[4] = {0, 0, low, high};
         uint64 denom[2] = {other.low, other.high};
@@ -555,7 +697,11 @@ public:
         }
         return *this;
     }
-
+    /**
+     * @brief divide this object by val.
+     * @param val: denominator.
+     * @return this object.
+    */
     inline fixed_point128& operator/=(double val) {
         uint64 i = *((uint64*)(&val));
         // infinity
@@ -572,7 +718,11 @@ public:
         *this /= fixed_point128(val);
         return *this;
     }
-
+    /**
+     * @brief %= operator
+     * @param other: modulo operand.
+     * @return this
+    */
     inline fixed_point128& operator%=(const fixed_point128& other) {
         uint64 nom[4] = {0, 0, low, high};
         uint64 denom[2] = {other.low, other.high};
@@ -611,7 +761,11 @@ public:
         }
         return *this;
     }
-
+    /**
+     * @brief left right for this object.
+     * @param shift: how many bits to shift. neagive or very high values cause undefined behavior.
+     * @return this
+    */
     inline fixed_point128& operator>>=(int shift) {
         // 0-64 bit shift - most common
         if (shift <= 64) {
@@ -629,7 +783,11 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief left shift for this object.
+     * @param shift: how many bits to shift. neagive or very high values cause undefined behavior. 
+     * @return this
+    */
     inline fixed_point128& operator<<=(int shift) {
         if (shift <= 64) {
             high = __shiftleft128(low, high, (unsigned char)shift);
@@ -646,7 +804,11 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief bitwise AND=
+     * @param other mask
+     * @return this
+    */
     inline fixed_point128& operator&=(const fixed_point128& other) {
         low &= other.low;
         high &= other.high;
@@ -655,36 +817,50 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
+    /**
+     * @brief bitwise OR=
+     * @param other mask
+     * @return this
+    */
     inline fixed_point128& operator|=(const fixed_point128& other) {
         low |= other.low;
         high |= other.high;
         sign |= other.sign;
         return *this;
     }
-
+    /**
+     * @brief bitwise XOR=
+     * @param other mask
+     * @return this
+    */
     inline fixed_point128& operator^=(const fixed_point128& other) {
         low ^= other.low;
         high ^= other.high;
         sign ^= other.sign;
     }
-
-    // prefix ++ operation
+    /**
+     * @brief prefix ++ operation (++a)
+     * @return this
+    */
     inline fixed_point128& operator++() {
         high += unity;
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
-    // postfix ++ operation
+    /**
+     * @brief postfix ++ operation (a++)
+     * @return this
+    */
     inline fixed_point128 operator++(int) {
         fixed_point128 temp(*this);
         ++*this; // call the prefix implementation
         return temp;
     }
-
-    // prefix -- operation
+    /**
+     * @brief prefix -- operation (--a)
+     * @return this
+    */
     inline fixed_point128& operator--() {
         // unity is in the upper QWORD
         high -= unity;
@@ -696,8 +872,10 @@ public:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
-    // postfix -- operation
+    /**
+     * @brief postfix -- operation (a--)
+     * @return this
+    */
     inline fixed_point128 operator--(int) {
         fixed_point128 temp(*this);
         --*this; // call the prefix implementation
@@ -707,15 +885,21 @@ public:
     // unary operations
     // 
     
-    // conversion to bool
+    /**
+     * @brief convert to bool
+    */
     inline operator bool() const {
         return high != 0 || low != 0;
     }
-    // logical not
+    /**
+     * @brief logical not (!). Opposite of operator bool.
+    */
     inline bool operator!() const {
         return high == 0 && low == 0;
     }
-    // bit wise not
+    /**
+     * @brief bitwise not (~).
+    */
     inline fixed_point128 operator~() const {
         fixed_point128 temp(*this);
         temp.high = ~high;
@@ -724,12 +908,16 @@ public:
         temp.sign &= (0 != low || 0 != high);
         return temp;
     }
-    // unary +
+    /**
+     * @brief unary +. returns a copy of the object.
+    */
     inline fixed_point128 operator+() const {
         fixed_point128 temp(*this);
         return temp;
     }
-    // unary -
+    /**
+     * @brief unary -. returns a copy of the object with sign inverted.
+    */
     inline fixed_point128 operator-() const {
         fixed_point128 temp(*this);
 
@@ -742,14 +930,28 @@ public:
     //
     // Comparison operators
     //
+
+    /**
+     * @brief compare logical/bitwise equal.
+     * @param other: righthand operand
+     * @return true of equal
+    */
     inline bool operator==(const fixed_point128& other) const {
         return sign == other.sign && high == other.high && low == other.low;
     }
-
+    /**
+     * @brief return true when objects are not equal. Can be used as logical XOR.
+     * @param other: righthand operand
+     * @return true of not equal
+    */
     inline bool operator!=(const fixed_point128& other) const {
         return sign != other.sign || high != other.high || low != other.low;
     }
-
+    /**
+     * @brief return true this object is small than the other
+     * @param other: righthand operand
+     * @return true when this is smaller
+    */
     inline bool operator<(const fixed_point128& other) const {
         // signs are different
         if (sign != other.sign)
@@ -761,11 +963,19 @@ public:
 
         return (sign) ? high > other.high : high < other.high;
     }
-
+    /**
+     * @brief return true this object is small or equal than the other
+     * @param other: righthand operand
+     * @return true when this is smaller or equal
+    */
     inline bool operator<=(const fixed_point128& other) const {
         return !(*this > other);
     }
-
+    /**
+     * @brief return true this object is larger than the other
+     * @param other: righthand operand
+     * @return true when this is larger
+    */
     inline bool operator>(const fixed_point128& other) const {
         // signs are different
         if (sign != other.sign)
@@ -777,20 +987,38 @@ public:
 
         return (sign) ? high < other.high : high > other.high;
     }
-
+    /**
+     * @brief return true this object is larger or equal than the other
+     * @param other: righthand operand
+     * @return true when this is larger or equal
+    */
     inline bool operator>=(const fixed_point128& other) const {
         return !(*this < other);
     }
-
+    //
     // useful public functions
+    //
+
+    /**
+     * @brief returns true if the value is an int (fraction is zero)
+     * @return true when the fraction is zero
+    */
     inline bool is_int() const
     {
         return 0 == low && 0 == (high << int_bits);
     }
+    /**
+     * @brief returns true if the value positive (incuding zero)
+     * @return true when the the value positive
+    */
     inline bool is_positive() const
     {
         return 0 == sign;
     }
+    /**
+     * @brief returns true if the value is zero
+     * @return returns true if the value is zero 
+    */
     inline bool is_zero() const
     {
         return 0 == low && 0 == high;
@@ -919,10 +1147,6 @@ public:
         res.high &= ~x.int_mask; // lose the integer part
         return res;
     }
-
-
-    /// Calculates the square root.
-
     /**
      * @brief Calculates the square root.
      * @param x - value to calculate the root of
@@ -971,7 +1195,6 @@ public:
         return t;
     }
 };
-
 /**
  * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
  * @param q - (output) Pointer to receive the quote
@@ -1010,10 +1233,8 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
             r[0] = (uint32)k;
         return 0;
     }
-    // Normalize by shifting v left just enough so that 
-    // its high-order bit is on, and shift u left the 
-    // same amount. We may have to append a high-order 
-    // digit on the dividend; we do that unconditionally.
+    // Normalize by shifting v left just enough so that its high-order bit is on, and shift u left the same amount.
+    // We may have to append a high-order digit on the dividend; we do that unconditionally.
     s = (uint64)__lzcnt(v[n - 1]); // 0 <= s <= 32. 
     s_comp = 32 - s;
     vn = (uint32*)_malloca(sizeof(uint32) * n);
@@ -1062,8 +1283,7 @@ inline int div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int
             un[j + n] = (uint32)((uint64)un[j + n] + k);
         }
     } // End j.
-      // If the caller wants the remainder, unnormalize 
-      // it and pass it back. 
+    // If the caller wants the remainder, unnormalize it and pass it back. 
     if (r != nullptr) {
         for (i = 0; i < n; i++) {
             r[i] = (un[i] >> s) | (un[i + 1] << s_comp);
