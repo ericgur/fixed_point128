@@ -1,0 +1,7 @@
+// Hint files help the Visual Studio IDE interpret Visual C++ identifiers
+// such as names of functions and macros.
+// For more information see https://go.microsoft.com/fwlink/?linkid=865984
+#define FP128_ONE_SHIFT(x)  (1ull << (x))
+#define FP128_GET_BIT(x, n)  (((x) >> n) & 1)
+#define FP128_GET_BITS(x, b, count) (((x) >> (b)) & FP128_MAX_VALUE_64(count))
+#define FP128_MAX_VALUE_64(x) (((uint64)-1ll) >> (64 - x))
