@@ -773,9 +773,9 @@ public:
 
         // MSB is the same, check the LSB
         if (high == other.high)
-            return (sign) ? low <= other.low : low >= other.low;
+            return (sign) ? low <= other.low : low > other.low;
 
-        return (sign) ? high <= other.high : high >= other.high;
+        return (sign) ? high <= other.high : high > other.high;
     }
 
     inline bool operator>=(const fixed_point128& other) const {
