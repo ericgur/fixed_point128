@@ -47,6 +47,14 @@ void test_conversion()
     printf("a2: %0.15lf --> %0.15lf\n", a2, r2);
     printf("a3: %0.15lf --> %0.15lf\n", a3, r3);
     f3 = fabs(-f3);
+    printf("Pi (double): %0.40lf\n", 3.14159265358979323846264338327950288419716939937510);
+    printf("f1 = \"3.14159265358979323846264338327950288419716939937510\"\n"),
+        f1 = "3.14159265358979323846264338327950288419716939937510"; // 50 first digits of pi
+    std::string s = f1;
+    printf("f1: %s\n", s.c_str());
+    f1 = f1.pi();
+    s = f1;
+    printf("fixed_point128<4>.pi(): %s\n", s.c_str());
 }
 
 void test_addition()
@@ -75,11 +83,6 @@ void test_addition()
     printf("f2: %0.15lf\n", (double)f2);
     f3 = f1 - f2;
     printf("f1-f2 --> %0.15lf\n", (double)f3);
-    printf("Pi (double): %0.40lf\n", 3.14159265358979323846264338327950288419716939937510);
-    printf("f1 = \"3.14159265358979323846264338327950288419716939937510\"\n"),
-    f1 = "3.14159265358979323846264338327950288419716939937510"; // 50 first digits of pi
-    std::string s = f1;
-    printf("f1: %s\n", s.c_str());
 }
 
 void test_shift()

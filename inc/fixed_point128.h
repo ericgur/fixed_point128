@@ -120,6 +120,7 @@ class fixed_point128
     static constexpr uint64 int_mask = max_qword_value << upper_frac_bits;
     static constexpr int dbl_exp_bits = 11;
     static constexpr int dbl_frac_bits = 52;
+    typedef fixed_point128<int_bits> type;
 public:
     //
     // ctors
@@ -1023,6 +1024,23 @@ public:
     {
         return 0 == low && 0 == high;
     }
+    /**
+     * @brief Return an instance of fixed_point128 with the value of pi
+     * @return 
+    */
+    inline const fixed_point128& pi() noexcept {
+        static const fixed_point128 pi = "3.14159265358979323846264338327950288419716939937510"; // 50 first digits of pi
+        return pi;
+    }
+    /**
+     * @brief Return an instance of fixed_point128 with the value of e
+     * @return
+    */
+    inline const fixed_point128& e() noexcept {
+        static const fixed_point128 e = "2.71828182845904523536028747135266249775724709369"; // 50 first digits of e
+        return e;
+    }
+
 private:
     /**
      * @brief adds 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
