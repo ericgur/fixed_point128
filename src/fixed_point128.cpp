@@ -61,6 +61,21 @@ void test_conversion()
     f1 = f1.one();
     s = f1;
     printf("fixed_point128<4>.one(): %s\n", s.c_str());
+    f1 = f1.pi();
+    printf("f3 = f1\n");
+    f3 = f1;
+    s = f1;
+    printf("f1: %s\n", s.c_str());
+    s = f3;
+    printf("f3: %s\n", s.c_str());
+    printf("f1 = f3\n");
+    f1 = f3;
+    s = f1;
+    printf("f1: %s\n", s.c_str());
+    s = f3;
+    printf("f3: %s\n", s.c_str());
+
+    printf("\n");
 }
 
 void test_addition()

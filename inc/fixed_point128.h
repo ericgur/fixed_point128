@@ -308,6 +308,37 @@ public:
         sign = other.sign;
         return *this;
     }
+    /**
+     * @brief template assignment operator, can be used between two different fixed_point128 templates
+     * @param other fixed_point128 instance with from a different template instance.
+     * @return this
+    */
+    template<int32 I2>
+    inline fixed_point128<I>& operator=(const fixed_point128<I2>& other)
+    {
+        sign = other.sign;
+        if constexpr (I == I2) {
+            high = other.high;
+            low = other.low;
+        }
+        // other has less integer bits and more fraction bits
+        else if constexpr (I < I2) {
+            // shift left by I2 - I bits
+            int shift = I2 - I;
+            low = other.low << shift;
+            high = __shiftright128(other.low, other.high, (uint8)(64 - shift));
+        }
+        // other has more integer bits and less fraction bits
+        else { // I > I2
+            // shift right by I - I2 bits
+            int shift = I - I2;
+            low = __shiftright128(other.low, other.high, (uint8)shift);
+            high = other.high >> shift;
+        }
+
+        return *this;
+    }
+
     //
     // conversion operators
     //
@@ -395,7 +426,7 @@ public:
                 uint64 res[2];
                 res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
                 // extract the integer part
-                integer = __shiftright128(res[0], res[1], (unsigned char)upper_frac_bits);
+                integer = __shiftright128(res[0], res[1], (uint8)upper_frac_bits);
                 temp *= 10; // move another digit to the integer area
             }
             else {
@@ -785,7 +816,7 @@ public:
     inline fixed_point128& operator>>=(int32 shift) {
         // 0-64 bit shift - most common
         if (shift <= 64) {
-            low = __shiftright128(low, high, (unsigned char)shift);
+            low = __shiftright128(low, high, (uint8)shift);
             high >>= shift;
         }
         else if (shift >= 128) {
