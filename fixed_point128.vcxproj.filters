@@ -28,6 +28,6 @@
     <None Include="cpp.hint" />
   </ItemGroup>
   <ItemGroup>
-    <Natvis Include="NatvisFile.natvis" />
+    <Natvis Include="fixed_point128.natvis" />
   </ItemGroup>
 </Project>
