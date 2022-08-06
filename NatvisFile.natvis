@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?> 
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+	<Type Name="fp128::fixed_point128&lt;*&gt;">
+		<DisplayString>{((sign) ? -1.0 : 1.0) * (double)high * upper_unity + (double)low * lower_unity}</DisplayString>
+		<Expand>
+			<Item Name="[sign]" ExcludeView="simple">sign,d</Item>
+			<Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
+			<Item Name="[high (hex)]" ExcludeView="simple">high,h</Item>
+			<Item Name="[low (dec)]" ExcludeView="simple">low,d</Item>
+			<Item Name="[high (dec)]" ExcludeView="simple">high,d</Item>
+		</Expand>
+	</Type>	
+</AutoVisualizer>
