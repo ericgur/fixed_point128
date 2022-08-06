@@ -138,6 +138,7 @@ public:
     }
     /**
      * @brief Copy constructor
+     * @param other Object to copy from
     */
     fixed_point128(const fixed_point128& other) noexcept {
         low = other.low;
@@ -146,9 +147,10 @@ public:
     }
     /**
      * @brief Constructor from double type
+     * @param x input value
     */
-    fixed_point128(double val) noexcept {
-        uint64 i = *((uint64*)(&val));
+    fixed_point128(double x) noexcept {
+        uint64 i = *((uint64*)(&x));
         // very common case
         if (i == 0) {
             low = high = 0;
@@ -204,46 +206,51 @@ public:
     }
     /**
      * @brief Constructor from uint64 type
+     * @param x input value
     */
-    fixed_point128(uint64 val) noexcept {
+    fixed_point128(uint64 x) noexcept {
         low = 0;
         sign = 0;
-        high = val << upper_frac_bits;
+        high = x << upper_frac_bits;
     }
     /**
      * @brief Constructor from int64 type
+     * @param x input value
     */
-    fixed_point128(int64 val) noexcept {
+    fixed_point128(int64 x) noexcept {
         low = 0;
-        sign = FP128_GET_BIT(val, 63);
-        high = ((sign != 0) ? -val : val) << upper_frac_bits;
+        sign = FP128_GET_BIT(x, 63);
+        high = ((sign != 0) ? -x : x) << upper_frac_bits;
     }
     /**
      * @brief Constructor from uint32 type
-    */
-    fixed_point128(uint32 val) noexcept {
+     * @param x input value
+   */
+    fixed_point128(uint32 x) noexcept {
         low = 0;
         sign = 0;
-        high = (uint64)val << upper_frac_bits;
+        high = (uint64)x << upper_frac_bits;
     }
     /**
      * @brief Constructor from int32 type
-    */
-    fixed_point128(int32 val) noexcept {
+     * @param x input value
+   */
+    fixed_point128(int32 x) noexcept {
         low = 0;
-        sign = FP128_GET_BIT(val, 31);
-        high = (uint64)((sign != 0) ? -val : val) << upper_frac_bits;
+        sign = FP128_GET_BIT(x, 31);
+        high = (uint64)((sign != 0) ? -x : x) << upper_frac_bits;
     }
     /**
      * @brief Constructor from const char* (C string).
      * Allows creating very high precision values. Much slower than the other constructors.
+     * @param x input value
     */
-    fixed_point128(const char* val) noexcept {
+    fixed_point128(const char* x) noexcept {
         low = high = 0;
         sign = 0;
-        if (val == nullptr) return;
+        if (x == nullptr) return;
         
-        char* str = _strdup(val);
+        char* str = _strdup(x);
 
         char* p = str;
         // set negative sign if needed
@@ -279,8 +286,12 @@ public:
     }
     /**
      * @brief Constructor from the 3 fixed_point128 base elements, useful for creating very small constants.
+     * @param l Low QWORD
+     * @param h High QWORD
+     * @param s Sign - zero fo rpositive, 1 for negative.
     */
-    fixed_point128(uint64 l, uint64 h, int32 s) {
+    fixed_point128(uint64 l, uint64 h, uint32 s) {
+        FP128_ASSERT(sign < 2);
         low = l;
         high = h;
         sign = s;
@@ -429,30 +440,30 @@ public:
     }
     /**
      * @brief multiplies the right hand side operand with this object to and returns the result.
-     * @param val: right hand side operand
+     * @param x: right hand side operand
      * @return temporary object with the result of the operation
     */
-    inline fixed_point128 operator*(double val) const {
+    inline fixed_point128 operator*(double x) const {
         fixed_point128 temp(*this);
-        return temp *= fixed_point128(val);
+        return temp *= fixed_point128(x);
     }
     /**
      * @brief multiplies the right hand side operand with this object to and returns the result.
-     * @param val: right hand side operand
+     * @param x: right hand side operand
      * @return temporary object with the result of the operation
     */
-    inline fixed_point128 operator*(int64 val) const {
+    inline fixed_point128 operator*(int64 x) const {
         fixed_point128 temp(*this);
-        return temp *= val;
+        return temp *= x;
     }
     /**
      * @brief multiplies the right hand side operand with this object to and returns the result.
-     * @param val: right hand side operand
+     * @param x: right hand side operand
      * @return temporary object with the result of the operation
     */
-    inline fixed_point128 operator*(int32 val) const {
+    inline fixed_point128 operator*(int32 x) const {
         fixed_point128 temp(*this);
-        return temp *= (int64)val;
+        return temp *= (int64)x;
     }
     /**
      * @brief divides this object by the right hand side operand and returns the result.
@@ -465,15 +476,15 @@ public:
     }
     /**
      * @brief divides this object by the right hand side operand and returns the result.
-     * @param val: right hand side operand (denominator)
+     * @param x: right hand side operand (denominator)
      * @return temporary object with the result of the operation
     */
-    inline fixed_point128 operator/(double val) const {
-        if (val == 0)
+    inline fixed_point128 operator/(double x) const {
+        if (x == 0)
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
 
         fixed_point128 temp(*this);
-        temp /= val;
+        temp /= x;
         return temp;
     }
     /**
@@ -610,16 +621,16 @@ public:
     }
     /**
      * @brief multiplies a value to this object
-     * @param val: right hand side operand
+     * @param x: right hand side operand
      * @return this
     */
-    inline fixed_point128& operator*=(int32 val) {
+    inline fixed_point128& operator*=(int32 x) {
         // alway do positive multiplication
-        if (val < 0) {
-            val = -val;
+        if (x < 0) {
+            x = -x;
             sign ^= 1;
         }
-        uint64 uval = (uint64)val;
+        uint64 uval = (uint64)x;
         uint64 temp;
 
         // multiply low QWORDs
@@ -631,31 +642,31 @@ public:
     }
     /**
      * @brief multiplies a value to this object
-     * @param val: right hand side operand
+     * @param x: right hand side operand
      * @return this
     */
-    inline fixed_point128& operator*=(uint32 val) {
+    inline fixed_point128& operator*=(uint32 x) {
         uint64 temp;
 
         // multiply low QWORDs
-        low = _umul128(low, val, &temp);
-        high = high * val + temp;
+        low = _umul128(low, x, &temp);
+        high = high * x + temp;
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
         sign &= (0 != low || 0 != high);
         return *this;
     }
     /**
      * @brief multiplies a value to this object
-     * @param val: right hand side operand
+     * @param x: right hand side operand
      * @return this
     */
-    inline fixed_point128& operator*=(int64 val) {
+    inline fixed_point128& operator*=(int64 x) {
         // alway do positive multiplication
-        if (val < 0) {
-            val = -val;
+        if (x < 0) {
+            x = -x;
             sign ^= 1;
         }
-        uint64 uval = (uint64)val;
+        uint64 uval = (uint64)x;
         uint64 temp;
 
         // multiply low QWORDs
@@ -667,21 +678,21 @@ public:
     }
     /**
      * @brief multiplies a value to this object
-     * @param val: right hand side operand
+     * @param x: right hand side operand
      * @return this
     */
-    inline fixed_point128& operator*=(uint64 val) {
+    inline fixed_point128& operator*=(uint64 x) {
         uint64 temp;
 
         // multiply low QWORDs
-        low = _umul128(low, val, &temp);
-        high = high * val + temp;
+        low = _umul128(low, x, &temp);
+        high = high * x + temp;
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
         sign &= (0 != low || 0 != high);
         return *this;
     }
     /**
-     * @brief divide this object by val.
+     * @brief divide this object by x.
      * @param other: right hand side operator (denominator)
      * @return this object.
     */
@@ -703,12 +714,12 @@ public:
         return *this;
     }
     /**
-     * @brief divide this object by val.
-     * @param val: denominator.
+     * @brief divide this object by x.
+     * @param x: denominator.
      * @return this object.
     */
-    inline fixed_point128& operator/=(double val) {
-        uint64 i = *((uint64*)(&val));
+    inline fixed_point128& operator/=(double x) {
+        uint64 i = *((uint64*)(&x));
         // infinity
         if (0 == i) FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
 
@@ -720,7 +731,7 @@ public:
             return (e >= 0) ? *this >>= e  : *this <<= e;
         }
 
-        *this /= fixed_point128(val);
+        *this /= fixed_point128(x);
         return *this;
     }
     /**
@@ -1117,9 +1128,9 @@ public:
      * @param x - fixed_point128 element
      * @return - a copy of x with sign removed
     */
-    friend inline fixed_point128 fabs(const fixed_point128& val) noexcept
+    friend inline fixed_point128 fabs(const fixed_point128& x) noexcept
     {
-        fixed_point128 temp = val;
+        fixed_point128 temp = x;
         temp.sign = 0;
         return temp;
     }
@@ -1128,9 +1139,9 @@ public:
      * @param x - input value
      * @return a fixed_point128 holding the integer value. Overflow is not reported.
     */
-    friend inline fixed_point128 floor(const fixed_point128& val) noexcept
+    friend inline fixed_point128 floor(const fixed_point128& x) noexcept
     {
-        auto temp = val;
+        auto temp = x;
         temp.low = 0;
         uint64 frac = temp.high & ~temp.int_mask;
         temp.high &= temp.int_mask;
@@ -1146,9 +1157,9 @@ public:
      * @param x - input value
      * @return a fixed_point128 holding the integer value. Overflow is not reported.
     */
-    friend inline fixed_point128 ciel(const fixed_point128& val) noexcept
+    friend inline fixed_point128 ciel(const fixed_point128& x) noexcept
     {
-        auto temp = val;
+        auto temp = x;
         temp.low = 0;
         uint64 frac = temp.high & ~temp.int_mask;
         temp.high &= temp.int_mask;
