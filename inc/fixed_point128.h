@@ -50,41 +50,18 @@ typedef char int8;
 typedef unsigned char uint8;
 
 // useful macros
-#ifndef FP128_ONE_SHIFT
-#define FP128_ONE_SHIFT(x)  (1ull << (x))
-#endif
-
-#ifndef FP128_MAX_VALUE_64
-#define FP128_MAX_VALUE_64(x)   (((uint64)-1ll) >> (64 - x))
-#endif
-
-#ifndef FP128_GET_BIT
-#define FP128_GET_BIT(x, n)  (((x) >> n) & 1)
-#endif 
-
-#ifndef FP128_GET_BITS
-#define FP128_GET_BITS(x, b, count)   (((x) >> (b)) & FP128_MAX_VALUE_64(count))
-#endif
-
-#ifndef FP128_INT_DIVIDE_BY_ZERO_EXCEPTION
+#define FP128_ONE_SHIFT(x)          (1ull << (x))
+#define FP128_MAX_VALUE_64(x)       (((uint64)-1ll) >> (64 - x))
+#define FP128_GET_BIT(x, n)         (((x) >> n) & 1)
+#define FP128_GET_BITS(x, b, count) (((x) >> (b)) & FP128_MAX_VALUE_64(count))
 #define FP128_INT_DIVIDE_BY_ZERO_EXCEPTION   throw std::logic_error("Integer divide by zero!")
-#endif
-
-#ifndef FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION 
 #define FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Floating point divide by zero!")
-#endif
-
-#ifndef FP128_NOT_IMPLEMENTED_EXCEPTION 
 #define FP128_NOT_IMPLEMENTED_EXCEPTION throw std::exception("Not implemented!")
-#endif
-
-#ifndef FP128_ASSERT
 #ifdef _DEBUG 
-#define FP128_ASSERT(x) { if (!(x)) std::exception("FP128_ASSERT failed: "#x); } 
+    #define FP128_ASSERT(x) { if (!(x)) std::exception("FP128_ASSERT failed: "#x); } 
 #else
-#define FP128_ASSERT(x)
+    #define FP128_ASSERT(x)
 #endif // _DEBUG
-#endif // FP128_ASSERT
 
 // uncomment this to force the functions to not become inline (useful for profling a specific function)
 //#define FP128_DISABLE_INLINE
@@ -100,23 +77,35 @@ namespace fp128 {
 FP128_INLINE int32 div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
 
 /**
- * @brief 128 bit fixed point type template.
- * The only template parameter I is the bit count of the integer part. The fraction part complements I to 128 bit.
- * I is limited to the range [1,64] in order to simplify the implementation and increase preformance. This restriction is enforced at compile time.
- * All of fixed_point128's methods are FP128_INLINE for maximum performance.
- * Overflow is handled silently, similar to builtin integer operations.
- * Unlike integer operations, the sign is held in a separate data member which simplifies the implementation.
+ * @brief 128 bit fixed point class template.
+ * 
+ * This template provides a floating point-like type that performs various math operations quickly compared to traditional high precision libraries.
+ * The only template parameter <B>I</B> is the bit count of the integer part. The fraction part complements <B>I</B> to 128 bit.<BR>
+ * <B>I</B> is limited to the range [1,64] in order to simplify the implementation and increase preformance.<BR>
+ * This restriction is enforced at compile time.
+ * All of fixed_point128's methods are inline for maximum performance.
+ *
+ * <B>Implementation notes:</B>
+ * <UL>
+ * <LI>Overflow is handled silently, similar to builtin integer operations.</LI>
+ * <LI>Unlike integer operations, the sign is held in a separate data member which simplifies the implementation.</LI>
+ * <LI>A fixed_point128 object is not thread safe. Accessing a const object from multiple threads is safe.</LI>
+ * <LI>fixed_point128 is <B>conditionally safe</B>, 2 different non const objects can be accessed concurrently.</LI>
+ * <LI>Only 64 bit builds are supported.</LI>
+ * </UL>
 */
 template<int32 I>
 class fixed_point128
 {
     static_assert(1 <= I && I <= 64, "Template parameter <I> must be in the [1,64] range!");
+    static_assert(sizeof(void*) == 8, "fixed_point128 is 64 bit only!");
+
     // friends
     friend class fixed_point128; // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
     //
     // members
     //
-    uint64 low;
+    uint64 low; 
     uint64 high;
     unsigned sign; // 0 = positive, 1 negative
 
@@ -133,6 +122,8 @@ class fixed_point128
     static constexpr int32 dbl_frac_bits = 52;
 public:
     typedef fixed_point128<I> type;
+    typedef fixed_point128<I>* ptr_type;
+    typedef fixed_point128<I>& ref_type;
 
     //
     // ctors
@@ -141,23 +132,20 @@ public:
     /**
      * @brief Default constructor
     */
-    fixed_point128() noexcept { 
-        low = high = 0ull; sign = 0; 
-    }
+    fixed_point128() noexcept :
+        low(0), high(0), sign(0) {}
     /**
      * @brief Copy constructor
      * @param other Object to copy from
     */
-    fixed_point128(const fixed_point128& other) noexcept {
-        low = other.low;
-        high = other.high;
-        sign = other.sign;
-    }
+    fixed_point128(const fixed_point128& other) noexcept :
+        low(other.low), high(other.high), sign(other.sign) {}
     /**
      * @brief Constructor from double type
      * @param x input value
     */
     fixed_point128(double x) noexcept {
+        // brute convert to uint64 for easy bit manipulation
         uint64 i = *((uint64*)(&x));
         // very common case
         if (i == 0) {
@@ -296,13 +284,11 @@ public:
      * @brief Constructor from the 3 fixed_point128 base elements, useful for creating very small constants.
      * @param l Low QWORD
      * @param h High QWORD
-     * @param s Sign - zero fo rpositive, 1 for negative.
+     * @param s Sign - zero for positive, 1 for negative.
     */
-    fixed_point128(uint64 l, uint64 h, uint32 s) {
+    fixed_point128(uint64 l, uint64 h, uint32 s) :
+        low(l), high(h) ,sign(s) {
         FP128_ASSERT(sign < 2);
-        low = l;
-        high = h;
-        sign = s;
     }
 
     /**
