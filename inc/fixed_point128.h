@@ -58,7 +58,7 @@ typedef unsigned char uint8;
 #define FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Floating point divide by zero!")
 #define FP128_NOT_IMPLEMENTED_EXCEPTION throw std::exception("Not implemented!")
 #if defined _DEBUG || defined DEBUG
-    #define FP128_ASSERT(x) { if (!(x)) std::exception("FP128_ASSERT failed: "#x); } 
+    #define FP128_ASSERT(x) { if (!(x)) throw std::exception("FP128_ASSERT failed: "#x); } 
 #else
     #define FP128_ASSERT(x)
 #endif // _DEBUG

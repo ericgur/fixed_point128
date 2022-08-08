@@ -242,16 +242,36 @@ void test_comparison()
     };
     constexpr int len = sizeof(values) / sizeof(double) / 2;
     for (int i = 0; i < len; ++i) {
-        fixed_point128<16> f1 = values[i][0];
-        fixed_point128<16> f2 = values[i][1];
+        double d0 = values[i][0];
+        double d1 = values[i][1];
+        fixed_point128<16> f1 = d0;
+        fixed_point128<16> f2 = d1;
         printf("f1: %0.15lf\n", (double)f1);
         printf("f2: %0.15lf\n", (double)f2);
-        printf("f1 < f2: %s\n", (f1 < f2) ? "True" : "False");
-        printf("f1 <= f2: %s\n", (f1 <= f2) ? "True" : "False");
-        printf("f1 > f2: %s\n", (f1 > f2) ? "True" : "False");
-        printf("f1 >= f2: %s\n", (f1 >= f2) ? "True" : "False");
-        printf("f1 == f2: %s\n", (f1 == f2) ? "True" : "False");
-        printf("f1 != f2: %s\n", (f1 != f2) ? "True" : "False");
+        if (d0 < d1 != f1 < f2) {
+            FP128_ASSERT(d0 < d1 == f1 < f2);
+            printf("Bug: f1 < f2: %s\n", (f1 < f2) ? "True" : "False");
+        }
+        if (d0 <= d1 != f1 <= f2) {
+            FP128_ASSERT(d0 <= d1 == f1 <= f2);
+            printf("Bug: f1 <= f2: %s\n", (f1 <= f2) ? "True" : "False");
+        }
+        if (d0 > d1 != f1 > f2) {
+            FP128_ASSERT(d0 > d1 == f1 > f2);
+            printf("Bug: f1 > f2: %s\n", (f1 > f2) ? "True" : "False");
+        }
+        if (d0 >= d1 != f1 >= f2) {
+            FP128_ASSERT(d0 >= d1 == f1 >= f2);
+            printf("Bug: f1 >= f2: %s\n", (f1 >= f2) ? "True" : "False");
+        }
+        if ((d0 == d1) != (f1 == f2)) {
+            FP128_ASSERT((d0 == d1) == (f1 == f2));
+            printf("Bug: f1 == f2: %s\n", (f1 == f2) ? "True" : "False");
+        }
+        if ((d0 != d1) != (f1 != f2)) {
+            FP128_ASSERT((d0 != d1) == (f1 != f2));
+            printf("Bug: f1 != f2: %s\n", (f1 != f2) ? "True" : "False");
+        }
         printf("\n");
     }
 }
