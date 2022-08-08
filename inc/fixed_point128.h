@@ -57,13 +57,13 @@ typedef unsigned char uint8;
 #define FP128_INT_DIVIDE_BY_ZERO_EXCEPTION   throw std::logic_error("Integer divide by zero!")
 #define FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Floating point divide by zero!")
 #define FP128_NOT_IMPLEMENTED_EXCEPTION throw std::exception("Not implemented!")
-#ifdef _DEBUG 
+#if defined _DEBUG || defined DEBUG
     #define FP128_ASSERT(x) { if (!(x)) std::exception("FP128_ASSERT failed: "#x); } 
 #else
     #define FP128_ASSERT(x)
 #endif // _DEBUG
 
-// uncomment this to force the functions to not become inline (useful for profling a specific function)
+// uncomment this to force the functions to not become inline (useful for profiling a specific function)
 //#define FP128_DISABLE_INLINE
 #ifdef FP128_DISABLE_INLINE
 #define FP128_INLINE __declspec(noinline)
@@ -142,7 +142,7 @@ public:
         low(other.low), high(other.high), sign(other.sign) {}
     /**
      * @brief Constructor from double type
-     * @param x input value
+     * @param x Input value
     */
     fixed_point128(double x) noexcept {
         // brute convert to uint64 for easy bit manipulation
@@ -165,7 +165,7 @@ public:
             return;
         }
 
-        // normal number, smaller exponents underflow silently to zero
+        // normal number, produces non zero value
         if (e >= -F) {
             // bit 52 in f is the unity value of the float. it needs to move to the unity position in fixed point
             f |= FP128_ONE_SHIFT(dbl_frac_bits);
@@ -202,7 +202,7 @@ public:
     }
     /**
      * @brief Constructor from uint64 type
-     * @param x input value
+     * @param x Input value
     */
     fixed_point128(uint64 x) noexcept {
         low = 0;
@@ -211,7 +211,7 @@ public:
     }
     /**
      * @brief Constructor from int64 type
-     * @param x input value
+     * @param x Input value
     */
     fixed_point128(int64 x) noexcept {
         low = 0;
@@ -220,7 +220,7 @@ public:
     }
     /**
      * @brief Constructor from uint32 type
-     * @param x input value
+     * @param x Input value
    */
     fixed_point128(uint32 x) noexcept {
         low = 0;
@@ -229,7 +229,7 @@ public:
     }
     /**
      * @brief Constructor from int32 type
-     * @param x input value
+     * @param x Input value
    */
     fixed_point128(int32 x) noexcept {
         low = 0;
@@ -239,7 +239,7 @@ public:
     /**
      * @brief Constructor from const char* (C string).
      * Allows creating very high precision values. Much slower than the other constructors.
-     * @param x input value
+     * @param x Input string
     */
     fixed_point128(const char* x) noexcept {
         low = high = 0;
@@ -281,6 +281,15 @@ public:
         free(str);
     }
     /**
+     * @brief Constructor from std::string.
+     * Allows creating very high precision values. Much slower than the other constructors.
+     * @param x Input string
+    */
+    fixed_point128(const std::string& x) noexcept {
+        fixed_point128 temp = x.c_str();
+        *this = temp;
+    }
+    /**
      * @brief Constructor from the 3 fixed_point128 base elements, useful for creating very small constants.
      * @param l Low QWORD
      * @param h High QWORD
@@ -292,9 +301,9 @@ public:
     }
 
     /**
-     * @brief assignment operator
-     * @param other: object to copy from 
-     * @return this
+     * @brief Assignment operator
+     * @param other Object to copy from 
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator=(const fixed_point128& other) {
         high = other.high;
@@ -305,7 +314,7 @@ public:
     /**
      * @brief template assignment operator, can be used between two different fixed_point128 templates
      * @param other fixed_point128 instance with from a different template instance.
-     * @return this
+     * @return This object.
     */
     template<int32 I2>
     FP128_INLINE fixed_point128<I>& operator=(const fixed_point128<I2>& other)
@@ -338,14 +347,14 @@ public:
     //
     /**
      * @brief operator uint64 - converts to a uint64
-     * @return object value
+     * @return Object value.
     */
     FP128_INLINE operator uint64() const noexcept {
         return (high >> upper_frac_bits) & max_qword_value;
     }
     /**
      * @brief operator int64 - converts to a int64
-     * @return object value
+     * @return Object value.
     */
     FP128_INLINE operator int64() const noexcept {
         int64 res = (sign) ? -1ll : 1ll;
@@ -353,14 +362,14 @@ public:
     }
     /**
      * @brief operator uint32 - converts to a uint32
-     * @return object value
+     * @return Object value.
     */
     FP128_INLINE operator uint32() const noexcept {
         return (high >> upper_frac_bits) & max_dword_value;
     }
     /**
      * @brief operator int32 - converts to a int32
-     * @return object value
+     * @return Object value.
     */
     FP128_INLINE operator int32() const noexcept {
         int32 res = (sign) ? -1 : 1;
@@ -368,7 +377,7 @@ public:
     }
     /**
      * @brief operator float - converts to a float
-     * @return object value
+     * @return Object value.
     */
     FP128_INLINE operator float() const noexcept {
         double res = (double)(high * upper_unity); // bits [64:127]
@@ -377,7 +386,7 @@ public:
     }
     /**
      * @brief operator double - converts to a double
-     * @return object value
+     * @return Object value.
     */
     FP128_INLINE operator double() const noexcept {
         double res = (double)(high * upper_unity); // bits [64:127]
@@ -386,11 +395,11 @@ public:
     }
     /**
      * @brief operator long double - converts to a long double
-     * @return object value
+     * @return Object value.
     */
     FP128_INLINE operator long double() const noexcept {
-        double res = (long double)(high * upper_unity); // bits [64:127]
-        res += (long double)(low * lower_unity);        // bits [0:63]
+        long double res = (long double)(high * upper_unity); // bits [64:127]
+        res += (long double)(low * lower_unity);             // bits [0:63]
         return (sign) ? -res : res;
     }
     /**
@@ -437,9 +446,9 @@ public:
     // math operators
     //
     /**
-     * @brief adds the right hand side operand to this object to and returns the result.
-     * @param other: right hand side operand
-     * @return temporary object with the result of the operation
+     * @brief Adds the right hand side operand to this object to and returns the result.
+     * @param other Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator+(const fixed_point128& other) const {
         fixed_point128 temp(*this);
@@ -447,62 +456,62 @@ public:
     }
     /**
      * @brief subtracts the right hand side operand to this object to and returns the result.
-     * @param other: right hand side operand
-     * @return temporary object with the result of the operation
+     * @param other Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator-(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp -= other;
     }
     /**
-     * @brief multiplies the right hand side operand with this object to and returns the result.
-     * @param other: right hand side operand
-     * @return temporary object with the result of the operation
+     * @brief Multiplies the right hand side operand with this object to and returns the result.
+     * @param other Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator*(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp *= other;
     }
     /**
-     * @brief multiplies the right hand side operand with this object to and returns the result.
-     * @param x: right hand side operand
-     * @return temporary object with the result of the operation
+     * @brief Multiplies the right hand side operand with this object to and returns the result.
+     * @param x Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator*(double x) const {
         fixed_point128 temp(*this);
         return temp *= fixed_point128(x);
     }
     /**
-     * @brief multiplies the right hand side operand with this object to and returns the result.
-     * @param x: right hand side operand
-     * @return temporary object with the result of the operation
+     * @brief Multiplies the right hand side operand with this object to and returns the result.
+     * @param x Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator*(int64 x) const {
         fixed_point128 temp(*this);
         return temp *= x;
     }
     /**
-     * @brief multiplies the right hand side operand with this object to and returns the result.
-     * @param x: right hand side operand
-     * @return temporary object with the result of the operation
+     * @brief Multiplies the right hand side operand with this object to and returns the result.
+     * @param x Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator*(int32 x) const {
         fixed_point128 temp(*this);
         return temp *= (int64)x;
     }
     /**
-     * @brief divides this object by the right hand side operand and returns the result.
-     * @param other: right hand side operand (denominator)
-     * @return temporary object with the result of the operation
+     * @brief Divides this object by the right hand side operand and returns the result.
+     * @param other Right hand side operand (denominator)
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator/(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp /= other;
     }
     /**
-     * @brief divides this object by the right hand side operand and returns the result.
-     * @param x: right hand side operand (denominator)
-     * @return temporary object with the result of the operation
+     * @brief Divides this object by the right hand side operand and returns the result.
+     * @param x Right hand side operand (denominator)
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator/(double x) const {
         if (x == 0)
@@ -513,63 +522,63 @@ public:
         return temp;
     }
     /**
-     * @brief calculates modulo.
-     * @param other: right hand side operand (denominator)
-     * @return temporary object with the result of the operation
+     * @brief Calculates modulo.
+     * @param other Right hand side operand (denominator)
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator%(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp %= other;
     }
     /**
-     * @brief performs right shift operation.
-     * @param shift: bits to shift
-     * @return temporary object with the result of the operation
+     * @brief Performs right shift operation.
+     * @param Shift bits to shift
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator>>(int32 shift) const {
         fixed_point128 temp(*this);
         return temp >>= shift;
     }
     /**
-     * @brief performs left shift operation.
-     * @param shift: bits to shift
-     * @return temporary object with the result of the operation
+     * @brief Performs left shift operation.
+     * @param Shift bits to shift
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator<<(int32 shift) const {
         fixed_point128 temp(*this);
         return temp <<= shift;
     }
     /**
-     * @brief performs bitwise AND (&)
-     * @param other: right hand side operand
-     * @return temporary object with the result of the operation
+     * @brief Performs bitwise AND (&)
+     * @param other Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator&(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp &= other;
     }
     /**
-     * @brief performs bitwise OR (|)
-     * @param other: right hand side operand
-     * @return temporary object with the result of the operation
+     * @brief Performs bitwise OR (|)
+     * @param other Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator|(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp |= other;
     }
     /**
-     * @brief performs bitwise XOR (^)
-     * @param other: right hand side operand
-     * @return temporary object with the result of the operation
+     * @brief Performs bitwise XOR (^)
+     * @param other Right hand side operand
+     * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator^(const fixed_point128& other) const {
         fixed_point128 temp(*this);
         return temp ^= other;
     }
     /**
-     * @brief add a value to this object
-     * @param other: right hand side operand
-     * @return this
+     * @brief Add a value to this object
+     * @param other Right hand side operand
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator+=(const fixed_point128& other) {
         if (!other) {
@@ -585,9 +594,9 @@ public:
         return add(other);
     }
     /**
-     * @brief subtract a value to this object
-     * @param other: right hand side operand
-     * @return this
+     * @brief Subtract a value to this object
+     * @param other Right hand side operand
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator-=(const fixed_point128& other) {
         if (!other) {
@@ -603,9 +612,9 @@ public:
         return subtract(other);
     }
     /**
-     * @brief multiplies a value to this object
-     * @param other: right hand side operand
-     * @return this
+     * @brief Multiplies a value to this object
+     * @param other Right hand side operand
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator*=(const fixed_point128& other) {
         uint64 res[4]; // 256 bit of result
@@ -644,9 +653,9 @@ public:
         return *this;
     }
     /**
-     * @brief multiplies a value to this object
-     * @param x: right hand side operand
-     * @return this
+     * @brief Multiplies a value to this object
+     * @param x Right hand side operand
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator*=(int32 x) {
         // alway do positive multiplication
@@ -665,9 +674,9 @@ public:
         return *this;
     }
     /**
-     * @brief multiplies a value to this object
-     * @param x: right hand side operand
-     * @return this
+     * @brief Multiplies a value to this object
+     * @param x Right hand side operand
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator*=(uint32 x) {
         uint64 temp;
@@ -680,9 +689,9 @@ public:
         return *this;
     }
     /**
-     * @brief multiplies a value to this object
-     * @param x: right hand side operand
-     * @return this
+     * @brief Multiplies a value to this object
+     * @param x Right hand side operand
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator*=(int64 x) {
         // alway do positive multiplication
@@ -701,9 +710,9 @@ public:
         return *this;
     }
     /**
-     * @brief multiplies a value to this object
-     * @param x: right hand side operand
-     * @return this
+     * @brief Multiplies a value to this object
+     * @param x Right hand side operand
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator*=(uint64 x) {
         uint64 temp;
@@ -716,8 +725,8 @@ public:
         return *this;
     }
     /**
-     * @brief divide this object by x.
-     * @param other: right hand side operator (denominator)
+     * @brief Divide this object by x.
+     * @param other Right hand side operator (denominator)
      * @return this object.
     */
     FP128_INLINE fixed_point128& operator/=(const fixed_point128& other) {
@@ -738,9 +747,9 @@ public:
         return *this;
     }
     /**
-     * @brief divide this object by x.
-     * @param x: denominator.
-     * @return this object.
+     * @brief Divide this object by x.
+     * @param x Denominator.
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator/=(double x) {
         uint64 i = *((uint64*)(&x));
@@ -760,8 +769,8 @@ public:
     }
     /**
      * @brief %= operator
-     * @param other: modulo operand.
-     * @return this
+     * @param other Modulo operand.
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator%=(const fixed_point128& other) {
         uint64 nom[4] = {0, 0, low, high};
@@ -802,9 +811,10 @@ public:
         return *this;
     }
     /**
-     * @brief left right for this object.
-     * @param shift: how many bits to shift. neagive or very high values cause undefined behavior.
-     * @return this
+     * @brief Shift right this object.
+     * @param shift Bits to shift. negative or very high values cause undefined behavior.
+     * @return This object.
+
     */
     FP128_INLINE fixed_point128& operator>>=(int32 shift) {
         // 0-64 bit shift - most common
@@ -824,9 +834,9 @@ public:
         return *this;
     }
     /**
-     * @brief left shift for this object.
-     * @param shift: how many bits to shift. neagive or very high values cause undefined behavior. 
-     * @return this
+     * @brief Shift left this object.
+     * @param shift Bits to shift. Negative or very high values cause undefined behavior. 
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator<<=(int32 shift) {
         if (shift <= 64) {
@@ -845,9 +855,9 @@ public:
         return *this;
     }
     /**
-     * @brief bitwise AND=
-     * @param other mask
-     * @return this
+     * @brief Bitwise AND=
+     * @param other AND mask.
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator&=(const fixed_point128& other) {
         low &= other.low;
@@ -858,9 +868,9 @@ public:
         return *this;
     }
     /**
-     * @brief bitwise OR=
-     * @param other mask
-     * @return this
+     * @brief Bitwise OR=
+     * @param other OR mask.
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator|=(const fixed_point128& other) {
         low |= other.low;
@@ -869,9 +879,9 @@ public:
         return *this;
     }
     /**
-     * @brief bitwise XOR=
-     * @param other mask
-     * @return this
+     * @brief Bitwise XOR=
+     * @param other XOR mask.
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator^=(const fixed_point128& other) {
         low ^= other.low;
@@ -879,8 +889,8 @@ public:
         sign ^= other.sign;
     }
     /**
-     * @brief prefix ++ operation (++a)
-     * @return this
+     * @brief Prefix ++ operation (++a)
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator++() {
         high += unity;
@@ -889,8 +899,8 @@ public:
         return *this;
     }
     /**
-     * @brief postfix ++ operation (a++)
-     * @return this
+     * @brief Postfix ++ operation (a++)
+     * @return This object.
     */
     FP128_INLINE fixed_point128 operator++(int32) {
         fixed_point128 temp(*this);
@@ -898,8 +908,8 @@ public:
         return temp;
     }
     /**
-     * @brief prefix -- operation (--a)
-     * @return this
+     * @brief Prefix -- operation (--a)
+     * @return This object.
     */
     FP128_INLINE fixed_point128& operator--() {
         // unity is in the upper QWORD
@@ -913,32 +923,32 @@ public:
         return *this;
     }
     /**
-     * @brief postfix -- operation (a--)
-     * @return this
+     * @brief Postfix -- operation (a--)
+     * @return This object.
     */
     FP128_INLINE fixed_point128 operator--(int32) {
         fixed_point128 temp(*this);
         --*this; // call the prefix implementation
         return temp;
     }
+    
     //
     // unary operations
-    // 
-    
+    //     
     /**
-     * @brief convert to bool
+     * @brief Convert to bool
     */
     FP128_INLINE operator bool() const {
         return high != 0 || low != 0;
     }
     /**
-     * @brief logical not (!). Opposite of operator bool.
+     * @brief Logical not (!). Opposite of operator bool.
     */
     FP128_INLINE bool operator!() const {
         return high == 0 && low == 0;
     }
     /**
-     * @brief bitwise not (~).
+     * @brief Bitwise not (~).
     */
     FP128_INLINE fixed_point128 operator~() const {
         fixed_point128 temp(*this);
@@ -949,14 +959,14 @@ public:
         return temp;
     }
     /**
-     * @brief unary +. returns a copy of the object.
+     * @brief Unary +. Returns a copy of the object.
     */
     FP128_INLINE fixed_point128 operator+() const {
         fixed_point128 temp(*this);
         return temp;
     }
     /**
-     * @brief unary -. returns a copy of the object with sign inverted.
+     * @brief Unary -. Returns a copy of the object with sign inverted.
     */
     FP128_INLINE fixed_point128 operator-() const {
         fixed_point128 temp(*this);
@@ -970,27 +980,26 @@ public:
     //
     // Comparison operators
     //
-
     /**
-     * @brief compare logical/bitwise equal.
-     * @param other: righthand operand
-     * @return true of equal
+     * @brief Compare logical/bitwise equal.
+     * @param other Righthand operand
+     * @return True if this and other are equal.
     */
     FP128_INLINE bool operator==(const fixed_point128& other) const {
         return sign == other.sign && high == other.high && low == other.low;
     }
     /**
-     * @brief return true when objects are not equal. Can be used as logical XOR.
-     * @param other: righthand operand
-     * @return true of not equal
+     * @brief Return true when objects are not equal. Can be used as logical XOR.
+     * @param other Righthand operand.
+     * @return True of not equal.
     */
     FP128_INLINE bool operator!=(const fixed_point128& other) const {
         return sign != other.sign || high != other.high || low != other.low;
     }
     /**
-     * @brief return true this object is small than the other
-     * @param other: righthand operand
-     * @return true when this is smaller
+     * @brief Return true if this object is small than the other
+     * @param other Righthand operand.
+     * @return True when this object is smaller.
     */
     FP128_INLINE bool operator<(const fixed_point128& other) const {
         // signs are different
@@ -1004,17 +1013,17 @@ public:
         return (sign) ? high > other.high : high < other.high;
     }
     /**
-     * @brief return true this object is small or equal than the other
-     * @param other: righthand operand
-     * @return true when this is smaller or equal
+     * @brief Return true this object is small or equal than the other
+     * @param other Righthand operand.
+     * @return True when this object is smaller or equal.
     */
     FP128_INLINE bool operator<=(const fixed_point128& other) const {
         return !(*this > other);
     }
     /**
-     * @brief return true this object is larger than the other
-     * @param other: righthand operand
-     * @return true when this is larger
+     * @brief Return true this object is larger than the other
+     * @param other Righthand operand.
+     * @return True when this objext is larger.
     */
     FP128_INLINE bool operator>(const fixed_point128& other) const {
         // signs are different
@@ -1028,9 +1037,9 @@ public:
         return (sign) ? high < other.high : high > other.high;
     }
     /**
-     * @brief return true this object is larger or equal than the other
-     * @param other: righthand operand
-     * @return true when this is larger or equal
+     * @brief Return true this object is larger or equal than the other
+     * @param other Righthand operand.
+     * @return True when this objext is larger or equal.
     */
     FP128_INLINE bool operator>=(const fixed_point128& other) const {
         return !(*this < other);
@@ -1038,26 +1047,25 @@ public:
     //
     // useful public functions
     //
-
     /**
-     * @brief returns true if the value is an int (fraction is zero)
-     * @return true when the fraction is zero
+     * @brief Returns true if the value is an int (fraction is zero)
+     * @return True when the fraction is zero.
     */
     FP128_INLINE bool is_int() const
     {
         return 0 == low && 0 == (high << I);
     }
     /**
-     * @brief returns true if the value positive (incuding zero)
-     * @return true when the the value positive
+     * @brief Returns true if the value positive (incuding zero)
+     * @return True when the the value positive
     */
     FP128_INLINE bool is_positive() const
     {
         return 0 == sign;
     }
     /**
-     * @brief returns true if the value is zero
-     * @return returns true if the value is zero 
+     * @brief Returns true if the value is zero
+     * @return Returns true if the value is zero 
     */
     FP128_INLINE bool is_zero() const
     {
@@ -1066,7 +1074,7 @@ public:
     /**
      * @brief get a specific bit wihtin the 128 fixed point data
      * @param bit bit to get [0,127]
-     * @return 0 or 1. undefined when bit is > 127
+     * @return 0 or 1. Undefined when bit > 127
     */
     FP128_INLINE int32 get_bit(unsigned bit) const
     {
@@ -1076,7 +1084,7 @@ public:
         return FP128_GET_BIT(high, bit-64);
     }
     /**
-     * @brief Return an instance of fixed_point128 with the value of pi
+     * @brief Returns an instance of fixed_point128 with the value of pi
      * @return pi
     */
     FP128_INLINE static const fixed_point128& pi() noexcept {
@@ -1084,7 +1092,7 @@ public:
         return pi;
     }
     /**
-     * @brief Return an instance of fixed_point128 with the value of e
+     * @brief Returns an instance of fixed_point128 with the value of e
      * @return e
     */
     FP128_INLINE static const fixed_point128& e() noexcept {
@@ -1104,7 +1112,7 @@ private:
     /**
      * @brief Adds 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
      * @param other The right side of the addition operation
-     * @return This object
+     * @return This object.
     */
     FP128_INLINE fixed_point128& add(const fixed_point128& other) {
         unsigned char carry;
@@ -1120,7 +1128,7 @@ private:
     /**
      * @brief Subtracts 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
      * @param other The right side of the subtraction operation.
-     * @return This object
+     * @return This object.
     */
     FP128_INLINE fixed_point128& subtract(const fixed_point128& other) {
         unsigned char carry;
@@ -1147,10 +1155,13 @@ private:
     }
 
 public:
+    //
+    // Floating point style functions
+    //
     /**
-     * @brief returns the absolute value (sets sign to 0)
-     * @param x - fixed_point128 element
-     * @return - a copy of x with sign removed
+     * @brief Returns the absolute value (sets sign to 0)
+     * @param x Fixed_point128 object
+     * @return A copy of x with sign removed
     */
     friend FP128_INLINE fixed_point128 fabs(const fixed_point128& x) noexcept
     {
@@ -1159,9 +1170,9 @@ public:
         return temp;
     }
     /**
-     * @brief peforms the floor() function, similar to libc's floor(), rounds down towards -infinity.
-     * @param x - input value
-     * @return a fixed_point128 holding the integer value. Overflow is not reported.
+     * @brief Performs the floor() function, similar to libc's floor(), rounds down towards -infinity.
+     * @param x Input value
+     * @return A fixed_point128 holding the integer value. Overflow is not reported.
     */
     friend FP128_INLINE fixed_point128 floor(const fixed_point128& x) noexcept
     {
@@ -1177,9 +1188,9 @@ public:
     }
 
     /**
-     * @brief peforms the ciel() function, similar to libc's ciel(), rounds up towards infinity.
-     * @param x - input value
-     * @return a fixed_point128 holding the integer value. Overflow is not reported.
+     * @brief Performs the ciel() function, similar to libc's ciel(), rounds up towards infinity.
+     * @param x Input value
+     * @return A fixed_point128 holding the integer value. Overflow is not reported.
     */
     friend FP128_INLINE fixed_point128 ciel(const fixed_point128& x) noexcept
     {
@@ -1195,10 +1206,10 @@ public:
     }
 
     /**
-     * @brief peforms the fmod() function, similar to libc's fmod(), returns the remainder of a division x/y.
-     * @param x - nominator
-     * @param y - denominator
-     * @return a fixed_point128 holding the modulo value.
+     * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/y.
+     * @param x Nominator
+     * @param y Denominator
+     * @return A fixed_point128 holding the modulo value.
     */
     friend FP128_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y) noexcept
     {
@@ -1207,9 +1218,10 @@ public:
 
     /**
      * @brief Split into integer and fraction parts.
-     * @param x - input value
-     * @param iptr - pointer to fixed_point128 holding the integer part of x
-     * @return the fraction part of x. Undefined when iptr is nullptr.
+     * Both results carry the sign of the input variable.
+     * @param x Input value
+     * @param iptr Pointer to fixed_point128 holding the integer part of x.
+     * @return The fraction part of x. Undefined when iptr is nullptr.
     */
     friend FP128_INLINE fixed_point128 modf(const fixed_point128& x, fixed_point128* iptr) noexcept
     {
@@ -1226,8 +1238,8 @@ public:
     }
     /**
      * @brief Calculates the square root.
-     * @param x - value to calculate the root of
-     * @return square root of (x), zero for negative or zero values of x
+     * @param x Value to calculate the root of
+     * @return Square root of (x), zero when X <= 0.
     */
     friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x) noexcept
     {
@@ -1274,12 +1286,12 @@ public:
 };
 /**
  * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
- * @param q - (output) Pointer to receive the quote
- * @param r - (output, optional) Pointer to receive the remainder. Can be nullptr
- * @param u - Pointer nominator, an array of uint32
- * @param v - Pointer denominator, an array of uint32
- * @param m - count of elements in u
- * @param n - count of elements in v
+ * @param q (output) Pointer to receive the quote
+ * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
+ * @param u Pointer nominator, an array of uint32
+ * @param v Pointer denominator, an array of uint32
+ * @param m Count of elements in u
+ * @param n Count of elements in v
  * @return 0 for success
 */
 FP128_INLINE int32 div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n)
