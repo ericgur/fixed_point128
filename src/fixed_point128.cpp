@@ -25,7 +25,11 @@
 // fixed_point128.cpp : test executable for the fixed_point128 class template
 //
 
+#define FP128_DISABLE_INLINE
+
+#include <windows.h>
 #include <stdio.h>
+#include <profileapi.h>
 #include "../inc/fixed_point128.h" 
 
 using namespace fp128;
@@ -276,6 +280,99 @@ void test_comparison()
     }
 }
 
+void print_ips(const char* name, int64 ips)
+{
+    if (ips < 1000) {
+        printf("%s: %lld per second\n", name, ips);
+    }
+    else if (ips < 1000000) {
+        double dips = ips / 1000.0;
+        printf("%s: %0.3lfK per second\n", name, dips);
+    }
+    else if (ips < 1000000000) {
+        double dips = ips / 1000000.0;
+        printf("%s: %0.3lfM per second\n", name, dips);
+    }
+    else {
+        double dips = ips / 1000000000.0;
+        printf("%s: %0.3lfG per second\n", name, dips);
+    }
+}
+
+void bench()
+{
+    LARGE_INTEGER li, time_start, time_end;
+    QueryPerformanceFrequency(&li);
+    double totalTime, frequency = double(li.QuadPart);
+    int iterations = 100000000;
+    uint64 ips = 0;
+    fixed_point128<10> f1 = fixed_point128<10>::pi();
+    fixed_point128<10> f2 = fixed_point128<10>::e();
+    fixed_point128<10> f3;
+
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f3 = f1 + f2;
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64)(iterations / totalTime);
+    print_ips("Addition", ips);
+
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f3 = f2 - f1;
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64)(iterations / totalTime);
+    print_ips("Subtraction", ips);
+
+
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i) {
+        f1 = f2;
+        f1 >>= 5;
+    }
+    f1 = fixed_point128<10>::pi();
+    
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64)(iterations / totalTime);
+    print_ips("Shift right", ips);
+
+
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i) {
+        f1 = f2;
+        f1 <<= 2;
+    }
+    f1 = fixed_point128<10>::pi();
+
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64)(iterations / totalTime);
+    print_ips("Shift left", ips);
+
+
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f3 = f1 * f2;
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64)(iterations / totalTime);
+    print_ips("Multiplication", ips);
+   
+    
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f3 = f1 / f2;
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64)(iterations / totalTime);
+    print_ips("Division", ips);
+
+
+}
+
 int main()
 {
     test_precision();
@@ -287,5 +384,6 @@ int main()
     test_functions();
     test_string();
     test_comparison();
+    bench();
 }
 
