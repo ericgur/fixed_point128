@@ -27,10 +27,9 @@
     The function div_32bit is derived from the book "Hacker's Delight" 2nd Edition by 
     Henry S. Warren Jr. It was converted to 32 bit operations + a bugfix.
 
-    The sin, cos, exp  functions were adapted from the Fixed Point Math 
-    Library. Copyright (c) 2007-2009: Peter Schregle
-
 ************************************************************************************/
+
+// TODO: implement faster _umul128
 
 #ifndef FIXED_POINT128_H
 #define FIXED_POINT128_H
@@ -68,7 +67,7 @@ typedef unsigned char uint8;
 #ifdef FP128_DISABLE_INLINE
 #define FP128_INLINE __declspec(noinline)
 #else
-#define FP128_INLINE inline
+#define FP128_INLINE __forceinline
 #endif
 
 namespace fp128 {
@@ -329,13 +328,13 @@ public:
             // shift left by I2 - I bits
             int shift = I2 - I;
             low = other.low << shift;
-            high = __shiftright128(other.low, other.high, (uint8)(64 - shift));
+            high = shift_right128(other.low, other.high, (uint8)(64 - shift));
         }
         // other has more integer bits and less fraction bits
         else { // I > I2
             // shift right by I - I2 bits
             int shift = I - I2;
-            low = __shiftright128(other.low, other.high, (uint8)shift);
+            low = shift_right128(other.low, other.high, (uint8)shift);
             high = other.high >> shift;
         }
 
@@ -429,7 +428,7 @@ public:
                 uint64 res[2];
                 res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
                 // extract the integer part
-                integer = __shiftright128(res[0], res[1], (uint8)upper_frac_bits);
+                integer = shift_right128(res[0], res[1], (uint8)upper_frac_bits);
                 temp *= 10; // move another digit to the integer area
             }
             else {
@@ -643,8 +642,8 @@ public:
         static constexpr int32 lsb = F & FP128_MAX_VALUE_64(6);
 
         // copy block #1 (lowest)
-        low = __shiftright128(res[index], res[index + 1], lsb);
-        high = __shiftright128(res[index+1], res[index + 2], lsb);
+        low = shift_right128(res[index], res[index + 1], lsb);
+        high = shift_right128(res[index+1], res[index + 2], lsb);
 
         // set the sign
         sign ^= other.sign;
@@ -729,14 +728,14 @@ public:
      * @param other Right hand side operator (denominator)
      * @return this object.
     */
-    FP128_INLINE fixed_point128& operator/=(const fixed_point128& other) {
+    inline fixed_point128& operator/=(const fixed_point128& other) {
         uint64 nom[4] = {0, 0, low, high};
         uint64 denom[2] = {other.low, other.high};
         uint64 q[4] = {0}, *r = nullptr; // don't need the reminder
         if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, sizeof(nom) / sizeof(uint32), sizeof(denom) / sizeof(uint32))) {
             // result in q needs to shift left by F
-            high = __shiftright128(q[1], q[2], I);
-            low = __shiftright128(q[0], q[1], I);
+            high = shift_right128(q[1], q[2], I);
+            low = shift_right128(q[0], q[1], I);
             sign ^= other.sign;
             // set sign to 0 when both low and high are zero (avoid having negative zero value)
             sign &= (0 != low || 0 != high);
@@ -772,7 +771,7 @@ public:
      * @param other Modulo operand.
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator%=(const fixed_point128& other) {
+    inline fixed_point128& operator%=(const fixed_point128& other) {
         uint64 nom[4] = {0, 0, low, high};
         uint64 denom[2] = {other.low, other.high};
         uint64 q[4] = {0}, r[4] = {0};
@@ -819,7 +818,7 @@ public:
     FP128_INLINE fixed_point128& operator>>=(int32 shift) {
         // 0-64 bit shift - most common
         if (shift <= 64) {
-            low = __shiftright128(low, high, (uint8)shift);
+            low = shift_right128(low, high, (uint8)shift);
             high >>= shift;
         }
         else if (shift >= 128) {
@@ -840,7 +839,7 @@ public:
     */
     FP128_INLINE fixed_point128& operator<<=(int32 shift) {
         if (shift <= 64) {
-            high = __shiftleft128(low, high, (unsigned char)shift);
+            high = shift_left128(low, high, (unsigned char)shift);
             low <<= shift;
         }
         else if (shift < 128) {
@@ -1154,6 +1153,28 @@ private:
         return *this;
     }
 
+    /**
+     * @brief Right shift a 128 bit ineteger.
+     * @param l Low QWORD
+     * @param h High QWORD
+     * @param shift Bits to shift
+     * @return Lower 64 bit of the result
+    */
+    static inline uint64 shift_right128(uint64 l, uint64 h, int shift)
+    {
+        return (l >> shift) | (h << (64 - shift));
+    }
+    /**
+     * @brief Left shift a 128 bit ineteger.
+     * @param l Low QWORD
+     * @param h High QWORD
+     * @param shift Bits to shift
+     * @return Upper 64 bit of the result
+    */
+    static inline uint64 shift_left128(uint64 l, uint64 h, int shift)
+    {
+        return (h << shift) | (l >> (64 - shift));
+    }
 public:
     //
     // Floating point style functions
@@ -1294,7 +1315,7 @@ public:
  * @param n Count of elements in v
  * @return 0 for success
 */
-FP128_INLINE int32 div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n)
+int32 div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n)
 {
     const uint64 b = 1ull << 32; // Number base (32 bits).
     const uint64 mask = b - 1;
@@ -1326,6 +1347,7 @@ FP128_INLINE int32 div_32bit(uint32* q, uint32* r, const uint32* u, const uint32
     // We may have to append a high-order digit on the dividend; we do that unconditionally.
     s = (uint64)__lzcnt(v[n - 1]); // 0 <= s <= 32. 
     s_comp = 32 - s;
+    
     vn = (uint32*)_malloca(sizeof(uint32) * n);
     if (nullptr == vn) return 1;
 

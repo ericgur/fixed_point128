@@ -25,7 +25,7 @@
 // fixed_point128.cpp : test executable for the fixed_point128 class template
 //
 
-#define FP128_DISABLE_INLINE
+//#define FP128_DISABLE_INLINE
 
 #include <windows.h>
 #include <stdio.h>
@@ -304,7 +304,7 @@ void bench()
     LARGE_INTEGER li, time_start, time_end;
     QueryPerformanceFrequency(&li);
     double totalTime, frequency = double(li.QuadPart);
-    int iterations = 100000000;
+    int iterations = 1000000000;
     uint64 ips = 0;
     fixed_point128<10> f1 = fixed_point128<10>::pi();
     fixed_point128<10> f2 = fixed_point128<10>::e();
@@ -328,40 +328,16 @@ void bench()
 
 
     QueryPerformanceCounter(&time_start);
-    for (int i = 0; i < iterations; ++i) {
-        f1 = f2;
-        f1 >>= 5;
-    }
-    f1 = fixed_point128<10>::pi();
-    
-    QueryPerformanceCounter(&time_end);
-    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
-    ips = (uint64)(iterations / totalTime);
-    print_ips("Shift right", ips);
-
-
-    QueryPerformanceCounter(&time_start);
-    for (int i = 0; i < iterations; ++i) {
-        f1 = f2;
-        f1 <<= 2;
-    }
-    f1 = fixed_point128<10>::pi();
-
-    QueryPerformanceCounter(&time_end);
-    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
-    ips = (uint64)(iterations / totalTime);
-    print_ips("Shift left", ips);
-
-
-    QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
         f3 = f1 * f2;
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64)(iterations / totalTime);
     print_ips("Multiplication", ips);
-   
-    
+
+
+    // slower functions
+    iterations /= 10;
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
         f3 = f1 / f2;
@@ -369,8 +345,6 @@ void bench()
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64)(iterations / totalTime);
     print_ips("Division", ips);
-
-
 }
 
 int main()
