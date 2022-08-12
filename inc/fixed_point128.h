@@ -51,7 +51,7 @@ typedef unsigned char uint8;
 // useful macros
 #define FP128_ONE_SHIFT(x)          (1ull << (x))
 #define FP128_MAX_VALUE_64(x)       (((uint64)-1ll) >> (64 - x))
-#define FP128_GET_BIT(x, n)         (((x) >> n) & 1)
+#define FP128_GET_BIT(x, n)         (((x) >> (n)) & 1)
 #define FP128_GET_BITS(x, b, count) (((x) >> (b)) & FP128_MAX_VALUE_64(count))
 #define FP128_INT_DIVIDE_BY_ZERO_EXCEPTION   throw std::logic_error("Integer divide by zero!")
 #define FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Floating point divide by zero!")
@@ -407,7 +407,7 @@ public:
      * @return object string representation
     */
     FP128_INLINE operator std::string() const {
-        char str[128]; // need roughly a digit per 3.5 bits
+        char str[128]; // need roughly a (meaningful) digit per 3.2 bits
         char* p = str;
         fixed_point128 temp = *this;
         
