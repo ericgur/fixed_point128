@@ -234,20 +234,20 @@ void test_functions()
         printf("\n");
     }
 
-    fixed_point128<10> fvalues[] = {
-        f1.pi(),
-        f1.pi() >> 1,
-        f1.pi() >> 2,
-        (-f1.pi()) >> 2
+    fixed_point128<4> fvalues[] = {
+        fixed_point128<4>::pi(),
+        fixed_point128<4>::pi() >> 1,
+        fixed_point128<4>::pi() >> 2,
+        (-fixed_point128<4>::pi()) >> 2
     };
-    
+    fixed_point128<4> f4;
     len = sizeof(fvalues) / sizeof(fixed_point128<10>);
     for (int i = 0; i < len; ++i) {
-        f1 = fvalues[i];
-        s = f1;
-        printf("f1: %s\n", s.c_str());
-        s = sin(f1);
-        printf("sin(f1): %s\n", s.c_str());
+        f4 = fvalues[i];
+        s = f4;
+        printf("f4: %s\n", s.c_str());
+        s = sin(f4);
+        printf("sin(f4): %s\n", s.c_str());
     }
     
     printf("\n");

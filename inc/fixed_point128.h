@@ -29,8 +29,6 @@
 
 ************************************************************************************/
 
-// TODO: implement faster _umul128
-
 #ifndef FIXED_POINT128_H
 #define FIXED_POINT128_H
 
@@ -264,21 +262,22 @@ public:
         }
         // number is a float, get the integer part using strtoull()
         *dec = '\0';
-        uint64 int_val = std::strtoull(p, nullptr, 10);
-        high = int_val << upper_frac_bits;
+        uint64 int_val = std::strtoull(p, nullptr, 10) << upper_frac_bits;
+
         p = dec + 1;
-        fixed_point128<1> base = 0.1, step = 0.1;
         int32 digits = 0;
+        fixed_point128<1> base = 0.1, step = 0.1;
+        fixed_point128<1> frac;
         while (digits++  < max_frac_digits && *p != '\0' && base) {
             fixed_point128<1> temp = base * (p[0] - '0');
-            // make them the same precision
-            temp >>= (I - 1);
-            unsigned char carry = _addcarry_u64(0, low, temp.low, &low);
-            high += temp.high + carry;
+            unsigned char carry = _addcarry_u64(0, frac.low, temp.low, &frac.low);
+            frac.high += temp.high + carry;
             base *= step;
             ++p;
         }        
-
+        frac >>= (I - 1);
+        low = frac.low;
+        high = frac.high + int_val;
         free(str);
     }
     /**
