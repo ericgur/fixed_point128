@@ -119,6 +119,7 @@ class fixed_point128
     static constexpr uint64 int_mask = max_qword_value << upper_frac_bits;
     static constexpr int32 dbl_exp_bits = 11;
     static constexpr int32 dbl_frac_bits = 52;
+    static constexpr int32 max_frac_digits = (int)(1 + F / 3.1);
 public:
     typedef fixed_point128<I> type;
     typedef fixed_point128<I>* ptr_type;
@@ -256,18 +257,19 @@ public:
         char* dec = strchr(p, '.');
         // number is an integer
         if (dec == nullptr) {
-            uint64 int_val = atoll(p);
+            uint64 int_val = std::strtoull(p, nullptr, 10);
             high = int_val << upper_frac_bits;
             free(str);
             return;
         }
-        // number is a float, get the integer part using atoll()
+        // number is a float, get the integer part using strtoull()
         *dec = '\0';
-        uint64 int_val = atoll(p);
+        uint64 int_val = std::strtoull(p, nullptr, 10);
         high = int_val << upper_frac_bits;
         p = dec + 1;
         fixed_point128<1> base = 0.1, step = 0.1;
-        while (*p != '\0' && base) {
+        int32 digits = 0;
+        while (digits++  < max_frac_digits && *p != '\0' && base) {
             fixed_point128<1> temp = base * (p[0] - '0');
             // make them the same precision
             temp >>= (I - 1);
@@ -408,6 +410,7 @@ public:
     */
     FP128_INLINE operator std::string() const {
         char str[128]; // need roughly a (meaningful) digit per 3.2 bits
+        
         char* p = str;
         fixed_point128 temp = *this;
         
@@ -423,7 +426,8 @@ public:
             *p++ = '.';
         }
         // the faster way, requires temp *= 10 not overflowing
-        while (temp) {
+        int digits = 0;
+        while (digits++ < max_frac_digits && temp) {
             if constexpr (I < 4) {
                 uint64 res[2];
                 res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
@@ -496,7 +500,7 @@ public:
     */
     FP128_INLINE fixed_point128 operator*(int32 x) const {
         fixed_point128 temp(*this);
-        return temp *= (int64)x;
+        return temp *= x;
     }
     /**
      * @brief Divides this object by the right hand side operand and returns the result.
@@ -785,9 +789,9 @@ public:
                 high = r[1];
             }
             // nom or denom are fractions
-            // x mod y =  x - y * floor(x/y)
+            // x mod res =  x - res * floor(x/res)
             else { 
-                fixed_point128 x_div_y; // x / y. 
+                fixed_point128 x_div_y; // x / res. 
                 x_div_y.high = (q[2] << upper_frac_bits) | (q[1] >> I);
                 x_div_y.low = (q[1] << upper_frac_bits) | (q[0] >> I);
                 x_div_y.sign = sign ^ other.sign;
@@ -1106,6 +1110,14 @@ public:
         static const fixed_point128 one = 1;
         return one;
     }
+    /**
+     * @brief Return an instance of fixed_point128 with the smallest positive value possible
+     * @return 1
+    */
+    FP128_INLINE static const fixed_point128& epsilon() noexcept {
+        static const fixed_point128 epsilon(1, 0, 0);
+        return epsilon;
+    }
 
 private:
     /**
@@ -1227,9 +1239,9 @@ public:
     }
 
     /**
-     * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/y.
+     * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/res.
      * @param x Nominator
-     * @param y Denominator
+     * @param res Denominator
      * @return A fixed_point128 holding the modulo value.
     */
     friend FP128_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y) noexcept
@@ -1303,6 +1315,71 @@ public:
         }
 
         return t;
+    }
+
+    /**
+     * @brief Calculate the sine function
+     * Using the Maclaurin series, the formula is:
+     * sin(x) = x - (x^3 / 3!) + (x^5 / 5!) - (x^7 / 7!)...
+     * 
+     * @param x value in Radians
+     * @param precision maximum error bits, default 0 means masimum precision
+     * @return Sine of x
+    */
+    friend FP128_INLINE fixed_point128 sin(const fixed_point128& x, int precision = 0) noexcept
+    {
+    //#define FAST_SIN
+        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
+        static const fixed_point128 pi = fixed_point128::pi();
+        static const fixed_point128 pi2 = pi << 1; // 2 * pi
+        static const fixed_point128 half_pi = pi >> 1; // pi / 2
+    #ifdef FAST_SIN
+        UNREFERENCED_PARAMETER(precision);
+
+        static const fixed_point128 c[] = {
+            fixed_point128(1.0 /   (2 * 3)), // 1 / 3!
+            fixed_point128(1.0 /   (4 * 5)), // 1 / 5!
+            fixed_point128(1.0 /   (6 * 7)),  // 1 / 7!
+            fixed_point128(1.0 /   (8 * 9)),  // 1 / 9!
+            fixed_point128(1.0 / (10 * 11)),  // 1 / 11!
+            fixed_point128(1.0 / (12 * 13)),  // 1 / 13!
+            fixed_point128(1.0 / (14 * 15)),  // 1 / 15!
+            fixed_point128(1.0 / (16 * 17)),  // 1 / 17!
+            fixed_point128(1.0 / (18 * 19)),  // 1 / 19!
+            fixed_point128(1.0 / (20 * 21)),  // 1 / 21!
+        };
+        constexpr int series_len = sizeof(c) / sizeof(fixed_point128);
+    #endif        
+
+        // first part of the series
+        fixed_point128 res = fmod(x, pi2);
+        if (res > pi)
+            res -= pi2;
+        // bring closest to zero as possible to minimize the error
+        if (res > half_pi)
+            res = pi - res;
+        else if (res < -half_pi)
+            res = -(pi + res);
+        
+        const fixed_point128 xx = res * res;
+        fixed_point128 temp = res;
+    #ifdef FAST_SIN
+        for (int i = 0; i < series_len; ++i) {
+            temp *= c[i] * xx;
+            res += (i & 1) ? temp : -temp;
+        }
+    #else 
+        fixed_point128 max_error = (precision == 0) ? fixed_point128::epsilon() : fixed_point128::epsilon() << (precision);
+        int64 k = 0;
+        for (int i = 0; temp >= max_error; ++i) {
+            k += 2;
+            double fact = 1.0 / (k * (k + 1));
+            temp *= xx * fixed_point128(fact);
+            res += (i & 1) ? temp : -temp;
+        }
+
+    #endif
+        return res;
     }
 };
 /**

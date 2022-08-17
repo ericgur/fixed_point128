@@ -976,8 +976,7 @@ public:
 
 		fpml::fixed_point<B, I, F> xx = x_ * x_;
 
-		fpml::fixed_point<B, I, F> y = - xx * 
-			fpml::fixed_point<B, I, F>(1. / (2 * 3 * 4 * 5 * 6 * 7));
+		fpml::fixed_point<B, I, F> y = - xx * fpml::fixed_point<B, I, F>(1. / (2 * 3 * 4 * 5 * 6 * 7));
 		y += fpml::fixed_point<B, I, F>(1. / (2 * 3 * 4 * 5));
 		y *= xx;
 		y -= fpml::fixed_point<B, I, F>(1. / (2 * 3));

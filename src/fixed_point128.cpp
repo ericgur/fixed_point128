@@ -213,9 +213,11 @@ void test_functions()
 {
     printf("\nTest functions\n");
     double values[] = {3.45, -7.5, 0.27};
+    std::string s;
+    fixed_point128<10> f1;
     int len = sizeof(values) / sizeof(double);
     for (int i = 0; i < len; ++i) {
-        fixed_point128<10> f1 = values[i];
+        f1 = values[i];
         printf("f1: %0.15lf\n", (double)f1);
         printf("floor(f1): %0.15lf\n", (double)floor(f1));
         printf("ciel(f1): %0.15lf\n", (double)ciel(f1));
@@ -228,8 +230,27 @@ void test_functions()
         printf("f2: %0.15lf\n", (double)f2);
         printf("fmod(f1, f2): %0.15lf\n", (double)fmod(f1, f2));
         printf("sqrt(f1): %0.15lf\n", (double)sqrt(f1));
+
         printf("\n");
     }
+
+    fixed_point128<10> fvalues[] = {
+        f1.pi(),
+        f1.pi() >> 1,
+        f1.pi() >> 2,
+        (-f1.pi()) >> 2
+    };
+    
+    len = sizeof(fvalues) / sizeof(fixed_point128<10>);
+    for (int i = 0; i < len; ++i) {
+        f1 = fvalues[i];
+        s = f1;
+        printf("f1: %s\n", s.c_str());
+        s = sin(f1);
+        printf("sin(f1): %s\n", s.c_str());
+    }
+    
+    printf("\n");
 }
 
 void test_comparison()
