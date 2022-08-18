@@ -34,7 +34,7 @@
 
 #include <intrin.h>
 #include <string>
-#include <exception>
+#include <cstdlib>
 #include <stdexcept>
 
 typedef __int64 int64;
@@ -236,6 +236,7 @@ public:
     }
     /**
      * @brief Constructor from const char* (C string).
+     * Accurate to 37 digits after the decimal point.
      * Allows creating very high precision values. Much slower than the other constructors.
      * @param x Input string
     */
@@ -255,20 +256,22 @@ public:
         char* dec = strchr(p, '.');
         // number is an integer
         if (dec == nullptr) {
-            uint64 int_val = std::strtoull(p, nullptr, 10);
-            high = int_val << upper_frac_bits;
+            high = std::strtoull(p, nullptr, 10) << upper_frac_bits;
             free(str);
             return;
         }
+
         // number is a float, get the integer part using strtoull()
         *dec = '\0';
         uint64 int_val = std::strtoull(p, nullptr, 10) << upper_frac_bits;
 
         p = dec + 1;
         int32 digits = 0;
-        fixed_point128<1> base = 0.1, step = 0.1;
+        fixed_point128<1> base(0xCCCCCCCCCCCCCCCD, 0x0CCCCCCCCCCCCCCC, 0); // maximum precision to represent 0.1
+        fixed_point128<1> step = base;
         fixed_point128<1> frac;
-        while (digits++  < max_frac_digits && *p != '\0' && base) {
+
+        while (digits++ < max_frac_digits && *p != '\0' && base) {
             fixed_point128<1> temp = base * (p[0] - '0');
             unsigned char carry = _addcarry_u64(0, frac.low, temp.low, &frac.low);
             frac.high += temp.high + carry;
@@ -282,6 +285,7 @@ public:
     }
     /**
      * @brief Constructor from std::string.
+     * Accurate to 37 digits after the decimal point.
      * Allows creating very high precision values. Much slower than the other constructors.
      * @param x Input string
     */
@@ -418,7 +422,7 @@ public:
             *p++ = '-';
 
         uint64 integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
-        p += snprintf(p, sizeof(str) + p - str, "%lld", integer);
+        p += snprintf(p, sizeof(str) + p - str, "%llu", integer);
         temp.high &= ~int_mask; // remove the integer part
         // check if temp has additional digits (not zero)
         if (temp) {
@@ -431,7 +435,7 @@ public:
                 uint64 res[2];
                 res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
                 // extract the integer part
-                integer = shift_right128(res[0], res[1], (uint8)upper_frac_bits);
+                integer = shift_right128(res[0], res[1], upper_frac_bits);
                 temp *= 10; // move another digit to the integer area
             }
             else {
@@ -642,12 +646,18 @@ public:
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F
         static constexpr int32 index = F >> 6; // / 64;
-        static constexpr int32 lsb = F & FP128_MAX_VALUE_64(6);
+        static constexpr int32 lsb = F & FP128_MAX_VALUE_64(6); // bit within the 64bit data pointed by res[index]
+        static constexpr uint64 half = 1ull << (lsb - 1);       // used for rounding
+        bool need_rounding = (res[index] & half) != 0;
 
         // copy block #1 (lowest)
         low = shift_right128(res[index], res[index + 1], lsb);
         high = shift_right128(res[index+1], res[index + 2], lsb);
 
+        if (need_rounding) {
+            low += 1;
+            high += low == 0;
+        }
         // set the sign
         sign ^= other.sign;
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
