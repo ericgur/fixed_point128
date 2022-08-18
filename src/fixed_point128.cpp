@@ -241,13 +241,15 @@ void test_functions()
         (-fixed_point128<4>::pi()) >> 2
     };
     fixed_point128<4> f4;
-    len = sizeof(fvalues) / sizeof(fixed_point128<10>);
+    len = sizeof(fvalues) / sizeof(fvalues[0]);
     for (int i = 0; i < len; ++i) {
         f4 = fvalues[i];
         s = f4;
         printf("f4: %s\n", s.c_str());
         s = sin(f4);
         printf("sin(f4): %s\n", s.c_str());
+        s = cos(f4);
+        printf("cos(f4): %s\n", s.c_str());
     }
     
     printf("\n");

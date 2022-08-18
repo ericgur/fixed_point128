@@ -70,8 +70,15 @@ typedef unsigned char uint8;
 
 namespace fp128 {
 
+// utility functions
+template<typename T>
+constexpr int array_length(const T& a) {
+    return sizeof(a) / sizeof(a[0]);
+}
+
 // Forward declarations
 FP128_INLINE int32 div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m, int64 n);
+
 
 /**
  * @brief 128 bit fixed point class template.
@@ -745,7 +752,7 @@ public:
         uint64 nom[4] = {0, 0, low, high};
         uint64 denom[2] = {other.low, other.high};
         uint64 q[4] = {0}, *r = nullptr; // don't need the reminder
-        if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, sizeof(nom) / sizeof(uint32), sizeof(denom) / sizeof(uint32))) {
+        if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
             // result in q needs to shift left by F
             high = shift_right128(q[1], q[2], I);
             low = shift_right128(q[0], q[1], I);
@@ -790,7 +797,7 @@ public:
         uint64 q[4] = {0}, r[4] = {0};
         
         //do the division in with positive numbers
-        if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, sizeof(nom) / sizeof(uint32), sizeof(denom) / sizeof(uint32))) {
+        if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
             // simple case, both are integers (fractions is zero)
             if (is_int() && other.is_int()) {
                 // result is in r (remainder) needs to shift left by F
@@ -1325,72 +1332,149 @@ public:
 
         return t;
     }
+    friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
+    {
+        static const fixed_point128 c[] = {
+            fixed_point128(0),
+            fixed_point128(1),                                           // 1 /  1!
+            fixed_point128(0.5),                                         // 1 /  2!
+            fixed_point128("0.166666666666666666666666666666666666667"), // 1 /  3!
+            fixed_point128("0.041666666666666666666666666666666666667"), // 1 /  4!
+            fixed_point128("0.008333333333333333333333333333333333333"), // 1 /  5!
+            fixed_point128("0.001388888888888888888888888888888888889"), // 1 /  6!
+            fixed_point128("0.000198412698412698412698412698412698413"), // 1 /  7!
+            fixed_point128("0.000024801587301587301587301587301587302"), // 1 /  8!
+            fixed_point128("0.000002755731922398589065255731922398589"), // 1 /  9!
+            fixed_point128("0.000000275573192239858906525573192239859"), // 1 / 10!
+            fixed_point128("0.000000025052108385441718775052108385442"), // 1 / 11!
+            fixed_point128("0.000000002087675698786809897921009032120"), // 1 / 12!
+            fixed_point128("0.000000000160590438368216145993923771702"), // 1 / 13!
+            fixed_point128("0.000000000011470745597729724713851697979"), // 1 / 14!
+            fixed_point128("0.000000000000764716373181981647590113199"), // 1 / 15!
+            fixed_point128("0.000000000000047794773323873852974382075"), // 1 / 16!
+            fixed_point128("0.000000000000002811457254345520763198946"), // 1 / 17!
+            fixed_point128("0.000000000000000156192069685862264622164"), // 1 / 18!
+            fixed_point128("0.000000000000000008220635246624329716956"), // 1 / 19!
+            fixed_point128("0.000000000000000000411031762331216485848"), // 1 / 20!
+            fixed_point128("0.000000000000000000019572941063391261231"), // 1 / 21!
+            fixed_point128("0.000000000000000000000889679139245057329"), // 1 / 22!
+            fixed_point128("0.000000000000000000000038681701706306840"), // 1 / 23!
+            fixed_point128("0.000000000000000000000001611737571096118"), // 1 / 24!
+            fixed_point128("0.000000000000000000000000064469502843845"), // 1 / 25!
+            fixed_point128("0.000000000000000000000000002479596263225"), // 1 / 26!
+            fixed_point128("0.000000000000000000000000000091836898638"), // 1 / 27!
+            fixed_point128("0.000000000000000000000000000003279889237"), // 1 / 28!
+            fixed_point128("0.000000000000000000000000000000113099628"), // 1 / 29!
+            fixed_point128("0.000000000000000000000000000000003769988"), // 1 / 30!
+            fixed_point128("0.000000000000000000000000000000000121613"), // 1 / 31!
+            fixed_point128("0.000000000000000000000000000000000003800"), // 1 / 32!
+            fixed_point128("0.000000000000000000000000000000000000115"), // 1 / 33!
+            fixed_point128("0.000000000000000000000000000000000000003")  // 1 / 34!
+        };
+        constexpr int series_len = array_length(c);
 
+        if (x > 0 && x < series_len) {
+            res = c[x];
+        }
+        else {
+            res = 0;
+        }
+        
+    }
     /**
      * @brief Calculate the sine function
-     * Using the Maclaurin series, the formula is:
-     * sin(x) = x - (x^3 / 3!) + (x^5 / 5!) - (x^7 / 7!)...
+     * Using the Maclaurin series expansion, the formula is:
+     * sin(x) = x - (x^3 / 3!) + (x^5 / 5!) - (x^7 / 7!) + ...
      * 
      * @param x value in Radians
      * @param precision maximum error bits, default 0 means masimum precision
      * @return Sine of x
     */
-    friend FP128_INLINE fixed_point128 sin(const fixed_point128& x, int precision = 0) noexcept
+    friend FP128_INLINE fixed_point128 sin(const fixed_point128& x) noexcept
     {
-    //#define FAST_SIN
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
         static const fixed_point128 pi = fixed_point128::pi();
         static const fixed_point128 pi2 = pi << 1; // 2 * pi
         static const fixed_point128 half_pi = pi >> 1; // pi / 2
-    #ifdef FAST_SIN
-        UNREFERENCED_PARAMETER(precision);
-
-        static const fixed_point128 c[] = {
-            fixed_point128(1.0 /   (2 * 3)), // 1 / 3!
-            fixed_point128(1.0 /   (4 * 5)), // 1 / 5!
-            fixed_point128(1.0 /   (6 * 7)),  // 1 / 7!
-            fixed_point128(1.0 /   (8 * 9)),  // 1 / 9!
-            fixed_point128(1.0 / (10 * 11)),  // 1 / 11!
-            fixed_point128(1.0 / (12 * 13)),  // 1 / 13!
-            fixed_point128(1.0 / (14 * 15)),  // 1 / 15!
-            fixed_point128(1.0 / (16 * 17)),  // 1 / 17!
-            fixed_point128(1.0 / (18 * 19)),  // 1 / 19!
-            fixed_point128(1.0 / (20 * 21)),  // 1 / 21!
-        };
-        constexpr int series_len = sizeof(c) / sizeof(fixed_point128);
-    #endif        
 
         // first part of the series
-        fixed_point128 res = fmod(x, pi2);
-        if (res > pi)
-            res -= pi2;
+        fixed_point128 res = x;
+        // move to the range  [-pi, pi]
+        if (res > pi || res < -pi) {
+            res = fmod(x, pi2);
+            if (res > pi)
+                res -= pi2;
+        }
+
         // bring closest to zero as possible to minimize the error
+        // move to the range [-1/2pi, 1/2pi]
         if (res > half_pi)
             res = pi - res;
         else if (res < -half_pi)
             res = -(pi + res);
         
         const fixed_point128 xx = res * res;
-        fixed_point128 temp = res;
-    #ifdef FAST_SIN
-        for (int i = 0; i < series_len; ++i) {
-            temp *= c[i] * xx;
-            res += (i & 1) ? temp : -temp;
-        }
-    #else 
-        fixed_point128 max_error = (precision == 0) ? fixed_point128::epsilon() : fixed_point128::epsilon() << (precision);
-        int64 k = 0;
-        for (int i = 0; temp >= max_error; ++i) {
-            k += 2;
-            double fact = 1.0 / (k * (k + 1));
-            temp *= xx * fixed_point128(fact);
-            res += (i & 1) ? temp : -temp;
+        fixed_point128 elem_denom, elem_nom = res;
+
+        for (int i = 3, sign = 1; ; i += 2, sign = 1 - sign) {
+            elem_nom *= xx;
+            fact_reciprocal(i, elem_denom);
+            if (!elem_denom)
+                break;
+            fixed_point128 elem = elem_nom * elem_denom; // next element in the series
+            res += (sign) ? -elem : elem;
         }
 
-    #endif
         return res;
     }
-};
+    /**
+     * @brief Calculate the cosine function
+     * Using the Maclaurin series expansion, the formula is:
+     * cos(x) = 1 - (x^2 / 2!) + (x^4 / 4!) - (x^6 / 6!) + ...
+     *
+     * @param x value in Radians
+     * @return Cosine of x
+    */
+    friend FP128_INLINE fixed_point128 cos(const fixed_point128& x) noexcept
+    {
+        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cos()!");
+        static const fixed_point128 pi = fixed_point128::pi();
+        static const fixed_point128 pi2 = pi << 1; // 2 * pi
+        static const fixed_point128 half_pi = pi >> 1; // pi / 2
+
+        // first part of the series
+        fixed_point128 res = x;
+        // move to the range  [-pi, pi]
+        if (res > pi || res < -pi) {
+            res = fmod(x, pi2);
+            if (res > pi)
+                res -= pi2;
+        }
+
+        // bring closest to zero as possible to minimize the error
+        // move to the range [-1/2pi, 1/2pi]
+        if (res > half_pi)
+            res = pi - res;
+        else if (res < -half_pi)
+            res = -(pi + res);
+
+        const fixed_point128 xx = res * res;
+        res = 1; // first element in the series
+        fixed_point128 elem_denom, elem_nom = res;
+
+        for (int i = 2, sign = 1; ; i += 2, sign = 1 - sign) {
+            elem_nom *= xx;
+            fact_reciprocal(i, elem_denom);
+            if (!elem_denom)
+                break;
+            fixed_point128 elem = elem_nom * elem_denom; // next element in the series
+            res += (sign) ? -elem : elem;
+        }
+
+        return res;
+    }
+}; //class fixed_point128
+
 /**
  * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
  * @param q (output) Pointer to receive the quote
