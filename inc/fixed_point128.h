@@ -339,14 +339,19 @@ public:
             // shift left by I2 - I bits
             int shift = I2 - I;
             low = other.low << shift;
-            high = shift_right128(other.low, other.high, (uint8)(64 - shift));
+            high = shift_left128(other.low, other.high, (uint8)(64 - shift));
         }
         // other has more integer bits and less fraction bits
         else { // I > I2
             // shift right by I - I2 bits
             int shift = I - I2;
+            bool need_rounding = (other.low & (1ull << (shift - 1))) != 0;
             low = shift_right128(other.low, other.high, (uint8)shift);
             high = other.high >> shift;
+            if (need_rounding) {
+                ++low;
+                high += low == 0;
+            }
         }
 
         return *this;
@@ -413,46 +418,18 @@ public:
         return (sign) ? -res : res;
     }
     /**
-     * @brief operator std::string - converts to a std::string (slow)
-     *                 string holds all fraction bits.
+     * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
     */
     FP128_INLINE operator std::string() const {
-        char str[128]; // need roughly a (meaningful) digit per 3.2 bits
-        
-        char* p = str;
-        fixed_point128 temp = *this;
-        
-        //number is negative
-        if (temp.sign)
-            *p++ = '-';
-
-        uint64 integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
-        p += snprintf(p, sizeof(str) + p - str, "%llu", integer);
-        temp.high &= ~int_mask; // remove the integer part
-        // check if temp has additional digits (not zero)
-        if (temp) {
-            *p++ = '.';
-        }
-        // the faster way, requires temp *= 10 not overflowing
-        int digits = 0;
-        while (digits++ < max_frac_digits && temp) {
-            if constexpr (I < 4) {
-                uint64 res[2];
-                res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
-                // extract the integer part
-                integer = shift_right128(res[0], res[1], upper_frac_bits);
-                temp *= 10; // move another digit to the integer area
-            }
-            else {
-                temp *= 10; // move another digit to the integer area
-                integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
-            }
-            *p++ = '0' + (char)integer;
-            temp.high &= ~int_mask;
-        }
-        *p = '\0';
-        return str;
+        return fp2s();
+    }
+    /**
+     * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
+     * @return object string representation
+    */
+    explicit FP128_INLINE operator char*() const {
+        return fp2s();
     }
     //
     // math operators
@@ -661,7 +638,7 @@ public:
         high = shift_right128(res[index+1], res[index + 2], lsb);
 
         if (need_rounding) {
-            low += 1;
+            ++low;
             high += low == 0;
         }
         // set the sign
@@ -752,9 +729,17 @@ public:
         uint64 denom[2] = {other.low, other.high};
         uint64 q[4] = {0}, *r = nullptr; // don't need the reminder
         if (0 == div_32bit((uint32*)q, (uint32*)r, (uint32*)nom, (uint32*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
-            // result in q needs to shift left by F
+            static constexpr uint64 half = 1ull << (I - 1);  // used for rounding
+            bool need_rounding = (q[0] & half) != 0;
+            // result in q needs to shifted left by F
+            // shifting right by 128-F is simpler.
             high = shift_right128(q[1], q[2], I);
             low = shift_right128(q[0], q[1], I);
+            if (need_rounding) {
+                ++low;
+                high += low == 0;
+            }
+
             sign ^= other.sign;
             // set sign to 0 when both low and high are zero (avoid having negative zero value)
             sign &= (0 != low || 0 != high);
@@ -837,14 +822,14 @@ public:
     FP128_INLINE fixed_point128& operator>>=(int32 shift) {
         // 0-64 bit shift - most common
         if (shift <= 64) {
-            low = shift_right128(low, high, (uint8)shift);
+            low = shift_right128_round(low, high, (uint8)shift);
             high >>= shift;
         }
         else if (shift >= 128) {
             low = high = 0;
         }
         else if (shift >= 64) {
-            low = high >> (shift - 64);
+            low = shift_right64_round(high, shift - 64);
             high = 0;
         }
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
@@ -1136,6 +1121,49 @@ public:
 
 private:
     /**
+     * @brief Converts this obejct to a C string.
+     * The returned string is a statically thread-allocated buffer.
+     * Additional calls to this function from the same thread, overwrite the previosu result.
+     * @return C string with describing the value of the object.
+    */
+    FP128_INLINE char* fp2s() const {
+        static thread_local char str[128]; // need roughly a (meaningful) digit per 3.2 bits
+
+        char* p = str;
+        fixed_point128 temp = *this;
+
+        //number is negative
+        if (temp.sign)
+            *p++ = '-';
+
+        uint64 integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
+        p += snprintf(p, sizeof(str) + p - str, "%llu", integer);
+        temp.high &= ~int_mask; // remove the integer part
+        // check if temp has additional digits (not zero)
+        if (temp) {
+            *p++ = '.';
+        }
+        // the faster way, requires temp *= 10 not overflowing
+        int digits = 0;
+        while (digits++ < max_frac_digits && temp) {
+            if constexpr (I < 4) {
+                uint64 res[2];
+                res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
+                // extract the integer part
+                integer = shift_right128_round(res[0], res[1], upper_frac_bits);
+                temp *= 10; // move another digit to the integer area
+            }
+            else {
+                temp *= 10; // move another digit to the integer area
+                integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
+            }
+            *p++ = '0' + (char)integer;
+            temp.high &= ~int_mask;
+        }
+        *p = '\0';
+        return str;
+    }
+    /**
      * @brief Adds 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
      * @param other The right side of the addition operation
      * @return This object.
@@ -1179,9 +1207,22 @@ private:
         sign &= (0 != low || 0 != high);
         return *this;
     }
-
     /**
-     * @brief Right shift a 128 bit ineteger.
+     * @brief shift right 'x' by 'shift' bits with rounding
+     * Undefiend behavior when shift is outside the range [0, 64]
+     * @param x value to shift
+     * @param shift how many bits to shift
+     * @return result of 'x' right shifed by 'shift'. 
+    */
+    static inline uint64 shift_right64_round(uint64 x, int shift)
+    {
+        if (x < 1 || x > 63)
+            return x;
+        x += 1ull << (shift - 1);
+        return x >> shift;
+    }
+    /**
+     * @brief Right shift a 128 bit integer.
      * @param l Low QWORD
      * @param h High QWORD
      * @param shift Bits to shift
@@ -1192,7 +1233,19 @@ private:
         return (l >> shift) | (h << (64 - shift));
     }
     /**
-     * @brief Left shift a 128 bit ineteger.
+     * @brief Right shift a 128 bit integer with rounding.
+     * @param l Low QWORD
+     * @param h High QWORD
+     * @param shift Bits to shift
+     * @return Lower 64 bit of the result
+    */
+    static inline uint64 shift_right128_round(uint64 l, uint64 h, int shift)
+    {   
+        bool need_rounding = (l & 1ull << (shift - 1)) != 0;
+        return need_rounding + ((l >> shift) | (h << (64 - shift)));
+    }
+    /**
+     * @brief Left shift a 128 bit integer.
      * @param l Low QWORD
      * @param h High QWORD
      * @param shift Bits to shift

@@ -54,31 +54,23 @@ void test_conversion()
     printf("Pi (double): %0.40lf\n", 3.14159265358979323846264338327950288419716939937510);
     printf("f1 = \"3.14159265358979323846264338327950288419716939937510\"\n"),
         f1 = "3.14159265358979323846264338327950288419716939937510"; // 50 first digits of pi
-    std::string s = f1;
-    printf("f1: %s\n", s.c_str());
+
+    printf("f1: %s\n", (char*)f1);
     f1 = f1.pi();
-    s = f1;
-    printf("fixed_point128<4>.pi(): %s\n", s.c_str());
+    printf("fixed_point128<4>.pi(): %s\n", (char*)f1);
     f1 = f1.e();
-    s = f1;
-    printf("fixed_point128<4>.e(): %s\n", s.c_str());
+    printf("fixed_point128<4>.e(): %s\n", (char*)f1);
     f1 = f1.one();
-    s = f1;
-    printf("fixed_point128<4>.one(): %s\n", s.c_str());
+    printf("fixed_point128<4>.one(): %s\n", (char*)f1);
     f1 = f1.pi();
     printf("f3 = f1\n");
     f3 = f1;
-    s = f1;
-    printf("f1: %s\n", s.c_str());
-    s = f3;
-    printf("f3: %s\n", s.c_str());
+    printf("f1: %s\n", (char*)f1);
+    printf("f3: %s\n", (char*)f3);
     printf("f1 = f3\n");
     f1 = f3;
-    s = f1;
-    printf("f1: %s\n", s.c_str());
-    s = f3;
-    printf("f3: %s\n", s.c_str());
-
+    printf("f1: %s\n", (char*)f1);
+    printf("f3: %s\n", (char*)f3);
     printf("\n");
 }
 
@@ -198,14 +190,13 @@ void test_string()
     printf("\nTest string\n");
     double val = 1.0 / (3.0 * (1 << 21));
     fixed_point128<5> f1 = val;
-    std::string s = f1;
-    printf("double val:\n%0.80lf\n", val);
-    printf("f1:\n%s\n", s.c_str());
+
+    printf("double val:\n%0.38lf\n", val);
+    printf("f1:\n%s\n", (char*)f1);
     val = -5.12345678901234567890;
     f1 = val;
-    s = f1;
-    printf("double val:\n%0.80lf\n", val);
-    printf("f1:\n%s\n", s.c_str());
+    printf("double val:\n%0.38lf\n", val);
+    printf("f1:\n%s\n", (char*)f1);
 }
 
 
