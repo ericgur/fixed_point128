@@ -240,6 +240,7 @@ void test_functions()
         fixed_point128<4>::pi() >> 2,
         (-fixed_point128<4>::pi()) >> 2
     };
+
     fixed_point128<4> f4;
     len = sizeof(fvalues) / sizeof(fvalues[0]);
     for (int i = 0; i < len; ++i) {
@@ -348,7 +349,6 @@ void bench()
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64)(iterations / totalTime);
     print_ips("Subtraction", ips);
-
 
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
