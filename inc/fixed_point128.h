@@ -310,7 +310,6 @@ public:
         low(l), high(h) ,sign(s) {
         FP128_ASSERT(sign < 2);
     }
-
     /**
      * @brief Assignment operator
      * @param other Object to copy from 
@@ -1335,7 +1334,7 @@ public:
     friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
     {
         static const fixed_point128 c[] = {
-            fixed_point128(0),
+            fixed_point128(0),                                           // place holder for faster/simpler access
             fixed_point128(1),                                           // 1 /  1!
             fixed_point128(0.5),                                         // 1 /  2!
             fixed_point128("0.166666666666666666666666666666666666667"), // 1 /  3!
@@ -1379,7 +1378,6 @@ public:
         else {
             res = 0;
         }
-        
     }
     /**
      * @brief Calculate the sine function
@@ -1475,6 +1473,7 @@ public:
     }
 }; //class fixed_point128
 
+
 /**
  * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
  * @param q (output) Pointer to receive the quote
@@ -1516,7 +1515,7 @@ int32 div_32bit(uint32* q, uint32* r, const uint32* u, const uint32* v, int64 m,
     // Normalize by shifting v left just enough so that its high-order bit is on, and shift u left the same amount.
     // We may have to append a high-order digit on the dividend; we do that unconditionally.
     s = (uint64)__lzcnt(v[n - 1]); // 0 <= s <= 32. 
-    s_comp = 32 - s;
+    s_comp = 32 - s; // complementry of the shift value to 32
     
     vn = (uint32*)_malloca(sizeof(uint32) * n);
     if (nullptr == vn) return 1;
