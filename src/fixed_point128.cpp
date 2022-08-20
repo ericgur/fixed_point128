@@ -295,7 +295,7 @@ void test_comparison()
     }
 }
 
-void print_ips(const char* name, int64 ips)
+void print_ips(const char* name, int64_t ips)
 {
     if (ips < 1000) {
         printf("%s: %lld per second\n", name, ips);
@@ -320,7 +320,7 @@ void bench()
     QueryPerformanceFrequency(&li);
     double totalTime, frequency = double(li.QuadPart);
     int iterations = 1000000000;
-    uint64 ips = 0;
+    uint64_t ips = 0;
     fixed_point128<10> f1 = fixed_point128<10>::pi();
     fixed_point128<10> f2 = fixed_point128<10>::e();
     fixed_point128<10> f3;
@@ -330,7 +330,7 @@ void bench()
         f3 = f1 + f2;
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
-    ips = (uint64)(iterations / totalTime);
+    ips = (uint64_t)(iterations / totalTime);
     print_ips("Addition", ips);
 
     QueryPerformanceCounter(&time_start);
@@ -338,7 +338,7 @@ void bench()
         f3 = f2 - f1;
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
-    ips = (uint64)(iterations / totalTime);
+    ips = (uint64_t)(iterations / totalTime);
     print_ips("Subtraction", ips);
 
     QueryPerformanceCounter(&time_start);
@@ -346,18 +346,17 @@ void bench()
         f3 = f1 * f2;
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
-    ips = (uint64)(iterations / totalTime);
+    ips = (uint64_t)(iterations / totalTime);
     print_ips("Multiplication", ips);
 
-
     // slower functions
-    iterations /= 10;
+    iterations /= 50;
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
         f3 = f1 / f2;
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
-    ips = (uint64)(iterations / totalTime);
+    ips = (uint64_t)(iterations / totalTime);
     print_ips("Division", ips);
 }
 
