@@ -41,7 +41,7 @@
 /***********************************************************************************
 *                                  Build Options
 ************************************************************************************/
-// uncomment this to force the functions to not become inline (useful for profiling a specific function)
+// Set to TRUE to disable function inlining - useful for profiling a specific function
 #define FP128_DISABLE_INLINE FALSE
 
 /***********************************************************************************
@@ -158,7 +158,7 @@ public:
     */
     fixed_point128(double x) noexcept {
         // brute convert to uint64_t for easy bit manipulation
-        uint64_t i = *((uint64_t*)(&x));
+        const uint64_t i = *((uint64_t*)(&x));
         // very common case
         if (i == 0) {
             low = high = 0;
@@ -167,7 +167,7 @@ public:
         }
 
         sign = FP128_GET_BIT(i, 63);
-        int32_t e = FP128_GET_BITS(i, dbl_frac_bits, dbl_exp_bits) - 1023;
+        const int32_t e = FP128_GET_BITS(i, dbl_frac_bits, dbl_exp_bits) - 1023;
         uint64_t f = (i & FP128_MAX_VALUE_64(dbl_frac_bits));
         
         // overflow which catches NaN and Inf
@@ -352,7 +352,7 @@ public:
         else { // I > I2
             // shift right by I - I2 bits
             int shift = I - I2;
-            bool need_rounding = (other.low & (1ull << (shift - 1))) != 0;
+            const bool need_rounding = (other.low & (1ull << (shift - 1))) != 0;
             low = shift_right128(other.low, other.high, (uint8_t)shift);
             high = other.high >> shift;
             if (need_rounding) {
@@ -737,7 +737,7 @@ public:
         uint64_t q[4] = {0}, *r = nullptr; // don't need the reminder
         if (0 == div_32bit((uint32_t*)q, (uint32_t*)r, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
             static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
-            bool need_rounding = (q[0] & half) != 0;
+            const bool need_rounding = (q[0] & half) != 0;
             // result in q needs to shifted left by F
             // shifting right by 128-F is simpler.
             high = shift_right128(q[1], q[2], I);
@@ -762,7 +762,7 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator/=(double x) {
-        uint64_t i = *((uint64_t*)(&x));
+        const uint64_t i = *((uint64_t*)(&x));
         // infinity
         if (0 == i) FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
 
@@ -1128,13 +1128,13 @@ public:
 
 private:
     /**
-     * @brief Converts this obejct to a C string.
+     * @brief Converts this object to a C string.
      * The returned string is a statically thread-allocated buffer.
-     * Additional calls to this function from the same thread, overwrite the previosu result.
+     * Additional calls to this function from the same thread, overwrite the previous result.
      * @return C string with describing the value of the object.
     */
     FP128_INLINE char* fp2s() const {
-        static thread_local char str[128]; // need roughly a (meaningful) digit per 3.2 bits
+        static thread_local char str[128]; // need roughly a (meaningful) decimal digit per 3.2 bits
 
         char* p = str;
         fixed_point128 temp = *this;
@@ -1554,13 +1554,16 @@ public:
 */
 int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n)
 {
-    const uint64_t b = 1ull << 32; // Number base (32 bits).
-    const uint64_t mask = b - 1;
+    constexpr uint64_t b = 1ull << 32; // Number base (32 bits).
+    constexpr uint64_t mask = b - 1;
     uint32_t* un, * vn;            // Normalized form of u, v.
     uint64_t qhat;                 // Estimated quotient digit.
     uint64_t rhat;                 // A remainder.
     uint64_t p;                    // Product of two digits.
     int64_t s, s_comp, i, j, t, k;
+    if (v == nullptr || u == nullptr || q == nullptr)
+        return 1;
+
     // shrink the arrays to avoid extra work on small numbers
     while (m >= 0 && u[m - 1] == 0) --m;
     while (n >= 0 && v[n - 1] == 0) --n;
