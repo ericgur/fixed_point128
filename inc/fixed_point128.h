@@ -38,7 +38,15 @@
 #include <cstdlib>
 #include <stdexcept>
 
-// useful macros
+/***********************************************************************************
+*                                  Build Options
+************************************************************************************/
+// uncomment this to force the functions to not become inline (useful for profiling a specific function)
+#define FP128_DISABLE_INLINE FALSE
+
+/***********************************************************************************
+*                                  Macros
+************************************************************************************/
 #define FP128_ONE_SHIFT(x)          (1ull << (x))
 #define FP128_MAX_VALUE_64(x)       (((uint64_t)-1ll) >> (64 - x))
 #define FP128_GET_BIT(x, n)         (((x) >> (n)) & 1)
@@ -52,9 +60,7 @@
     #define FP128_ASSERT(x)
 #endif // _DEBUG
 
-// uncomment this to force the functions to not become inline (useful for profiling a specific function)
-//#define FP128_DISABLE_INLINE
-#ifdef FP128_DISABLE_INLINE
+#if FP128_DISABLE_INLINE != FALSE
 #define FP128_INLINE __declspec(noinline)
 #else
 #define FP128_INLINE __forceinline
@@ -62,15 +68,24 @@
 
 namespace fp128 {
 
-// utility functions
+/***********************************************************************************
+*                                  Utility Functions
+************************************************************************************/
+
 template<typename T>
 constexpr int array_length(const T& a) {
     return sizeof(a) / sizeof(a[0]);
 }
 
-// Forward declarations
+/***********************************************************************************
+*                                  Forward declarations
+************************************************************************************/
+
 FP128_INLINE int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n);
 
+/***********************************************************************************
+*                                  Main Code
+************************************************************************************/
 
 /**
  * @brief 128 bit fixed point class template.
