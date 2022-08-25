@@ -203,7 +203,7 @@ void test_string()
 void test_functions()
 {
     printf("\nTest functions\n");
-    double values[] = {3.45, -7.5, 0.27};
+    const double values[] = {3.45, -7.5, 0.27};
     std::string s;
     fixed_point128<10> f1;
     int len = sizeof(values) / sizeof(double);
@@ -244,6 +244,20 @@ void test_functions()
         printf("cos(f4): %s\n", s.c_str());
     }
     
+    fixed_point128<16> fvalues2[] = {
+        fixed_point128<16>::one(),
+        fixed_point128<16>(2),
+        fixed_point128<16>(0.1)
+    };
+    len = sizeof(fvalues2) / sizeof(fvalues2[0]);
+    for (int i = 0; i < len; ++i) {
+        fixed_point128<16> f5 = fvalues2[i];
+        s = f5;
+        printf("f5: %s\n", s.c_str());
+        s = exp(f5);
+        printf("exp(f4): %s\n", s.c_str());
+    }
+
     printf("\n");
 }
 
@@ -318,7 +332,8 @@ void bench()
 {
     LARGE_INTEGER li, time_start, time_end;
     QueryPerformanceFrequency(&li);
-    double totalTime, frequency = double(li.QuadPart);
+    double totalTime = 0;
+    const double frequency = double(li.QuadPart);
     int iterations = 1000000000;
     uint64_t ips = 0;
     fixed_point128<10> f1 = fixed_point128<10>::pi();
