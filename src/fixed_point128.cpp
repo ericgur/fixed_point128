@@ -144,8 +144,11 @@ void test_division()
     printf("f1: %0.15lf\n", (double)f1);
     fixed_point128<20> f2 = f1 / 2.0;
     printf("f2 = f1 / 2.0: %0.15lf\n", (double)f2);
-    f2 /= 32.0;
+    f2 = f1 / 32.0;
     printf("f2 = f1 / 32.0: %0.15lf\n", (double)f2);
+    f2 = f1 / 3.0;
+    printf("f2 = f1 / 3.0: %0.15lf\n", (double)f2);
+
     f1 = 0.01 / 3.0;
     printf("f1 = 0.01 / 3.0 %0.15lf\n", (double)f1);
     f2 = 1.0;
@@ -367,12 +370,21 @@ void bench()
     // slower functions
     iterations /= 50;
     QueryPerformanceCounter(&time_start);
+    fixed_point128<10> f4 = 5;
+    for (int i = 0; i < iterations; ++i)
+        f3 = f1 / f4;
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64_t)(iterations / totalTime);
+    print_ips("Division by int", ips);
+
+    QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
         f3 = f1 / f2;
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64_t)(iterations / totalTime);
-    print_ips("Division", ips);
+    print_ips("Division by fixed_point128", ips);
 }
 
 int main()
