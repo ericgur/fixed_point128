@@ -388,4 +388,3 @@ int main()
     test_comparison();
     bench();
 }
-

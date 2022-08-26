@@ -90,7 +90,7 @@ constexpr uint32_t array_length(const T& a) {
 *                                  Forward declarations
 ************************************************************************************/
 
-FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n);
+FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int32_t m, int32_t n);
 
 /***********************************************************************************
 *                                  Main Code
@@ -1615,14 +1615,10 @@ public:
  * @param n Count of elements in v
  * @return 0 for success
 */
-static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n)
+static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int32_t m, int32_t n)
 {
     constexpr uint64_t b = 1ull << 32; // Number base (32 bits).
     constexpr uint64_t mask = b - 1;
-    uint64_t qhat{};                 // Estimated quotient digit.
-    uint64_t rhat{};                 // A remainder.
-    uint64_t p{};                    // Product of two digits.
-    int64_t s{}, s_comp{}, i{}, j{}, t{}, k{};
     if (v == nullptr || u == nullptr || q == nullptr)
         return 1;
 
@@ -1635,71 +1631,83 @@ static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint
 
     // Take care of the case of a single-digit divisor here.
     if (n == 1) {
-        k = 0;
-        for (j = m - 1; j >= 0; j--) {
-            q[j] = (uint32_t)((k * b + u[j]) / v[0]);
-            k = (k * b + u[j]) - (uint64_t)q[j] * v[0];
+        uint32_t k = 0;
+        
+        for (int j = m - 1; j >= 0; --j) {
+            q[j] = _udiv64(((uint64_t)k << 32ull) + u[j], v[0], &k);
         }
 
         if (r != nullptr)
-            r[0] = (uint32_t)k;
+            r[0] = k;
         return 0;
     }
+    const int32_t last_n = n - 1;   // array index of the highest item
+
     // Normalize by shifting v left just enough so that its high-order bit is on, and shift u left the same amount.
     // We may have to append a high-order digit on the dividend; we do that unconditionally.
-    s = (uint64_t)__lzcnt(v[n - 1]); // 0 <= s <= 32. 
-    s_comp = 32 - s; // complementry of the shift value to 32
-    
-    uint32_t* vn = (uint32_t*)_malloca(sizeof(uint32_t) * n);
+    const int64_t s = (uint64_t)__lzcnt(v[last_n]); // 0 <= s <= 32. 
+    const int64_t s_comp = 32 - s;  // complementry of the shift value to 32
+
+    uint64_t* vn = (uint64_t*)_malloca(sizeof(uint64_t) * n);
     if (nullptr == vn) return 1;
 
-    for (i = n - 1; i > 0; i--)
+    for (int i = last_n; i > 0; --i)
         vn[i] = (uint32_t)(v[i] << s) | (v[i - 1] >> s_comp);
-    vn[0] = v[0] << s;
-    uint32_t* un = (uint32_t*)_malloca(sizeof(uint32_t) * (m + 1));
+    vn[0] = (uint64_t)v[0] << s;
+    uint64_t* un = (uint64_t*)_malloca(sizeof(uint64_t) * (m + 1ull));
     if (nullptr == un) return 1;
 
     un[m] = u[m - 1] >> s_comp;
-    for (i = m - 1; i > 0; i--)
+    for (int i = m - 1; i > 0; --i)
         un[i] = (u[i] << s) | (u[i - 1] >> s_comp);
+    un[0] = (uint64_t)u[0] << s;
 
-    un[0] = u[0] << s;
-    for (j = m - n; j >= 0; j--) { // Main loop. 
-                                   // Compute estimate qhat of q[j]. 
-        qhat = ((uint64_t)un[j + n] * b + (uint64_t)un[j + n - 1]) / (uint64_t)vn[n - 1];
-        rhat = ((uint64_t)un[j + n] * b + (uint64_t)un[j + n - 1]) - qhat * (uint64_t)vn[n - 1];
-        while (qhat >= b || qhat * (uint64_t)vn[n - 2] > b * rhat + (uint64_t)un[j + n - 2]) {
+    uint64_t qhat{};                 // Estimated quotient digit.
+    uint64_t rhat{};                 // A remainder.
+    uint64_t p{};                    // Product of two digits.
+    for (int j = m - n; j >= 0; --j) { 
+        // Main loop. 
+        // Compute estimate qhat of q[j]. 
+        qhat = (un[j + n] * b + un[j + last_n]) / vn[last_n];
+        rhat = (un[j + n] * b + un[j + last_n]) - qhat * vn[last_n];
+        
+        //uint64_t dividend = ((uint64_t)un[j + n] << 32) + (uint64_t)un[j + last_n];
+        //qhat = _udiv64(dividend, vn[last_n], &rhat);
+        while (qhat >= b || 
+               qhat * vn[n - 2] > b * rhat + un[j + n - 2]) {
             qhat = qhat - 1;
-            rhat = rhat + (uint64_t)vn[n - 1];
+            rhat = rhat + vn[last_n];
             if (rhat >= b)
                 break;
         }
         // Multiply and subtract. 
-        k = 0;
-        for (i = 0; i < n; i++) {
+        uint64_t k = 0;
+        uint64_t t;
+        for (uint64_t i = 0; i < n; ++i) {
             p = qhat * vn[i];
-            t = (uint64_t)un[i + j] - k - (p & mask);
-            un[i + j] = (uint32_t)t;
-            k = (p >> 32) - (t >> 32);
+            t = un[i + j] - k - (p & mask);
+            un[i + j] = t;
+            k = (p - t) >> 32;
         }
 
-        t = (uint64_t)un[j + n] - k; un[j + n] = (uint32_t)t;
+        t = un[j + n] - k; 
+        un[j + n] = t;
         q[j] = (uint32_t)qhat;    // Store quotient digit. 
-        if (t < 0) {            // If we subtracted too
-            q[j] = q[j] - 1;    // much, add back. 
+        if (t < 0) {              // If we subtracted too
+            q[j] = q[j] - 1;      // much, add back. 
             k = 0;
-            for (i = 0; i < n; i++) {
-                t = (uint64_t)un[i + j] + vn[i] + k;
-                un[i + j] = (uint32_t)t;
+            for (int i = 0; i < n; ++i) {
+                t = un[i + j] + vn[i] + k;
+                un[i + j] = t;
                 k = t >> 32;
             }
-            un[j + n] = (uint32_t)((uint64_t)un[j + n] + k);
+            un[j + n] = un[j + n] + k;
         }
     } // End j.
     // If the caller wants the remainder, unnormalize it and pass it back. 
     if (r != nullptr) {
-        for (i = 0; i < n; i++) {
-            r[i] = (un[i] >> s) | (un[i + 1] << s_comp);
+        for (int  i = 0; i < n; ++i) {
+            r[i] = (uint32_t)((un[i] >> s) | ((mask & un[i + 1]) << s_comp));
         }
     }
     return 0;
