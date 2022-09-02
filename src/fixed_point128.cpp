@@ -344,6 +344,21 @@ void bench()
     fixed_point128<10> f3;
 
     QueryPerformanceCounter(&time_start);
+    
+    for (int i = 0; i < iterations; ++i) {
+        ips += f1 > f2;
+        ips += f1 >= f2;
+        ips += f1 < f2;
+        ips += f1 <= f2;
+    }
+    printf("%llu\n", ips);
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64_t)(iterations / totalTime);
+    print_ips("Operators >, >=, <, <=", ips);
+
+
+    QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
         f3 = f1 + f2;
     QueryPerformanceCounter(&time_end);
