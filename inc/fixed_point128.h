@@ -693,6 +693,10 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator*=(const fixed_point128& other) noexcept{
+        // Temporary arrays to store the result. They are uninitialzied to get 10-50% extra performance.
+        // Zero initialization is a 10% penalty and using a thread_local static varible lowers
+        //  performance by >50%.
+
         uint64_t res[4]; // 256 bit of result
         uint64_t temp1[2], temp2[2];
         unsigned char carry;
@@ -812,56 +816,47 @@ public:
      * @return this object.
     */
     inline fixed_point128& operator/=(const fixed_point128& other) {
-        uint64_t nom[4] = {0, 0, low, high};
-        uint64_t q[4] = {0}; 
+        uint64_t q[4]{}; 
+        bool need_rounding = false;
 
-        // optimization for when dividing by an int
+        // optimization for when dividing by an integer
         if (other.is_int()) {
+            uint64_t nom[2] = {low, high};
             uint64_t other_int = (uint64_t)other;
             uint64_t denom[1] = {other_int};
-            if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
-                const bool need_rounding = (q[1] >> 63) != 0;
-                high = q[3];
-                low = q[2];
-
-                if (need_rounding) {
-                    ++low;
-                    high += low == 0;
-                }
-
-                sign ^= other.sign;
-                // set sign to 0 when both low and high are zero (avoid having negative zero value)
-                sign &= (0 != low || 0 != high);
+            uint64_t r[1];
+            if (0 == div_32bit((uint32_t*)q, (uint32_t*)r, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+                need_rounding = r[0] > (other_int >> 1);
+                high = q[1];
+                low = q[0];
             }
             else { // error
                 FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
             }
-
-
-            return *this;
         }
         else {
+            uint64_t nom[4] = {0, 0, low, high};
             uint64_t denom[2] = {other.low, other.high};
             if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
                 static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
-                const bool need_rounding = (q[0] & half) != 0;
+                need_rounding = (q[0] & half) != 0;
                 // result in q needs to shifted left by F
                 // shifting right by 128-F is simpler.
                 high = shift_right128(q[1], q[2], I);
                 low = shift_right128(q[0], q[1], I);
-                if (need_rounding) {
-                    ++low;
-                    high += low == 0;
-                }
-
-                sign ^= other.sign;
-                // set sign to 0 when both low and high are zero (avoid having negative zero value)
-                sign &= (0 != low || 0 != high);
             }
             else { // error
                 FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
             }
         }
+
+        if (need_rounding) {
+            ++low;
+            high += low == 0;
+        }
+        sign ^= other.sign;
+        // set sign to 0 when both low and high are zero (avoid having negative zero value)
+        sign &= (0 != low || 0 != high);
         return *this;
     }
     /**
@@ -933,7 +928,7 @@ public:
     }
     /**
      * @brief Shift right this object.
-     * @param shift Bits to shift. negative or very high values cause undefined behavior.
+     * @param shift Bits to shift. Negative or very high values cause undefined behavior.
      * @return This object.
 
     */
