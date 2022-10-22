@@ -87,12 +87,12 @@ static constexpr uint32_t array_length(const T& a) {
 }
 /**
  * @brief shift right 'x' by 'shift' bits with rounding
- * Undefiend behavior when shift is outside the range [0, 64]
+ * Undefined behavior when shift is outside the range [0, 64]
  * @param x value to shift
  * @param shift how many bits to shift
  * @return result of 'x' right shifed by 'shift'.
 */
-FP128_INLINE  uint64_t shift_right64_round(uint64_t x, int shift)
+FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift)
 {
     if (x < 1 || x > 63)
         return x;
@@ -173,8 +173,8 @@ class fixed_point128
     //
     // members
     //
-    uint64_t low; 
-    uint64_t high;
+    uint64_t low;  // lower QWORD
+    uint64_t high; // upper QWORD
     unsigned sign; // 0 = positive, 1 negative
 
     // useful const calculations
