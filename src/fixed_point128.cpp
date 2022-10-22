@@ -258,7 +258,15 @@ void test_functions()
         s = f5;
         printf("f5: %s\n", s.c_str());
         s = exp(f5);
-        printf("exp(f4): %s\n", s.c_str());
+        printf("exp(f5): %s\n", s.c_str());
+    }
+
+    for (int i = 0; i < len; ++i) {
+        fixed_point128<16> f5 = fvalues2[i];
+        s = f5;
+        printf("f5: %s\n", s.c_str());
+        s = log2(f5);
+        printf("log2(f5): %s\n", s.c_str());
     }
 
     printf("\n");

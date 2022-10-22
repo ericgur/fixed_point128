@@ -221,7 +221,7 @@ public:
     */
     fixed_point128(double x) noexcept {
         // brute convert to uint64_t for easy bit manipulation
-        const uint64_t i = *((uint64_t*)(&x));
+        const uint64_t i = *reinterpret_cast<uint64_t*>(&x);
         // very common case
         if (i == 0) {
             low = high = 0;
@@ -1009,9 +1009,7 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator++() noexcept {
-        high += unity;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        *this += one();
         return *this;
     }
     /**
@@ -1028,14 +1026,7 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator--() {
-        // unity is in the upper QWORD
-        high -= unity;
-        if (high == max_qword_value) {
-            high = 0;
-            --low;
-        }
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        *this -= one();
         return *this;
     }
     /**
@@ -1628,6 +1619,49 @@ public:
         }
 
         return res;
+    }
+    /**
+     * @brief Calculates the Log base 2 of x: log2(x)
+     * @param x The number to perform log2 on.
+     * @return log2(x)
+    */
+    friend FP128_INLINE fixed_point128 log2(fixed_point128 x) noexcept
+    {
+        static const fixed_point128 two(2); 
+        fixed_point128 b = fixed_point128::one() >> 1;
+        fixed_point128 y = 0;
+
+        if (!x.is_positive() || x.is_zero()) {
+            errno = EINVAL;
+            return fixed_point128(UINT64_MAX, UINT64_MAX, 1); // represents negative infinity
+        }
+
+        // bring x to the range [1,2)
+        while (x < fixed_point128::one()) {
+            x <<= 1;
+            --y;
+        }
+
+        while (x >= two) {
+            x >>= 1;
+            ++y;
+        }
+
+        // x is an exponent of 2.
+        if (x == fixed_point128::one())
+            return y;
+
+        fixed_point128 z = x;
+        for (size_t i = 0; i < fixed_point128::F; ++i) {
+            z = z * z;
+            if (z >= two) {
+                z >>= 1;
+                y += b;
+            }
+            b >>= 1;
+        }
+
+        return y;
     }
 }; //class fixed_point128
 
