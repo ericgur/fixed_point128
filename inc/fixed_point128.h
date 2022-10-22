@@ -27,6 +27,9 @@
     The function div_32bit is derived from the book "Hacker's Delight" 2nd Edition by 
     Henry S. Warren Jr. It was converted to 32 bit operations + a bugfix.
 
+    The functions log, log2, log10 are derived from Dan Moulding's code:
+    https://github.com/dmoulding/log2fix
+
 ************************************************************************************/
 
 #ifndef FIXED_POINT128_H
