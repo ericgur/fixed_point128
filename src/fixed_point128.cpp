@@ -250,7 +250,8 @@ void test_functions()
     fixed_point128<16> fvalues2[] = {
         fixed_point128<16>::one(),
         fixed_point128<16>(2),
-        fixed_point128<16>(0.1)
+        fixed_point128<16>::one() / fixed_point128<16>(10), // 0.1 with high precision
+        fixed_point128<16>::e()
     };
     len = sizeof(fvalues2) / sizeof(fvalues2[0]);
     for (int i = 0; i < len; ++i) {
@@ -264,9 +265,14 @@ void test_functions()
     for (int i = 0; i < len; ++i) {
         fixed_point128<16> f5 = fvalues2[i];
         s = f5;
+        printf("\n");
         printf("f5: %s\n", s.c_str());
         s = log2(f5);
         printf("log2(f5): %s\n", s.c_str());
+        s = log(f5);
+        printf("log(f5): %s\n", s.c_str());
+        s = log10(f5);
+        printf("log10(f5): %s\n", s.c_str());
     }
 
     printf("\n");

@@ -1632,7 +1632,6 @@ public:
         fixed_point128 y = 0;
 
         if (!x.is_positive() || x.is_zero()) {
-            errno = EINVAL;
             return fixed_point128(UINT64_MAX, UINT64_MAX, 1); // represents negative infinity
         }
 
@@ -1653,7 +1652,7 @@ public:
 
         fixed_point128 z = x;
         for (size_t i = 0; i < fixed_point128::F; ++i) {
-            z = z * z;
+            z *= z;
             if (z >= two) {
                 z >>= 1;
                 y += b;
@@ -1662,6 +1661,30 @@ public:
         }
 
         return y;
+    }
+    /**
+     * @brief Calculates the natural Log (base e) of x: log(x)
+     * @param x The number to perform log on.
+     * @return log2(x)
+    */
+    friend FP128_INLINE fixed_point128 log(fixed_point128 x) noexcept
+    {
+        static const fixed_point128 inv_log2_e = fixed_point128("0.693147180559945309417232121458176575");
+        fixed_point128 y = log2(x);
+
+        return y * inv_log2_e;
+    }
+    /**
+     * @brief Calculates Log base 10 of x: log10(x)
+     * @param x The number to perform log on.
+     * @return log10(x)
+    */
+    friend FP128_INLINE fixed_point128 log10(fixed_point128 x) noexcept
+    {
+        static const fixed_point128 inv_log2_10 = fixed_point128("0.301029995663981195213738894724493068");
+        fixed_point128 y = log2(x);
+
+        return y * inv_log2_10;
     }
 }; //class fixed_point128
 
