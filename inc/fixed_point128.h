@@ -1398,47 +1398,71 @@ public:
         return res;
     }
     /**
+     * @brief Calculates the left zero count of value x, ignoring the sign.
+     * @param x input value.
+     * @return lzc (uint32_t) of th result.
+    */
+    friend FP128_INLINE uint32_t lzcnt128(const fixed_point128& x) noexcept
+    {
+        return (x.high != 0) ? (int32_t)__lzcnt64(x.high) : 64 + (int32_t)__lzcnt64(x.low);
+    }
+    /**
      * @brief Calculates the square root.
      * @param x Value to calculate the root of
      * @return Square root of (x), zero when X <= 0.
     */
     friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x) noexcept
     {
+        constexpr bool use_newton_raphson_method = false;
+
         if (x.sign || !x)
             return 0;
 
-        fixed_point128 ul = 0, ll = 0, t = 0, e(1, 0, 0);
-        int32_t s = 0;
-        ul.low = 1ull;
-        s = (x.high != 0) ? 128 - (int32_t)__lzcnt64(x.high) : 64 - (int32_t)__lzcnt64(x.low);
-
-        // x >= 1
-        if (s >= x.F) {
-            ul = x;     // upper limit
-            ll.low = 1; // lower limit
-            ll <<= x.F + ((s - x.F - 1) >> 1);
+        // Newton Raphson method 
+        if constexpr (use_newton_raphson_method)
+        {
+            int s = 64 - lzcnt128(x) / 2;
+            fixed_point128 g0 = fixed_point128::epsilon() << s; // g0 = 2**s.
+            fixed_point128 g1 = (g0 + (x >> s)) >> 1; // g1 = (g0 + x/g0)/2.
+            while (g1 < g0) {   // Do while approximations
+                g0 = g1;        // strictly decrease.
+                g1 = (g0 + (x / g0)) >> 1;
+            }
+            return g0;
         }
-        // x < 1
         else {
-            ul.low = 1; // upper limit
-            ul <<= x.F;
-            ll = x;     // lower limit
-        }
+            fixed_point128 ul = 0, ll = 0, t = 0, e(1, 0, 0);
+            ul.low = 1ull;
+            int32_t s = 128 - lzcnt128(x);
 
-        // yeh old binary search - need an int256 type to use Newton-Raphson or similar methods
-        t = (ul + ll) >> 1;
-        while (ul > ll + e) {
-            // check if the guess (t) is too big
-            if (t * t > x) {
-                ul = t; // decrease upper limit
+            // x >= 1
+            if (s >= x.F) {
+                ul = x;     // upper limit
+                ll.low = 1; // lower limit
+                ll <<= x.F + ((s - x.F - 1) >> 1);
             }
+            // x < 1
             else {
-                ll = t; // increase lower limit
+                ul.low = 1; // upper limit
+                ul <<= x.F;
+                ll = x;     // lower limit
             }
-            t = (ul + ll) >> 1;
-        }
 
-        return t;
+            // yeh old binary search - need an int256 type to use newton-raphson or similar methods
+            
+            do  {
+                t = (ul + ll) >> 1;
+                // check if the guess (t) is too big
+                if (t * t > x) {
+                    ul = t - e; // decrease upper limit
+                }
+                else {
+                    ll = t + e; // increase lower limit
+                }
+            } while (ul >= ll);
+
+            return ul - e;
+        }
     }
     /**
      * @brief Factorial reciprocal (inverse). Calculates 1 / x!
