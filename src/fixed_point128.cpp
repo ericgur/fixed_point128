@@ -214,7 +214,7 @@ void test_functions()
         f1 = values[i];
         printf("f1: %0.15lf\n", (double)f1);
         printf("floor(f1): %0.15lf\n", (double)floor(f1));
-        printf("ciel(f1): %0.15lf\n", (double)ciel(f1));
+        printf("ceil(f1): %0.15lf\n", (double)ceil(f1));
         printf("fabs(f1): %0.15lf\n", (double)fabs(f1));
         fixed_point128<10> int_part;
         fixed_point128<10> f2 = modf(f1, &int_part);

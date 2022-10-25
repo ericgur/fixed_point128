@@ -1174,6 +1174,14 @@ public:
         return 0 == sign;
     }
     /**
+     * @brief Returns true if the value negative (smaller than zero)
+     * @return True when the the value negative
+    */
+    FP128_INLINE bool is_negative() const
+    {
+        return 1 == sign;
+    }
+    /**
      * @brief Returns true if the value is zero
      * @return Returns true if the value is zero 
     */
@@ -1337,33 +1345,23 @@ public:
     */
     friend FP128_INLINE fixed_point128 floor(const fixed_point128& x) noexcept
     {
-        auto temp = x;
-        temp.low = 0;
-        uint64_t frac = temp.high & ~temp.int_mask;
-        temp.high &= temp.int_mask;
-        // floor always rounds towards -infinity
-        if (0 != temp.sign and 0 != frac) {
-            ++temp;
-        }
-        return temp;
+        if (x.is_int()) return x;
+
+        int64_t val = (int64_t)x;
+        return (val < 0) ? --val : val;
     }
 
     /**
-     * @brief Performs the ciel() function, similar to libc's ciel(), rounds up towards infinity.
+     * @brief Performs the ceil() function, similar to libc's ceil(), rounds up towards infinity.
      * @param x Input value
      * @return A fixed_point128 holding the integer value. Overflow is not reported.
     */
-    friend FP128_INLINE fixed_point128 ciel(const fixed_point128& x) noexcept
+    friend FP128_INLINE fixed_point128 ceil(const fixed_point128& x) noexcept
     {
-        auto temp = x;
-        temp.low = 0;
-        uint64_t frac = temp.high & ~temp.int_mask;
-        temp.high &= temp.int_mask;
-        // ciel always rounds towards infinity
-        if (0 != temp.sign and 0 != frac) {
-            ++temp;
-        }
-        return temp;
+        if (x.is_int()) return x;
+
+        int64_t val = (int64_t)x;
+        return (val >= 0) ? ++val : val;
     }
 
     /**
@@ -1413,56 +1411,41 @@ public:
     */
     friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x) noexcept
     {
-        constexpr bool use_newton_raphson_method = false;
-
         if (x.sign || !x)
             return 0;
 
-        // Newton Raphson method 
-        if constexpr (use_newton_raphson_method)
-        {
-            int s = 64 - lzcnt128(x) / 2;
-            fixed_point128 g0 = fixed_point128::epsilon() << s; // g0 = 2**s.
-            fixed_point128 g1 = (g0 + (x >> s)) >> 1; // g1 = (g0 + x/g0)/2.
-            while (g1 < g0) {   // Do while approximations
-                g0 = g1;        // strictly decrease.
-                g1 = (g0 + (x / g0)) >> 1;
-            }
-            return g0;
+        fixed_point128 ul = 0, ll = 0, t = 0, e(1, 0, 0);
+        int32_t s = 0;
+        ul.low = 1ull;
+        s = (x.high != 0) ? 128 - (int32_t)__lzcnt64(x.high) : 64 - (int32_t)__lzcnt64(x.low);
+
+        // x >= 1
+        if (s >= x.F) {
+            ul = x;     // upper limit
+            ll.low = 1; // lower limit
+            ll <<= x.F + ((s - x.F - 1) >> 1);
         }
+        // x < 1
         else {
-            fixed_point128 ul = 0, ll = 0, t = 0, e(1, 0, 0);
-            ul.low = 1ull;
-            int32_t s = 128 - lzcnt128(x);
-
-            // x >= 1
-            if (s >= x.F) {
-                ul = x;     // upper limit
-                ll.low = 1; // lower limit
-                ll <<= x.F + ((s - x.F - 1) >> 1);
-            }
-            // x < 1
-            else {
-                ul.low = 1; // upper limit
-                ul <<= x.F;
-                ll = x;     // lower limit
-            }
-
-            // yeh old binary search - need an int256 type to use newton-raphson or similar methods
-            
-            do  {
-                t = (ul + ll) >> 1;
-                // check if the guess (t) is too big
-                if (t * t > x) {
-                    ul = t - e; // decrease upper limit
-                }
-                else {
-                    ll = t + e; // increase lower limit
-                }
-            } while (ul >= ll);
-
-            return ul - e;
+            ul.low = 1; // upper limit
+            ul <<= x.F;
+            ll = x;     // lower limit
         }
+
+        // yeh old binary search - need an int256 type to use Newton-Raphson or similar methods
+        t = (ul + ll) >> 1;
+        while (ul > ll + e) {
+            // check if the guess (t) is too big
+            if (t * t > x) {
+                ul = t; // decrease upper limit
+            }
+            else {
+                ll = t; // increase lower limit
+            }
+            t = (ul + ll) >> 1;
+        }
+
+        return t;
     }
     /**
      * @brief Factorial reciprocal (inverse). Calculates 1 / x!
