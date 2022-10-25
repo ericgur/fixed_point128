@@ -95,7 +95,7 @@ static constexpr uint32_t array_length(const T& a) {
  * @param shift how many bits to shift
  * @return result of 'x' right shifed by 'shift'.
 */
-FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift)
+FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 {
     if (x < 1 || x > 63)
         return x;
@@ -120,7 +120,7 @@ FP128_INLINE static uint64_t shift_right128(uint64_t l, uint64_t h, int shift) n
  * @param shift Bits to shift
  * @return Lower 64 bit of the result
 */
-FP128_INLINE static uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift)
+FP128_INLINE static uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
     const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
     return need_rounding + ((l >> shift) | (h << (64 - shift)));
@@ -132,7 +132,7 @@ FP128_INLINE static uint64_t shift_right128_round(uint64_t l, uint64_t h, int sh
  * @param shift Bits to shift
  * @return Upper 64 bit of the result
 */
-FP128_INLINE static uint64_t shift_left128(uint64_t l, uint64_t h, int shift)
+FP128_INLINE static uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
     return (h << shift) | (l >> (64 - shift));
 }
@@ -141,7 +141,7 @@ FP128_INLINE static uint64_t shift_left128(uint64_t l, uint64_t h, int shift)
 *                                  Forward declarations
 ************************************************************************************/
 
-FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n);
+FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n) noexcept;
 
 /***********************************************************************************
 *                                  Main Code
@@ -173,6 +173,7 @@ class fixed_point128
 
     // friends
     friend class fixed_point128; // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
+private:
     //
     // members
     //
@@ -1709,7 +1710,7 @@ public:
  * @param n Count of elements in v
  * @return 0 for success
 */
-static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n)
+static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n) noexcept
 {
     constexpr uint64_t b = 1ull << 32; // Number base (32 bits).
     constexpr uint64_t mask = b - 1;
