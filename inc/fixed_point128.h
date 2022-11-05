@@ -85,7 +85,7 @@ namespace fp128 {
  * @return Element count in array
 */
 template<typename T>
-static constexpr uint32_t array_length(const T& a) {
+constexpr uint32_t array_length(const T& a) {
     return sizeof(a) / sizeof(a[0]);
 }
 /**
@@ -168,8 +168,9 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
 template<int32_t I>
 class fixed_point128
 {
+    // build time validation of template parameters
     static_assert(1 <= I && I <= 64, "Template parameter <I> must be in the [1,64] range!");
-    static_assert(sizeof(void*) == 8, "fixed_point128 is 64 bit only!");
+    static_assert(sizeof(void*) == 8, "fixed_point128 is supported in 64 bit builds only!");
 
     // friends
     friend class fixed_point128; // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
@@ -182,17 +183,15 @@ private:
     unsigned sign; // 0 = positive, 1 negative
 
     // useful const calculations
-    static constexpr int32_t F = 128 - I;
-    static constexpr int32_t upper_frac_bits = F - 64;
-    static constexpr uint64_t unity = 1ull << (64 - I);
-    static inline const double upper_unity = pow(2, 64 - F);
-    static inline const double lower_unity = pow(2, -F);
-    static constexpr uint32_t max_dword_value = (uint32_t)(-1);
-    static constexpr uint64_t max_qword_value = (uint64_t)(-1);
-    static constexpr uint64_t int_mask = max_qword_value << upper_frac_bits;
-    static constexpr int32_t dbl_exp_bits = 11;
-    static constexpr int32_t dbl_frac_bits = 52;
-    static constexpr int32_t max_frac_digits = (int)(1 + F / 3.1);
+    static constexpr int32_t F = 128 - I;                               // fraction bit count
+    static constexpr int32_t upper_frac_bits = F - 64;                  // how many bits of the fraction exist in the upper QWORD
+    static constexpr uint64_t unity = 1ull << (64 - I);                 // upper QWORD value equal to '1'
+    static inline const double upper_unity = pow(2, 64 - F);     // convert upper QWORD to floating point
+    static inline const double lower_unity = pow(2, -F);         // convert lower QWORD to floating point
+    static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits; // mask of the integer bits in the upper QWORD
+    static constexpr int32_t dbl_exp_bits = 11;                         // exponent bit count of a double variable
+    static constexpr int32_t dbl_frac_bits = 52;                        // mantisa bit count of a double variable
+    static constexpr int32_t max_frac_digits = (int)(1 + F / 3.1);      // meaningful base 10 digits for the fraction
 public:
     typedef fixed_point128<I> type;
     typedef fixed_point128<I>* ptr_type;
@@ -203,7 +202,7 @@ public:
     //
 
     /**
-     * @brief Default constructor
+     * @brief Default constructor, creates an instance with a value of zero.
     */
     fixed_point128() noexcept :
         low(0), high(0), sign(0) {}
@@ -215,12 +214,14 @@ public:
         low(other.low), high(other.high), sign(other.sign) {}
     /**
      * @brief Move constructor
+     * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param other Object to copy from
     */
     fixed_point128(const fixed_point128&& other) noexcept :
         low(other.low), high(other.high), sign(other.sign) {}
     /**
-     * @brief Constructor from double type
+     * @brief Constructor from the double type
+     * Underflow goes to zero. Overflow, NaN and +-INF go to max supported positive value.
      * @param x Input value
     */
     fixed_point128(double x) noexcept {
@@ -239,7 +240,7 @@ public:
         
         // overflow which catches NaN and Inf
         if (e >= I) {
-            high = low = max_qword_value;
+            high = low = UINT64_MAX;
             sign = 0;
             return;
         }
@@ -317,7 +318,7 @@ public:
     }
     /**
      * @brief Constructor from const char* (C string).
-     * Accurate to 37 digits after the decimal point.
+     * Accurate up to 37 digits after the decimal point.
      * Allows creating very high precision values. Much slower than the other constructors.
      * @param x Input string
     */
@@ -329,6 +330,15 @@ public:
         char* str = _strdup(x);
         char* p = str;
         if (p == nullptr) return;
+
+        // skip white space
+        while (*p == ' ') ++p;
+
+        if (*p == '\0') {
+            *this = fixed_point128();
+            free(str);
+            return;
+        }
 
         // set negative sign if needed
         if (p[0] == '-') {
@@ -352,7 +362,7 @@ public:
         fixed_point128<1> base(0xCCCCCCCCCCCCCCCD, 0x0CCCCCCCCCCCCCCC, 0); // maximum precision to represent 0.1
         fixed_point128<1> step = base;
         fixed_point128<1> frac;
-
+        // multiply each digits by 0.1**n
         while (digits++ < max_frac_digits && *p != '\0' && base) {
             fixed_point128<1> temp = base * (p[0] - '0');
             unsigned char carry = _addcarry_u64(0, frac.low, temp.low, &frac.low);
@@ -413,7 +423,7 @@ public:
         return *this;
     }
     /**
-     * @brief template assignment operator, can be used between two different fixed_point128 templates
+     * @brief cross-template assignment operator, can be used between two different fixed_point128 templates
      * @param other fixed_point128 instance with from a different template instance.
      * @return This object.
     */
@@ -436,13 +446,8 @@ public:
         else { // I > I2
             // shift right by I - I2 bits
             const int shift = I - I2;
-            const bool need_rounding = (other.low & (1ull << (shift - 1))) != 0;
-            low = shift_right128(other.low, other.high, (uint8_t)shift);
+            low = shift_right128_round(other.low, other.high, (uint8_t)shift);
             high = other.high >> shift;
-            if (need_rounding) {
-                ++low;
-                high += low == 0;
-            }
         }
 
         return *this;
@@ -456,7 +461,7 @@ public:
      * @return Object value.
     */
     FP128_INLINE operator uint64_t() const noexcept {
-        return (high >> upper_frac_bits) & max_qword_value;
+        return (high >> upper_frac_bits) & UINT64_MAX;
     }
     /**
      * @brief operator int64_t - converts to a int64_t
@@ -464,14 +469,14 @@ public:
     */
     FP128_INLINE operator int64_t() const noexcept {
         int64_t res = (sign) ? -1ll : 1ll;
-        return res * ((high >> upper_frac_bits) & max_qword_value);
+        return res * ((high >> upper_frac_bits) & UINT64_MAX);
     }
     /**
      * @brief operator uint32_t - converts to a uint32_t
      * @return Object value.
     */
     FP128_INLINE operator uint32_t() const noexcept {
-        return (high >> upper_frac_bits) & max_dword_value;
+        return (high >> upper_frac_bits) & UINT32_MAX;
     }
     /**
      * @brief operator int32_t - converts to a int32_t
@@ -479,7 +484,7 @@ public:
     */
     FP128_INLINE operator int32_t() const noexcept {
         int32_t res = (sign) ? -1 : 1;
-        return res * ((int32_t)((int64_t)high >> upper_frac_bits) & (max_dword_value));
+        return res * ((int32_t)((int64_t)high >> upper_frac_bits) & (UINT32_MAX));
     }
     /**
      * @brief operator float - converts to a float
@@ -733,7 +738,7 @@ public:
         high = shift_right128(res[index+1], res[index + 2], lsb);
 
         if (need_rounding) {
-            ++low;
+            ++low; // low will wrap around to zero if overflowed
             high += low == 0;
         }
         // set the sign
@@ -877,7 +882,6 @@ public:
         if (0 == f) {
             sign ^= int32_t(i >> 63);
             int32_t e = FP128_GET_BITS(i, dbl_frac_bits, dbl_exp_bits) - 1023;
-            // TODO: add rounding
             return (e >= 0) ? *this >>= e  : *this <<= e;
         }
 
@@ -894,8 +898,6 @@ public:
         uint64_t denom[2] = {other.low, other.high};
         uint64_t q[4] = {0}, r[4] = {0};
         
-        // TODO: optimize for other being int
-
         //do the division in with positive numbers
         if (0 == div_32bit((uint32_t*)q, (uint32_t*)r, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
             // simple case, both are integers (fractions is zero)
@@ -933,7 +935,6 @@ public:
      * @brief Shift right this object.
      * @param shift Bits to shift. Negative or very high values cause undefined behavior.
      * @return This object.
-
     */
     FP128_INLINE fixed_point128& operator>>=(int32_t shift) {
         // 0-64 bit shift - most common
