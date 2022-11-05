@@ -109,7 +109,7 @@ FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift) noexcept
  * @param shift Bits to shift
  * @return Lower 64 bit of the result
 */
-FP128_INLINE static uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
+FP128_INLINE uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
     return (l >> shift) | (h << (64 - shift));
 }
@@ -120,7 +120,7 @@ FP128_INLINE static uint64_t shift_right128(uint64_t l, uint64_t h, int shift) n
  * @param shift Bits to shift
  * @return Lower 64 bit of the result
 */
-FP128_INLINE static uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
+FP128_INLINE uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
     const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
     return need_rounding + ((l >> shift) | (h << (64 - shift)));
@@ -132,7 +132,7 @@ FP128_INLINE static uint64_t shift_right128_round(uint64_t l, uint64_t h, int sh
  * @param shift Bits to shift
  * @return Upper 64 bit of the result
 */
-FP128_INLINE static uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
+FP128_INLINE uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
     return (h << shift) | (l >> (64 - shift));
 }
@@ -617,7 +617,7 @@ public:
     }
     /**
      * @brief Performs right shift operation.
-     * @param Shift bits to shift
+     * @param shift bits to shift
      * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator>>(int32_t shift) const {
@@ -626,7 +626,7 @@ public:
     }
     /**
      * @brief Performs left shift operation.
-     * @param Shift bits to shift
+     * @param shift bits to shift
      * @return Temporary object with the result of the operation
     */
     FP128_INLINE fixed_point128 operator<<(int32_t shift) const {
@@ -1368,7 +1368,7 @@ public:
     /**
      * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/res.
      * @param x Nominator
-     * @param res Denominator
+     * @param y Denominator
      * @return A fixed_point128 holding the modulo value.
     */
     friend FP128_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y) noexcept
@@ -1454,7 +1454,6 @@ public:
      * This value depends on the amount of fraction bits.
      * @param x Input value
      * @param res Result of the function
-     * @return void
     */
     friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
     {
@@ -1510,7 +1509,6 @@ public:
      * sin(x) = x - (x^3 / 3!) + (x^5 / 5!) - (x^7 / 7!) + ...
      * 
      * @param x value in Radians
-     * @param precision maximum error bits, default 0 means masimum precision
      * @return Sine of x
     */
     friend FP128_INLINE fixed_point128 sin(const fixed_point128& x) noexcept
