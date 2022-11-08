@@ -27,7 +27,7 @@
  - floor, ceil
  - fmod
  - modf
- - sqrt
+ - sqrt with selectable precision/performance (+sqrt_slow which is ~7x slower and a bit more accurate)
  - sin, cos
  - exp
  - log, log2, log10
@@ -71,3 +71,4 @@ It was converted to 32 bit operations + a bugfix.
 
 The functions log, log2, log10 are derived from Dan Moulding's code: https://github.com/dmoulding/log2fix
 
+The function sqrt is based on the book "Math toolkit for real time programming" by Jack W. Crenshaw

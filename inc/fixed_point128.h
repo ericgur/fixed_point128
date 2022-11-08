@@ -24,11 +24,14 @@
 
 /***********************************************************************************
                                 Acknologements 
-    The function div_32bit is derived from the book "Hacker's Delight" 2nd Edition by 
-    Henry S. Warren Jr. It was converted to 32 bit operations + a bugfix.
+    The function div_32bit is derived from the book "Hacker's Delight" 2nd Edition 
+    by Henry S. Warren Jr. It was converted to 32 bit operations + a bugfix.
 
     The functions log, log2, log10 are derived from Dan Moulding's code:
     https://github.com/dmoulding/log2fix
+    
+    The function sqrt is based on the book "Math toolkit for real time programming" 
+    by Jack W. Crenshaw
 
 ************************************************************************************/
 
@@ -726,10 +729,10 @@ public:
         carry = _addcarry_u64(0, res[1], temp2[0], &res[1]);
         res[3] += _addcarry_u64(carry, res[2], temp2[1], &res[2]);
 
-        // extract the bits from res[] keeping the precision the same as this object
+        // extract the bits from root[] keeping the precision the same as this object
         // shift result by F
         static constexpr int32_t index = F >> 6; // / 64;
-        static constexpr int32_t lsb = F & FP128_MAX_VALUE_64(6); // bit within the 64bit data pointed by res[index]
+        static constexpr int32_t lsb = F & FP128_MAX_VALUE_64(6); // bit within the 64bit data pointed by root[index]
         static constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
         const bool need_rounding = (res[index] & half) != 0;
 
@@ -907,9 +910,9 @@ public:
                 high = r[1];
             }
             // nom or denom are fractions
-            // x mod res =  x - res * floor(x/res)
+            // x mod root =  x - root * floor(x/root)
             else { 
-                fixed_point128 x_div_y; // x / res. 
+                fixed_point128 x_div_y; // x / root. 
                 x_div_y.high = (q[2] << upper_frac_bits) | (q[1] >> I);
                 x_div_y.low = (q[1] << upper_frac_bits) | (q[0] >> I);
                 x_div_y.sign = sign ^ other.sign;
@@ -1203,6 +1206,17 @@ public:
         return FP128_GET_BIT(high, bit-64);
     }
     /**
+     * @brief Returns the exponent of the object - like the base 2 exponent of a floating point
+     * A value of 2.1 would return 1, [0.5,1.0) would return -1.
+     * @return Exponent of the number
+    */
+    FP128_INLINE int32_t get_exponent() const
+    {
+        int32_t s = lzcnt128(*this);
+        s = I - s - 1;
+        return s;
+    }
+    /**
      * @brief Returns an instance of fixed_point128 with the value of pi
      * @return pi
     */
@@ -1366,7 +1380,7 @@ public:
     }
 
     /**
-     * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/res.
+     * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/root.
      * @param x Nominator
      * @param y Denominator
      * @return A fixed_point128 holding the modulo value.
@@ -1406,11 +1420,63 @@ public:
         return (x.high != 0) ? (int32_t)__lzcnt64(x.high) : 64 + (int32_t)__lzcnt64(x.low);
     }
     /**
-     * @brief Calculates the square root.
+     * @brief Calculates the square root using Newton's method.
+     * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw 
+     * @param x Value to calculate the root of
+     * @param iterations how many iterations to perform (more is more accurate). Sensible values are 0-5.
+     * @return Square root of (x), zero when x <= 0.
+    */
+    friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x, uint32_t iterations = 3) noexcept
+    {
+        if (x.sign || !x)
+            return 0;
+        fixed_point128 root, norm_x = x;
+        static const fixed_point128 A = "0.41730759963886499890887997563983148154050544649511960252715318";
+        static const fixed_point128 B = "0.59016206709064458299663118037100097432703047929336615665205464";
+        static const fixed_point128 factor = "0.70710678118654752440084436210484903928483593768847403658833981"; // sqrt(2) / 2
+        int32_t expo;
+
+        // normalize the input to the range [0.5, 1)
+        expo = x.get_exponent() + 1;
+        if (expo > 0) {
+            norm_x >>= expo;
+        } 
+        else if (expo < 0)
+        {
+            norm_x <<= -expo;
+        }
+        
+        // get square root of the normalized number
+        // generate a first guess
+        root = A + B * norm_x;
+
+        // iterate several times 
+        for (auto i = 0ul; i < iterations; ++i) {
+            root = (norm_x / root + root) >> 1;
+        }
+
+        if (expo & 1) {
+            root *= factor;
+            ++expo;
+        }
+
+        // Denormalize the result
+        if (expo > 0) {
+            root <<= (expo + 1) / 2;
+        }
+        else if (expo < 0)
+        {
+            root >>= -expo / 2;
+        }
+
+        return root;
+    }
+    /**
+     * @brief Calculates the square root using binary search.
      * @param x Value to calculate the root of
      * @return Square root of (x), zero when X <= 0.
     */
-    friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x) noexcept
+    friend FP128_INLINE fixed_point128 sqrt_slow(const fixed_point128& x) noexcept
     {
         if (x.sign || !x)
             return 0;
@@ -1453,7 +1519,7 @@ public:
      * Maximum value of x that may produce non zero values is 34. 
      * This value depends on the amount of fraction bits.
      * @param x Input value
-     * @param res Result of the function
+     * @param root Result of the function
     */
     friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
     {
