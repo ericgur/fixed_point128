@@ -142,6 +142,8 @@ void test_division()
     printf("\nTest Division\n");
     fixed_point128<20> f1 = 1.0 / 3.0;
     printf("f1: %0.15lf\n", (double)f1);
+    fixed_point128<20> f3 = f1 / 64.0;
+    printf("f3 = f1 / 64.0: %0.15lf\n", (double)f3);
     fixed_point128<20> f2 = f1 / 2.0;
     printf("f2 = f1 / 2.0: %0.15lf\n", (double)f2);
     f2 = f1 / 32.0;
@@ -360,32 +362,36 @@ void bench()
 
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i) {
-        ips += f1 > f2;
-        ips += f1 >= f2;
-        ips += f1 < f2;
-        ips += f1 <= f2;
+        ips += (f1 > f2) || (f1 >= f2) || (f1 < f2) || (f1 <= f2);
     }
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    if (ips > 5) { // trick compiler to 
+        printf("");
+    }
     ips = (uint64_t)(iterations / totalTime);
     print_ips("Operators >, >=, <, <=", ips);
 
 
     QueryPerformanceCounter(&time_start);
-    for (int i = 0; i < iterations; ++i)
+    for (int i = 0; i < iterations; ++i) {
         f3 = f1 + f2;
+    }
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64_t)(iterations / totalTime);
     print_ips("Addition", ips);
 
+
     QueryPerformanceCounter(&time_start);
-    for (int i = 0; i < iterations; ++i)
+    for (int i = 0; i < iterations; ++i) {
         f3 = f2 - f1;
+    }
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64_t)(iterations / totalTime);
     print_ips("Subtraction", ips);
+
 
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
@@ -395,10 +401,27 @@ void bench()
     ips = (uint64_t)(iterations / totalTime);
     print_ips("Multiplication", ips);
 
+
+    iterations /= 2;
+    double values[2] = {64, 64};
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+    {
+        f3 = f1 / values[0]; // trick the compiler to not optimize away this code to nothing
+        f3 = f1 / values[1];
+    }
+    iterations *= 2;
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64_t)(iterations / totalTime);
+    print_ips("Division by float (exponent of 2)", ips);
+
+
     // slower functions
     iterations /= 30;
-    QueryPerformanceCounter(&time_start);
     fixed_point128<10> f4 = 5;
+
+    QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
         f3 = f1 / f4;
     QueryPerformanceCounter(&time_end);
@@ -414,6 +437,7 @@ void bench()
     ips = (uint64_t)(iterations / totalTime);
     print_ips("Division by fixed_point128", ips);
 
+    // even slower
     iterations /= 10;
 
     QueryPerformanceCounter(&time_start);
