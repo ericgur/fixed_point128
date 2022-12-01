@@ -31,12 +31,21 @@
 #include <stdio.h>
 #include <profileapi.h>
 #include "../inc/fixed_point128.h" 
+#include "../inc/uint128_t.h" 
 
 using namespace fp128;
 
 void test_conversion()
 {
     printf("\nTest Conversion\n");
+
+    uint128_t i1 = 1;
+    uint128_t i2 = UINT64_MAX;
+    uint128_t i3 = "0xDEADBEAFDEADBEAF";
+    uint128_t i4 = "0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF";
+    printf("uint128_t: 1=%llu, UINT64_MAX=0x%llX, 0xDEADBEAFDEADBEAF=0x%llX", (uint64_t)i1, (uint64_t)i2, (uint64_t)i3);
+    printf("uint128_t: 0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF=%s", (char*)i4);
+
     double a1 = 5.5;
     double a2 = 1.0 / (1ull << 22);
     double a3 = 3.000003;
@@ -47,6 +56,8 @@ void test_conversion()
     double r2 = f2;
     double r3 = f3;
     
+
+
     printf("a1: %0.15lf --> %0.15lf\n", a1, r1);
     printf("a2: %0.15lf --> %0.15lf\n", a2, r2);
     printf("a3: %0.15lf --> %0.15lf\n", a3, r3);

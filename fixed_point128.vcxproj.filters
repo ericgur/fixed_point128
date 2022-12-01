@@ -18,6 +18,12 @@
     <ClInclude Include="inc\fixed_point128.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="inc\uint128_t.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="inc\fixed_point128_shared.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\fixed_point128.cpp">
