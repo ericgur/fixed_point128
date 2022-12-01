@@ -43,8 +43,9 @@ void test_conversion()
     uint128_t i2 = UINT64_MAX;
     uint128_t i3 = "0xDEADBEAFDEADBEAF";
     uint128_t i4 = "0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF";
-    printf("uint128_t: 1=%llu, UINT64_MAX=0x%llX, 0xDEADBEAFDEADBEAF=0x%llX", (uint64_t)i1, (uint64_t)i2, (uint64_t)i3);
-    printf("uint128_t: 0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF=%s", (char*)i4);
+    printf("uint128_t: 1=%llu, UINT64_MAX=0x%llX, 0xDEADBEAFDEADBEAF=0x%llX\n", (uint64_t)i1, (uint64_t)i2, (uint64_t)i3);
+    printf("uint128_t: 0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF=%s\n", (char*)i4);
+    printf("uint128_t: 0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF=%s\n", i4.hex());
 
     double a1 = 5.5;
     double a2 = 1.0 / (1ull << 22);

@@ -944,6 +944,25 @@ public:
         return one;
     }
 
+    /**
+     * @brief Converts this object to a hex C string.
+     * The returned string is a statically thread-allocated buffer.
+     * Additional calls to this function from the same thread, overwrite the previous result.
+     * @return C string with describing the value of the object.
+    */
+    UINT128_T_INLINE char* hex() const {
+        constexpr int buff_size = 35;
+        static thread_local char str[buff_size];
+        
+        if (high) {
+            snprintf(str, buff_size, "0x%llX%016llX", high, low);
+        }
+        else {
+            snprintf(str, buff_size, "0x%llX", low);
+        }
+        
+        return str;
+    }
 private:
     /**
      * @brief Converts this object to a C string.
@@ -952,7 +971,7 @@ private:
      * @return C string with describing the value of the object.
     */
     UINT128_T_INLINE char* uint128tostr() const {
-        static thread_local char str[33];
+        static thread_local char str[65];
         // small number, use the fast snprintf method
         if (high == 0) {
             snprintf(str, sizeof(str), "%llu", low);
