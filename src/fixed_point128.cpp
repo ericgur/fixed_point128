@@ -49,7 +49,7 @@ void test_conversion()
     uint128_t i6 = d1;
     // assert(fabs((d1 / (double)i6) - 1.0) < 0.00001);
     assert(d1 == (double)i6);
-    uint64_t i64 = (uint64_t)d1;
+    //uint64_t i64 = (uint64_t)d1;
     printf("uint128_t: 1=%llu, UINT64_MAX=0x%llX, 0xDEADBEAFDEADBEAF=0x%llX\n", (uint64_t)i1, (uint64_t)i2, (uint64_t)i3);
     printf("uint128_t: 0xF123456789ABCDEFFEDCBA9876543210=%s\n", (char*)i4);
     printf("uint128_t: 0xF123456789ABCDEFFEDCBA9876543210=%s\n", i4.hex());
@@ -310,6 +310,17 @@ void test_functions()
     }
 
     printf("uint128_t log2 passed!\n");
+
+    srand(0xDEADBEEF);
+    for (auto i = 0ull; i < 256; ++i) {
+        uint128_t i1 = (1ull + rand()) * (1ull + rand());
+        uint128_t i2 = i1 * i1;
+        uint128_t i3 = sqrt(i2);
+
+        assert(i1 == i3);
+    }
+
+    printf("uint128_t sqrt passed!\n");
 
 
     const double values[] = {3.45, -7.5, 0.27};

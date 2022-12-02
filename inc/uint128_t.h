@@ -147,7 +147,6 @@ public:
             // bit 52 in f is the unity value of the float. it needs to move to the unity position in fixed point
             f |= FP128_ONE_SHIFT(dbl_frac_bits);
             int32_t bits_to_shift = e - dbl_frac_bits;
-            int32_t constexpr f_bits = dbl_frac_bits + 1;
             low = f;
             high = 0;
 
@@ -1001,29 +1000,47 @@ public:
      * @brief Calculates the square root using Newton's method.
      * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw 
      * @param x Value to calculate the root of
-     * @param iterations how many iterations to perform (more is more accurate). Sensible values are 0-5.
      * @return Square root of (x), zero when x <= 0.
     */
-    friend UINT128_T_INLINE uint128_t sqrt(const uint128_t& x, uint32_t iterations = 3) noexcept
+    friend UINT128_T_INLINE uint64_t sqrt(const uint128_t& x) noexcept
     {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // TODO: check if the floating poitn function isn't better here
+        auto expo = log2(x);
+        if (expo == 0)
+            return 0;
+
+        uint128_t root = uint128_t::one();
+        uint128_t e, temp;
+        root <<= ((expo + 1) / 2);
+
+        do {
+            temp = x / root;
+            e = (root > temp) ? (root - temp) >> 1 : (temp - root) >> 1;
+            root = (root + temp) >> 1;
+        } while (e);
+
+        return root;
     }
     /**
      * @brief Calculates the Log base 2 of x: log2(x)
      * @param x The number to perform log2 on.
-     * @return log2(x)
+     * @return log2(x). Returns zero when x is zero.
     */
     friend __forceinline uint32_t log2(uint128_t x)
     {
-        return 127 - lzcnt128(x);
+        if (x)
+            return 127 - lzcnt128(x);
+        
+        return 0;
     }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
-     * @return log2(x)
+     * @return log(x)
     */
     friend UINT128_T_INLINE uint32_t log(uint128_t x)
     {
+        // TODO: check if the floating poitn function isn't better here
         FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
     /**
@@ -1033,6 +1050,7 @@ public:
     */
     friend UINT128_T_INLINE uint32_t log10(uint128_t x)
     {
+        // TODO: check if the floating poitn function isn't better here
         FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
 }; //class uint128_t
