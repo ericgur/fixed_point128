@@ -147,20 +147,17 @@ public:
             // bit 52 in f is the unity value of the float. it needs to move to the unity position in fixed point
             f |= FP128_ONE_SHIFT(dbl_frac_bits);
             int32_t bits_to_shift = e - dbl_frac_bits;
+            int32_t constexpr f_bits = dbl_frac_bits + 1;
+            low = f;
+            high = 0;
 
             // f fits in high QWORD
-            if (bits_to_shift >= 0) {
-                if (bits_to_shift > 128 - dbl_frac_bits - 1) {
-                }
-
-                high = f << bits_to_shift;
-                low = 0;
+            if (bits_to_shift > 0) {
+                *this <<= bits_to_shift;
             }
             // shift right
             else {
-                bits_to_shift = -bits_to_shift;
-                high = 0;
-                low = f >> bits_to_shift;
+                *this >>= bits_to_shift;
             }
         }
         // too small to be represented, no need to bother.
