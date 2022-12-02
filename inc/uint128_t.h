@@ -677,20 +677,18 @@ public:
     }
     /**
      * @brief Shift right this object.
+     * Shifting is done without rounding to match uint64_t behavior
      * @param shift Bits to shift. Negative or very high values cause undefined behavior.
      * @return This object.
     */
     UINT128_T_INLINE uint128_t& operator>>=(int32_t shift) noexcept {
         // 0-64 bit shift - most common
-        if (shift <= 64) {
-            low = shift_right128_round(low, high, (uint8_t)shift);
+        if (shift < 64) {
+            low = shift_right128(low, high, (uint8_t)shift);
             high >>= shift;
         }
-        else if (shift >= 128) {
-            low = high = 0;
-        }
-        else if (shift >= 64) {
-            low = shift_right64_round(high, shift - 64);
+        else {
+            low = high >> (shift - 64);
             high = 0;
         }
         return *this;
@@ -701,16 +699,13 @@ public:
      * @return This object.
     */
     UINT128_T_INLINE uint128_t& operator<<=(int32_t shift) noexcept {
-        if (shift <= 64) {
+        if (shift < 64) {
             high = shift_left128(low, high, (unsigned char)shift);
             low <<= shift;
         }
-        else if (shift < 128) {
+        else {
             high = low << (shift - 64);
             low = 0;
-        }
-        else {
-            low = high = 0;
         }
         return *this;
     }
@@ -971,7 +966,7 @@ private:
      * @return C string with describing the value of the object.
     */
     UINT128_T_INLINE char* uint128tostr() const {
-        static thread_local char str[65];
+        static thread_local char str[45];
         // small number, use the fast snprintf method
         if (high == 0) {
             snprintf(str, sizeof(str), "%llu", low);

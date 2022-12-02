@@ -28,8 +28,9 @@
 //#define FP128_DISABLE_INLINE
 
 #include <windows.h>
-#include <stdio.h>
 #include <profileapi.h>
+#include <cstdio>
+#include <cassert>
 #include "../inc/fixed_point128.h" 
 #include "../inc/uint128_t.h" 
 
@@ -42,10 +43,10 @@ void test_conversion()
     uint128_t i1 = 1;
     uint128_t i2 = UINT64_MAX;
     uint128_t i3 = "0xDEADBEAFDEADBEAF";
-    uint128_t i4 = "0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF";
+    uint128_t i4 = "0xF123456789ABCDEFFEDCBA9876543210";
     printf("uint128_t: 1=%llu, UINT64_MAX=0x%llX, 0xDEADBEAFDEADBEAF=0x%llX\n", (uint64_t)i1, (uint64_t)i2, (uint64_t)i3);
-    printf("uint128_t: 0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF=%s\n", (char*)i4);
-    printf("uint128_t: 0xDEADBEAFDEADBEAFDEADBEAFDEADBEAF=%s\n", i4.hex());
+    printf("uint128_t: 0xF123456789ABCDEFFEDCBA9876543210=%s\n", (char*)i4);
+    printf("uint128_t: 0xF123456789ABCDEFFEDCBA9876543210=%s\n", i4.hex());
 
     double a1 = 5.5;
     double a2 = 1.0 / (1ull << 22);
@@ -56,8 +57,6 @@ void test_conversion()
     double r1 = f1;
     double r2 = f2;
     double r3 = f3;
-    
-
 
     printf("a1: %0.15lf --> %0.15lf\n", a1, r1);
     printf("a2: %0.15lf --> %0.15lf\n", a2, r2);
@@ -89,6 +88,26 @@ void test_conversion()
 void test_addition()
 {
     printf("\nTest Addition\n");
+    
+    srand(0xDEADBEEF);
+    for (auto i = 0ull; i < 32768; ++i) {
+        uint64_t val1 = i * rand();
+        uint64_t val2 = i * rand();
+        uint128_t i128a = val1;
+        uint128_t i128b = val2;
+        assert((uint64_t)i128a == val1);
+        assert((uint64_t)i128b == val2);
+        assert((uint64_t)(i128a + i128b) == (val1 + val2));
+        if (val1 >= val2) {
+            assert((uint64_t)(i128a - i128b) == (val1 - val2));
+        }
+        else {
+            assert((uint64_t)(i128b - i128a) == (val2 - val1));
+        }
+    }
+
+    printf("uint128_t addition and subtraction pass!\n");
+    
     fixed_point128<4> f1 = 5.123456789012345;
     fixed_point128<4> f2 =  7.0 - 5.123456789012345;
     printf("f1: %0.15lf\n", (double)f1);
@@ -117,6 +136,19 @@ void test_addition()
 void test_shift()
 {
     printf("\nTest Shift\n");
+
+    srand(0xDEADBEEF);
+    for (auto i = 0ull; i < 32768; ++i) {
+        int32_t shift = 1 + (rand() >> 10);
+        uint64_t val = i * rand();
+        uint128_t i128 = val;
+        uint128_t res = i128 >> shift;
+        assert((uint64_t)(res) == (val >> shift));
+        assert(((i128 << shift) >> shift) == i128);
+        assert((uint64_t)(i128 << 1) == val * 2);
+    }
+    printf("uint128_t bit shifts pass!\n");
+
     fixed_point128<4> f1 = 1.0;
     fixed_point128<4> f2 = 5.123456789012345;
     printf("f1: %0.15lf\n", (double)f1);
@@ -134,6 +166,23 @@ void test_shift()
 void test_multiplication()
 {
     printf("\nTest Multiplication\n");
+
+    srand(0xDEADBEEF);
+    for (auto i = 0ull; i < 32768; ++i) {
+        uint64_t val1 = 1ull + rand();
+        uint64_t val2 = 1ull + rand();
+        uint128_t i128a = val1;
+        uint128_t i128b = val2;
+        assert((uint64_t)i128a == val1);
+        assert((uint64_t)i128b == val2);
+        assert((uint64_t)(i128a * i128b) == (val1 * val2));
+        assert((i128a * i128b) == (i128b * i128a));
+        bool cond = ((i128a * i128b) << 51) == (i128b * i128a * uint128_t(1ull << 51u));
+        assert(cond);
+    }
+
+    printf("uint128_t multiplication pass!\n");
+
     fixed_point128<16> f1 = 1.0;
     fixed_point128<16> f2 = 1.4142135623730951; // == sqrt of 2
     fixed_point128<16> f1_sq = f1 * f1;
