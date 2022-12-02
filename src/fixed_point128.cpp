@@ -99,15 +99,9 @@ void test_addition()
         assert((uint64_t)i128b == val2);
         assert((uint64_t)(i128a + i128b) == (val1 + val2));
         assert((uint64_t)(i128a - i128b) == (val1 - val2));
-        //if (val1 >= val2) {
-        //    
-        //}
-        //else {
-        //    assert((uint64_t)(i128b - i128a) == (val2 - val1));
-        //}
     }
 
-    printf("uint128_t addition and subtraction pass!\n");
+    printf("uint128_t addition and subtraction passed!\n");
     
     fixed_point128<4> f1 = 5.123456789012345;
     fixed_point128<4> f2 =  7.0 - 5.123456789012345;
@@ -148,7 +142,7 @@ void test_shift()
         assert(((i128 << shift) >> shift) == i128);
         assert((uint64_t)(i128 << 1) == val * 2);
     }
-    printf("uint128_t bit shifts pass!\n");
+    printf("uint128_t bit shifts passed!\n");
 
     fixed_point128<4> f1 = 1.0;
     fixed_point128<4> f2 = 5.123456789012345;
@@ -182,7 +176,7 @@ void test_multiplication()
         assert(cond);
     }
 
-    printf("uint128_t multiplication pass!\n");
+    printf("uint128_t multiplication passed!\n");
 
     fixed_point128<16> f1 = 1.0;
     fixed_point128<16> f2 = 1.4142135623730951; // == sqrt of 2
@@ -215,7 +209,7 @@ void test_division()
         assert((i128a * i128b * i128b / i128b / i128b) == i128a);
     }
 
-    printf("uint128_t division pass!\n");
+    printf("uint128_t division passed!\n");
 
     fixed_point128<20> f1 = 1.0 / 3.0;
     printf("f1: %0.15lf\n", (double)f1);
@@ -286,7 +280,7 @@ void test_string()
         assert(0 == strcmp(i128_str, str));
     }
 
-    printf("uint128_t string operations pass!\n");
+    printf("uint128_t string operations passed!\n");
 
     printf("\nTest string\n");
     double val = 1.0 / (3.0 * (1 << 21));
@@ -304,6 +298,15 @@ void test_string()
 void test_functions()
 {
     printf("\nTest functions\n");
+    uint128_t i128a = 1ull;
+    for (auto i = 1; i < 127; ++i) {
+        uint128_t i128b = i128a << i;
+        assert(log2(i128b) == (uint32_t)i);
+    }
+
+    printf("uint128_t log2 passed!\n");
+
+
     const double values[] = {3.45, -7.5, 0.27};
     std::string s;
     fixed_point128<10> f1;

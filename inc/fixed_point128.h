@@ -837,6 +837,8 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator>>=(int32_t shift) noexcept {
+        if (shift < 1)
+            return *this;
         // 0-64 bit shift - most common
         if (shift <= 64) {
             low = shift_right128_round(low, high, (uint8_t)shift);
@@ -859,6 +861,8 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator<<=(int32_t shift) noexcept {
+        if (shift < 1)
+            return *this;
         if (shift <= 64) {
             high = shift_left128(low, high, (unsigned char)shift);
             low <<= shift;

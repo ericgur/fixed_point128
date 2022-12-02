@@ -28,6 +28,7 @@
 #include <string>
 #include <cstdint>
 #include <cstdlib>
+#include <cassert>
 #include <stdexcept>
 
 /***********************************************************************************
@@ -81,50 +82,55 @@ constexpr uint32_t array_length(const T& a) {
 }
 /**
     * @brief shift right 'x' by 'shift' bits with rounding
-    * Undefined behavior when shift is outside the range [0, 64]
+    * Undefined behavior when shift is outside the range [1, 63]
     * @param x value to shift
     * @param shift how many bits to shift
     * @return result of 'x' right shifed by 'shift'.
 */
 __forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 {
-    if (x < 1 || x > 63)
-        return x;
+    assert(shift > 0 && shift < 64);
     x += 1ull << (shift - 1);
     return x >> shift;
 }
 /**
     * @brief Right shift a 128 bit integer.
+    * Undefined behavior when shift is outside the range [1, 63]
     * @param l Low QWORD
     * @param h High QWORD
-    * @param shift Bits to shift
+    * @param shift Bits to shift, between 1-63
     * @return Lower 64 bit of the result
 */
 __forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
+    assert(shift > 0 && shift < 64);
     return (l >> shift) | (h << (64 - shift));
 }
 /**
     * @brief Right shift a 128 bit integer with rounding.
+    * Undefined behavior when shift is outside the range [1, 63]
     * @param l Low QWORD
     * @param h High QWORD
-    * @param shift Bits to shift
+    * @param shift Bits to shift, between 1-63
     * @return Lower 64 bit of the result
 */
 __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
+    assert(shift > 0 && shift < 64);
     const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
     return need_rounding + ((l >> shift) | (h << (64 - shift)));
 }
 /**
     * @brief Left shift a 128 bit integer.
+    * Undefined behavior when shift is outside the range [1, 63]
     * @param l Low QWORD
     * @param h High QWORD
-    * @param shift Bits to shift
+    * @param shift Bits to shift, between 0-63
     * @return Upper 64 bit of the result
 */
 __forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
+    assert(shift > 0 && shift < 64);
     return (h << shift) | (l >> (64 - shift));
 }
 /**

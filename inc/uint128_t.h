@@ -682,7 +682,9 @@ public:
      * @return This object.
     */
     UINT128_T_INLINE uint128_t& operator>>=(int32_t shift) noexcept {
-        // 0-64 bit shift - most common
+        if (shift < 1)
+            return *this;
+        // 1-64 bit shift - most common
         if (shift < 64) {
             low = shift_right128(low, high, (uint8_t)shift);
             high >>= shift;
@@ -699,6 +701,8 @@ public:
      * @return This object.
     */
     UINT128_T_INLINE uint128_t& operator<<=(int32_t shift) noexcept {
+        if (shift < 1)
+            return *this;
         if (shift < 64) {
             high = shift_left128(low, high, (unsigned char)shift);
             low <<= shift;
@@ -921,16 +925,6 @@ public:
         return FP128_GET_BIT(high, bit-64);
     }
     /**
-     * @brief Returns the exponent of the object - like the base 2 exponent of a floating point
-     * A value of 2.1 would return 1, [0.5,1.0) would return -1.
-     * @return Exponent of the number
-    */
-    UINT128_T_INLINE int32_t get_exponent() const
-    {
-        int32_t s = lzcnt128(*this) - 1;
-        return s;
-    }
-    /**
      * @brief Return an instance of uint128_t with the value of 1
      * @return 1
     */
@@ -1002,9 +996,9 @@ public:
      * @param x input value.
      * @return lzc (uint32_t) of the result.
     */
-    friend UINT128_T_INLINE uint32_t lzcnt128(const uint128_t& x) noexcept
+    friend __forceinline uint32_t lzcnt128(const uint128_t& x) noexcept
     {
-        return (int32_t)(__lzcnt64(x.high) + __lzcnt64(x.low));
+        return (x.high != 0) ? (int32_t)__lzcnt64(x.high) : 64 + (int32_t)__lzcnt64(x.low);
     }
     /**
      * @brief Calculates the square root using Newton's method.
@@ -1022,17 +1016,16 @@ public:
      * @param x The number to perform log2 on.
      * @return log2(x)
     */
-    friend UINT128_T_INLINE uint128_t log2(uint128_t x) noexcept
+    friend __forceinline uint32_t log2(uint128_t x)
     {
-        uint128_t y = x.get_exponent();
-        return y;
+        return 127 - lzcnt128(x);
     }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
      * @return log2(x)
     */
-    friend UINT128_T_INLINE uint128_t log(uint128_t x) noexcept
+    friend UINT128_T_INLINE uint32_t log(uint128_t x)
     {
         FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
@@ -1041,7 +1034,7 @@ public:
      * @param x The number to perform log on.
      * @return log10(x)
     */
-    friend UINT128_T_INLINE uint128_t log10(uint128_t x) noexcept
+    friend UINT128_T_INLINE uint32_t log10(uint128_t x)
     {
         FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
