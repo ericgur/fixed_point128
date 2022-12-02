@@ -9,5 +9,14 @@
 			<Item Name="[low (dec)]" ExcludeView="simple">low,d</Item>
 			<Item Name="[high (dec)]" ExcludeView="simple">high,d</Item>
 		</Expand>
-	</Type>	
+	</Type>
+  <Type Name="fp128::uint128_t">
+    <DisplayString>{high,h}{low,hb}</DisplayString>
+    <Expand>
+      <Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
+      <Item Name="[high (hex)]" ExcludeView="simple">high,h</Item>
+      <Item Name="[low (dec)]" ExcludeView="simple">low,d</Item>
+      <Item Name="[high (dec)]" ExcludeView="simple">high,d</Item>
+    </Expand>
+  </Type>
 </AutoVisualizer>

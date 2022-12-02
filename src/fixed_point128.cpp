@@ -464,7 +464,7 @@ void bench()
     }
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
-    if (ips > 5) { // trick compiler to 
+    if (ips > 5) { // trick compiler to not optimzie out the above loop
         printf("");
     }
     ips = (uint64_t)(iterations / totalTime);
