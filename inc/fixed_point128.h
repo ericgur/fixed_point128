@@ -1127,6 +1127,14 @@ public:
         return pi;
     }
     /**
+     * @brief Returns an instance of fixed_point128 with the value of the golden ratio
+     * @return golden ratio constant
+    */
+    FP128_INLINE static const fixed_point128& golden_ratio() noexcept {
+        static const fixed_point128 golden_ratio = "1.6180339887498948482045868343656381177203"; // 40 first digits of the golden ratio
+        return golden_ratio;
+    }
+    /**
      * @brief Returns an instance of fixed_point128 with the value of e
      * @return e
     */
@@ -1645,7 +1653,7 @@ public:
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
-     * @return log2(x)
+     * @return log(x)
     */
     friend FP128_INLINE fixed_point128 log(fixed_point128 x) noexcept
     {
