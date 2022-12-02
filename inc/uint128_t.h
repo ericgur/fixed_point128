@@ -217,7 +217,7 @@ public:
         while (*x && isspace(*x))
             ++x;
         
-        int base = (0 == strncmp("0x", x, 2)) ? 16 : 10;
+        uint32_t base = (0 == strncmp("0x", x, 2)) ? 16u : 10u;
         if (base == 16)
             x += 2;
         
@@ -990,9 +990,9 @@ private:
 
         while (temp.low) {
             --p;
-            lldiv_t res = lldiv(temp.low, 10ull);
-            temp.low = res.quot;
-            *p = static_cast<char>(res.rem + '0');
+            uint64_t r = temp.low % 10ull;
+            temp.low /= 10ull;
+            *p = static_cast<char>(r + '0');
         }
         return p;
     }

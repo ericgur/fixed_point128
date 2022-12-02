@@ -201,6 +201,21 @@ void test_multiplication()
 void test_division()
 {
     printf("\nTest Division\n");
+
+    srand(0xDEADBEEF);
+    for (auto i = 0ull; i < 32768; ++i) {
+        uint64_t val1 = i * rand();
+        uint64_t val2 = 1ull + rand();
+        uint128_t i128a = val1;
+        uint128_t i128b = val2;
+        assert((uint64_t)i128a == val1);
+        assert((uint64_t)i128b == val2);
+        assert((uint64_t)(i128a / i128b) == (val1 / val2));
+        assert((i128a * i128b * i128b / i128b / i128b) == i128a);
+    }
+
+    printf("uint128_t division pass!\n");
+
     fixed_point128<20> f1 = 1.0 / 3.0;
     printf("f1: %0.15lf\n", (double)f1);
     fixed_point128<20> f3 = f1 / 64.0;
@@ -254,6 +269,24 @@ void test_precision()
 
 void test_string()
 {
+    char digit2char[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+    char str[64]{};
+    srand(0xDEADBEEF);
+    for (auto i = 0ull; i < 32768; ++i) {
+        int j;
+        for (j = 0; j < 35; ++j) {
+            str[j] = digit2char[rand() % 10];
+        }
+        if (str[0] == '0')
+            str[0] = '1';
+        str[j] = '\0';
+        uint128_t i128 = str;
+        char* i128_str = (char*)i128;
+        assert(0 == strcmp(i128_str, str));
+    }
+
+    printf("uint128_t string operations pass!\n");
+
     printf("\nTest string\n");
     double val = 1.0 / (3.0 * (1 << 21));
     fixed_point128<5> f1 = val;
