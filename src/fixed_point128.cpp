@@ -45,8 +45,9 @@ void test_conversion()
     uint128_t i3 = "0xDEADBEAFDEADBEAF";
     uint128_t i4 = "0xF123456789ABCDEFFEDCBA9876543210";
     double d1 = 1e38;
-    uint128_t i5 = d1; // highest supported base 10 exponent
-    double d2 = (double)i5;
+    uint128_t i5a = d1;  // highest supported base 10 exponent
+    uint128_t i5b = 1.0; // lowest supported
+    double d2 = (double)i5a;
     assert(d1 == d2);
     d1 = pow(2.1, 80);
     uint128_t i6 = d1;

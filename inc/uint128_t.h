@@ -139,7 +139,7 @@ public:
         }
 
         // normal number, produces non zero value
-        if (e > 0) {
+        if (e >= 0) {
             // bit 52 in f is the unity value of the float. it needs to move to the unity position in fixed point
             f |= FP128_ONE_SHIFT(dbl_frac_bits);
             int32_t bits_to_shift = e - dbl_frac_bits;
