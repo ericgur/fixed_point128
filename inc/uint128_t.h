@@ -1028,11 +1028,13 @@ public:
 
         uint128_t root = uint128_t::one();
         uint128_t e, temp;
-        root <<= ((expo + 1) / 2);
-
+        root <<= ((expo + 1) >> 1);
+        
+        // Newton iterations to reduce the error
         do {
             temp = x / root;
-            e = (root > temp) ? (root - temp) >> 1 : (temp - root) >> 1;
+            // working with unsigned numbers, must keep the below positive at all times
+            e = ((root > temp) ? (root - temp) : (temp - root)) >> 1; 
             root = (root + temp) >> 1;
         } while (e);
 
@@ -1046,10 +1048,7 @@ public:
     */
     friend __forceinline uint32_t log2(const uint128_t& x)
     {
-        if (x)
-            return 127 - lzcnt128(x);
-        
-        return 0;
+        return (x) ? 127 - lzcnt128(x) : 0;
     }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x), rounded to the nearest integer.
@@ -1058,7 +1057,6 @@ public:
     */
     friend UINT128_T_INLINE uint32_t log(const uint128_t& x)
     {
-        // TODO: check if the floating point function isn't better here
         //static const uint128_t inv_log2_e = 12786308645202655659; // (1/log2(e)) * 2^64
         //return (inv_log2_e * log2(x)) >> 64;
         if (!x) return 0;
@@ -1072,7 +1070,6 @@ public:
     */
     friend UINT128_T_INLINE uint32_t log10(const uint128_t& x)
     {
-        // TODO: check if the floating point function isn't better here
         //static const uint128_t inv_log2_10 = 5553023288523357132; // (1/log2(10)) * 2^64
         //uint32_t l = log2(x);
         //uint128_t res = inv_log2_10 * l;
