@@ -87,6 +87,9 @@ private:
         uint64_t words[2];
     };
 #pragma warning(pop)
+    // useful const calculations
+    static constexpr uint64_t dbl_f_msb = 64ull + dbl_frac_bits; // msb location of the double precision fraction
+    static constexpr uint64_t flt_f_msb = 64ull + flt_frac_bits; // msb location of the single precision fraction
 
 public:
     typedef uint128_t type;
@@ -331,11 +334,11 @@ public:
 
         // move bits to the high QWORD so the msb goes to bit 23. bit [22:0] will contain the fraction.
         // double actually doesn't hold the msb, it's implicit
-        if (expo < 64 + 23) {
-            d.f = shift_left128(low, high, 64 + 23 - (int32_t)expo);
+        if (expo < flt_f_msb) {
+            d.f = shift_left128(low, high, flt_f_msb - (int32_t)expo);
         }
         else {
-            d.f = high >> (expo - (64 + 23));
+            d.f = high >> (expo - flt_f_msb);
         }
 
         return d.val;
@@ -354,11 +357,11 @@ public:
         
         // move bits to the high QWORD so the msb goes to bit 52. bit [51:0] will contain the fraction.
         // double actually doesn't hold the msb, it's implicit
-        if (expo < 64 + dbl_frac_bits) {
-            d.f = shift_left128(low, high, 64 + dbl_frac_bits - (int32_t)expo);
+        if (expo < dbl_f_msb) {
+            d.f = shift_left128(low, high, dbl_f_msb - (int32_t)expo);
         }
         else  {
-            d.f = high >> (expo - (64 + dbl_frac_bits));
+            d.f = high >> (expo - dbl_f_msb);
         }
 
         return d.val;
@@ -368,23 +371,7 @@ public:
      * @return Object value.
     */
     UINT128_T_INLINE operator long double() const noexcept {
-        if (!*this)
-            return 0;
-
-        uint64_t expo = log2(*this); // returns the bit location of the msb
-        Double d{};
-        d.e = expo + 1023;
-
-        // move bits to the high QWORD so the msb goes to bit 52. bit [51:0] will contain the fraction.
-        // double actually doesn't hold the msb, it's implicit
-        if (expo < 64 + 52) {
-            d.f = shift_left128(low, high, 64 + 52 - (int32_t)expo);
-        }
-        else {
-            d.f = high >> (expo - (64 + 52));
-        }
-
-        return d.val;
+        return operator double();
     }
     /**
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
@@ -877,11 +864,7 @@ public:
      * @return True when this object is smaller.
     */
     UINT128_T_INLINE bool operator<(const uint128_t& other) const noexcept {
-        // MSB is the same, check the LSB
-        if (high == other.high)
-            return low < other.low;
-
-        return high < other.high;
+        return high < other.high || (high == other.high && low < other.low);
     }
     /**
      * @brief Return true this object is small or equal than the other
@@ -897,11 +880,7 @@ public:
      * @return True when this objext is larger.
     */
     UINT128_T_INLINE bool operator>(const uint128_t& other) const noexcept {
-        // MSB is the same, check the LSB
-        if (high == other.high)
-            return low > other.low;
-
-        return high > other.high;
+        return high > other.high || (high == other.high && low > other.low);
     }
     /**
      * @brief Return true this object is larger or equal than the other
@@ -1073,18 +1052,21 @@ public:
         return 0;
     }
     /**
-     * @brief Calculates the natural Log (base e) of x: log(x)
+     * @brief Calculates the natural Log (base e) of x: log(x), rounded to the nearest integer.
      * @param x The number to perform log on.
      * @return log(x)
     */
     friend UINT128_T_INLINE uint32_t log(const uint128_t& x)
     {
         // TODO: check if the floating point function isn't better here
-        static const uint128_t inv_log2_e = 12786308645202655659; // (1/log2(e)) * 2^64
-        return (inv_log2_e * log2(x)) >> 64;
+        //static const uint128_t inv_log2_e = 12786308645202655659; // (1/log2(e)) * 2^64
+        //return (inv_log2_e * log2(x)) >> 64;
+        if (!x) return 0;
+        double res = log((double)x);
+        return  (uint32_t)(res + 0.5);
     }
     /**
-     * @brief Calculates Log base 10 of x: log10(x)
+     * @brief Calculates Log base 10 of x: log10(x), rounded to the nearest integer.
      * @param x The number to perform log on.
      * @return log10(x)
     */
@@ -1099,6 +1081,7 @@ public:
         double res = log10((double)x);
         return  (uint32_t)(res + 0.5);
     }
+
 }; //class uint128_t
 
 } //namespace fp128
