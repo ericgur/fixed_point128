@@ -88,8 +88,6 @@ private:
     static inline const double upper_unity = pow(2, 64 - F);     // convert upper QWORD to floating point
     static inline const double lower_unity = pow(2, -F);         // convert lower QWORD to floating point
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits; // mask of the integer bits in the upper QWORD
-    static constexpr int32_t dbl_exp_bits = 11;                         // exponent bit count of a double variable
-    static constexpr int32_t dbl_frac_bits = 52;                        // mantisa bit count of a double variable
     static constexpr int32_t max_frac_digits = (int)(1 + F / 3.1);      // meaningful base 10 digits for the fraction
 public:
     typedef fixed_point128<I> type;

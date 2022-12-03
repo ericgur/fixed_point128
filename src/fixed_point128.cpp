@@ -44,8 +44,11 @@ void test_conversion()
     uint128_t i2 = UINT64_MAX;
     uint128_t i3 = "0xDEADBEAFDEADBEAF";
     uint128_t i4 = "0xF123456789ABCDEFFEDCBA9876543210";
-    uint128_t i5 = 1e70;
-    double d1 = pow(2.1, 80);
+    double d1 = 1e38;
+    uint128_t i5 = d1; // highest supported base 10 exponent
+    double d2 = (double)i5;
+    assert(d1 == d2);
+    d1 = pow(2.1, 80);
     uint128_t i6 = d1;
     // assert(fabs((d1 / (double)i6) - 1.0) < 0.00001);
     assert(d1 == (double)i6);
@@ -308,8 +311,14 @@ void test_functions()
         uint128_t i128b = i128a << i;
         assert(log2(i128b) == (uint32_t)i);
     }
-
     printf("uint128_t log2 passed!\n");
+
+    i128a = 1ull;
+    for (auto i = 0; i < 39; ++i) { // higher than 10^38 will overflow
+        assert(log10(i128a) == (uint32_t)i);
+        i128a *= 10ull;
+    }
+    printf("uint128_t log10 passed!\n");
 
     srand(0xDEADBEEF);
     for (auto i = 0ull; i < 256; ++i) {
@@ -319,7 +328,6 @@ void test_functions()
 
         assert(i1 == i3);
     }
-
     printf("uint128_t sqrt passed!\n");
 
 

@@ -31,6 +31,7 @@
 #include <cassert>
 #include <stdexcept>
 
+
 /***********************************************************************************
 *                                  Build Options
 ************************************************************************************/
@@ -63,6 +64,40 @@
 
 namespace fp128 {
 
+/***********************************************************************************
+*                                  Constants
+************************************************************************************/
+// useful const calculations
+static constexpr int32_t flt_frac_bits = 23;  // mantisa bit count of a float variable
+static constexpr int32_t flt_exp_bits = 8;    // exponent bit count of a float variable
+static constexpr int32_t dbl_frac_bits = 52;  // mantisa bit count of a double variable
+static constexpr int32_t dbl_exp_bits = 11;   // exponent bit count of a double variable
+
+/***********************************************************************************
+*                                  Containers
+************************************************************************************/
+#pragma warning(push)
+#pragma warning(disable: 4201) // nameless union/structs
+union Double {
+    struct {
+        uint64_t f : dbl_frac_bits; // mantisa/fraction
+        uint64_t e : dbl_exp_bits; // exponent 
+        uint64_t s : 1;  // sign
+    };
+    double val;
+};
+union Float {
+    struct {
+        uint32_t f : flt_frac_bits; // mantisa/fraction
+        uint32_t e : flt_exp_bits;  // exponent 
+        uint32_t s : 1;  // sign
+    };
+    float val;
+};
+static_assert(sizeof(Double) == sizeof(double));
+static_assert(sizeof(Float) == sizeof(float));
+
+#pragma warning(pop)
 /***********************************************************************************
 *                                  Functions
 ************************************************************************************/
@@ -103,35 +138,49 @@ __forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 */
 __forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
-    assert(shift > 0 && shift < 64);
-    return (l >> shift) | (h << (64 - shift));
+    assert(shift > 0 && shift < 128);
+    if (shift < 64) {
+        return (l >> shift) | (h << (64 - shift));
+    }
+
+    shift -= 64;
+    return h >> shift;
 }
 /**
     * @brief Right shift a 128 bit integer with rounding.
     * Undefined behavior when shift is outside the range [1, 63]
     * @param l Low QWORD
     * @param h High QWORD
-    * @param shift Bits to shift, between 1-63
+    * @param shift Bits to shift, between 1-127
     * @return Lower 64 bit of the result
 */
 __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
-    assert(shift > 0 && shift < 64);
-    const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
-    return need_rounding + ((l >> shift) | (h << (64 - shift)));
+    assert(shift > 0 && shift < 128);
+    if (shift < 64) {
+        const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
+        return need_rounding + ((l >> shift) | (h << (64 - shift)));
+    }
+
+    shift -= 64;
+    const bool need_rounding = (h & 1ull << (shift - 1)) != 0;
+    return need_rounding + (h >> shift);
 }
 /**
     * @brief Left shift a 128 bit integer.
     * Undefined behavior when shift is outside the range [1, 63]
     * @param l Low QWORD
     * @param h High QWORD
-    * @param shift Bits to shift, between 0-63
+    * @param shift Bits to shift, between 0-127
     * @return Upper 64 bit of the result
 */
 __forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
-    assert(shift > 0 && shift < 64);
-    return (h << shift) | (l >> (64 - shift));
+    assert(shift > 0 && shift < 128);
+    if (shift < 64)
+        return (h << shift) | (l >> (64 - shift));
+    shift -= 64;
+    return l << shift;
 }
 /**
     * @brief converts a 128 integer to negavite via 2's complement.

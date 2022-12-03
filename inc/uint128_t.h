@@ -88,10 +88,6 @@ private:
     };
 #pragma warning(pop)
 
-    // useful const calculations
-    static constexpr int32_t dbl_exp_bits = 11;                         // exponent bit count of a double variable
-    static constexpr int32_t dbl_frac_bits = 52;                        // mantisa bit count of a double variable
-    static constexpr double upper_base = ((double)(1ull << 63)) * 2.0;
 public:
     typedef uint128_t type;
     typedef uint128_t* ptr_type;
@@ -125,16 +121,16 @@ public:
      * @param x Input value
     */
     uint128_t(double x) noexcept {
-        // brute convert to uint64_t for easy bit manipulation
-        const uint64_t i = *reinterpret_cast<uint64_t*>(&x);
+        Double d{};
+        d.val = x;
         // very common case
-        if (i == 0) {
+        if (x == 0) {
             low = high = 0;
             return;
         }
 
-        const int32_t e = FP128_GET_BITS(i, dbl_frac_bits, dbl_exp_bits) - 1023;
-        uint64_t f = (i & FP128_MAX_VALUE_64(dbl_frac_bits));
+        const int32_t e = (int32_t)d.e - 1023;
+        uint64_t f = d.f;
         
         // overflow which catches NaN and Inf
         if (e > 127) {
@@ -178,7 +174,7 @@ public:
     */
     uint128_t(int64_t x) noexcept {
         low = static_cast<uint64_t>(x);
-        high = (x < 0) ? UINT64_MAX : 0;
+        high = (x < 0) ? UINT64_MAX : 0; // sign extend tge value to the higher QWORD
     }
     /**
      * @brief Constructor from uint32_t type
@@ -194,7 +190,7 @@ public:
    */
     uint128_t(int32_t x) noexcept {
         low = static_cast<uint64_t>(x);
-        high = (x < 0) ? UINT64_MAX : 0;
+        high = (x < 0) ? UINT64_MAX : 0; // sign extend tge value to the higher QWORD
     }
     /**
      * @brief Constructor from const char* (C string).
@@ -326,27 +322,69 @@ public:
      * @return Object value.
     */
     UINT128_T_INLINE operator float() const noexcept {
-        double res = upper_base * high;
-        res += low;
-        return (float)res;
+        if (!*this)
+            return 0;
+
+        uint64_t expo = log2(*this); // returns the bit location of the msb
+        Float d{};
+        d.e = expo + 127;
+
+        // move bits to the high QWORD so the msb goes to bit 23. bit [22:0] will contain the fraction.
+        // double actually doesn't hold the msb, it's implicit
+        if (expo < 64 + 23) {
+            d.f = shift_left128(low, high, 64 + 23 - (int32_t)expo);
+        }
+        else {
+            d.f = high >> (expo - (64 + 23));
+        }
+
+        return d.val;
     }
     /**
      * @brief operator double - converts to a double
      * @return Object value.
     */
     UINT128_T_INLINE operator double() const noexcept {
-        double res = upper_base * high;
-        res += low;
-        return res;
+        if (!*this)
+            return 0;
+        
+        uint64_t expo = log2(*this); // returns the bit location of the msb
+        Double d{};
+        d.e = expo + 1023;
+        
+        // move bits to the high QWORD so the msb goes to bit 52. bit [51:0] will contain the fraction.
+        // double actually doesn't hold the msb, it's implicit
+        if (expo < 64 + dbl_frac_bits) {
+            d.f = shift_left128(low, high, 64 + dbl_frac_bits - (int32_t)expo);
+        }
+        else  {
+            d.f = high >> (expo - (64 + dbl_frac_bits));
+        }
+
+        return d.val;
     }
     /**
      * @brief operator long double - converts to a long double
      * @return Object value.
     */
     UINT128_T_INLINE operator long double() const noexcept {
-        double res = upper_base * high;
-        res += low;
-        return res;
+        if (!*this)
+            return 0;
+
+        uint64_t expo = log2(*this); // returns the bit location of the msb
+        Double d{};
+        d.e = expo + 1023;
+
+        // move bits to the high QWORD so the msb goes to bit 52. bit [51:0] will contain the fraction.
+        // double actually doesn't hold the msb, it's implicit
+        if (expo < 64 + 52) {
+            d.f = shift_left128(low, high, 64 + 52 - (int32_t)expo);
+        }
+        else {
+            d.f = high >> (expo - (64 + 52));
+        }
+
+        return d.val;
     }
     /**
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
@@ -407,7 +445,7 @@ public:
      * @param x Right hand side operand
      * @return Temporary object with the result of the operation
     */
-    UINT128_T_INLINE uint128_t operator*(int64_t x) const {
+    UINT128_T_INLINE uint128_t operator*(uint64_t x) const {
         uint128_t temp(*this);
         return temp *= x;
     }
@@ -416,7 +454,7 @@ public:
      * @param x Right hand side operand
      * @return Temporary object with the result of the operation
     */
-    UINT128_T_INLINE uint128_t operator*(int32_t x) const {
+    UINT128_T_INLINE uint128_t operator*(uint32_t x) const {
         uint128_t temp(*this);
         return temp *= x;
     }
@@ -1004,7 +1042,7 @@ public:
     */
     friend UINT128_T_INLINE uint64_t sqrt(const uint128_t& x) noexcept
     {
-        // TODO: check if the floating poitn function isn't better here
+        // TODO: check if the floating point function isn't better here
         auto expo = log2(x);
         if (expo == 0)
             return 0;
@@ -1023,10 +1061,11 @@ public:
     }
     /**
      * @brief Calculates the Log base 2 of x: log2(x)
+     * Rounding is always towards zero so the maximu error is close to 1.
      * @param x The number to perform log2 on.
      * @return log2(x). Returns zero when x is zero.
     */
-    friend __forceinline uint32_t log2(uint128_t x)
+    friend __forceinline uint32_t log2(const uint128_t& x)
     {
         if (x)
             return 127 - lzcnt128(x);
@@ -1038,20 +1077,27 @@ public:
      * @param x The number to perform log on.
      * @return log(x)
     */
-    friend UINT128_T_INLINE uint32_t log(uint128_t x)
+    friend UINT128_T_INLINE uint32_t log(const uint128_t& x)
     {
-        // TODO: check if the floating poitn function isn't better here
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // TODO: check if the floating point function isn't better here
+        static const uint128_t inv_log2_e = 12786308645202655659; // (1/log2(e)) * 2^64
+        return (inv_log2_e * log2(x)) >> 64;
     }
     /**
      * @brief Calculates Log base 10 of x: log10(x)
      * @param x The number to perform log on.
      * @return log10(x)
     */
-    friend UINT128_T_INLINE uint32_t log10(uint128_t x)
+    friend UINT128_T_INLINE uint32_t log10(const uint128_t& x)
     {
-        // TODO: check if the floating poitn function isn't better here
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // TODO: check if the floating point function isn't better here
+        //static const uint128_t inv_log2_10 = 5553023288523357132; // (1/log2(10)) * 2^64
+        //uint32_t l = log2(x);
+        //uint128_t res = inv_log2_10 * l;
+        //return static_cast<uint32_t>(res.high);
+        if (!x) return 0;
+        double res = log10((double)x);
+        return  (uint32_t)(res + 0.5);
     }
 }; //class uint128_t
 
