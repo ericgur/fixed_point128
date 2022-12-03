@@ -1112,7 +1112,7 @@ public:
     */
     FP128_INLINE int32_t get_exponent() const
     {
-        int32_t s = lzcnt128(*this);
+        int32_t s = (int32_t)lzcnt128(*this);
         s = I - s - 1;
         return s;
     }
@@ -1323,9 +1323,9 @@ public:
      * @param x input value.
      * @return lzc (uint32_t) of th result.
     */
-    friend FP128_INLINE uint32_t lzcnt128(const fixed_point128& x) noexcept
+    friend FP128_INLINE uint64_t lzcnt128(const fixed_point128& x) noexcept
     {
-        return (x.high != 0) ? (int32_t)__lzcnt64(x.high) : 64 + (int32_t)__lzcnt64(x.low);
+        return (x.high != 0) ? __lzcnt64(x.high) : 64 + __lzcnt64(x.low);
     }
     /**
      * @brief Calculates the square root using Newton's method.
