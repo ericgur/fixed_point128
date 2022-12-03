@@ -641,6 +641,11 @@ public:
             high = 0;
             return *this;
         }
+        
+        // exponent of 2, convert to a much faster shift operation
+        if (1 == popcnt128(other)) {
+            return *this >>= (int32_t)log2(other);
+        }
 
         uint64_t q[2]{}; 
         uint64_t nom[2] = { low, high };
@@ -1005,13 +1010,22 @@ private:
     }
 public:
     /**
-     * @brief Calculates the left zero count of value x, ignoring the sign.
+     * @brief Calculates the left zero count of value x.
      * @param x input value.
      * @return lzc (uint32_t) of the result.
     */
-    friend __forceinline uint32_t lzcnt128(const uint128_t& x) noexcept
+    friend __forceinline uint64_t lzcnt128(const uint128_t& x) noexcept
     {
-        return (x.high != 0) ? (int32_t)__lzcnt64(x.high) : 64 + (int32_t)__lzcnt64(x.low);
+        return (x.high != 0) ? __lzcnt64(x.high) : 64 + __lzcnt64(x.low);
+    }
+    /**
+     * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
+     * @param x input value.
+     * @return Number of 1 bits in x.
+    */
+    friend __forceinline uint64_t popcnt128(const uint128_t& x) noexcept
+    {
+        return __popcnt64(x.low) + __popcnt64(x.high);
     }
     /**
      * @brief Calculates the square root using Newton's method.
@@ -1028,7 +1042,7 @@ public:
 
         uint128_t root = uint128_t::one();
         uint128_t e, temp;
-        root <<= ((expo + 1) >> 1);
+        root <<= (uint32_t)((expo + 1) >> 1);
         
         // Newton iterations to reduce the error
         do {
@@ -1046,29 +1060,29 @@ public:
      * @param x The number to perform log2 on.
      * @return log2(x). Returns zero when x is zero.
     */
-    friend __forceinline uint32_t log2(const uint128_t& x)
+    friend __forceinline uint64_t log2(const uint128_t& x)
     {
-        return (x) ? 127 - lzcnt128(x) : 0;
+        return (x) ? 127ull - lzcnt128(x) : 0;
     }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x), rounded to the nearest integer.
      * @param x The number to perform log on.
      * @return log(x)
     */
-    friend UINT128_T_INLINE uint32_t log(const uint128_t& x)
+    friend UINT128_T_INLINE uint64_t log(const uint128_t& x)
     {
         //static const uint128_t inv_log2_e = 12786308645202655659; // (1/log2(e)) * 2^64
         //return (inv_log2_e * log2(x)) >> 64;
         if (!x) return 0;
         double res = log((double)x);
-        return  (uint32_t)(res + 0.5);
+        return  (uint64_t)(res + 0.5);
     }
     /**
      * @brief Calculates Log base 10 of x: log10(x), rounded to the nearest integer.
      * @param x The number to perform log on.
      * @return log10(x)
     */
-    friend UINT128_T_INLINE uint32_t log10(const uint128_t& x)
+    friend UINT128_T_INLINE uint64_t log10(const uint128_t& x)
     {
         //static const uint128_t inv_log2_10 = 5553023288523357132; // (1/log2(10)) * 2^64
         //uint32_t l = log2(x);
@@ -1076,7 +1090,7 @@ public:
         //return static_cast<uint32_t>(res.high);
         if (!x) return 0;
         double res = log10((double)x);
-        return  (uint32_t)(res + 0.5);
+        return  (uint64_t)(res + 0.5);
     }
 
 }; //class uint128_t
