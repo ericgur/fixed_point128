@@ -1086,4 +1086,4 @@ public:
 
 } //namespace fp128
 
-#endif // #ifndef FIXED_POINT128_H
+#endif // #ifndef UINT128_T_H
