@@ -7,3 +7,5 @@
 *.user
 *.aps
 html
+gtest/build
+gtest/external
