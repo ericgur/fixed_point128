@@ -314,7 +314,7 @@ public:
      * @param other Object to copy from
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator=(const fixed_point128&& other) noexcept {
+     FP128_INLINE fixed_point128& operator=(const fixed_point128&& other) noexcept {
         high = other.high;
         low = other.low;
         sign = other.sign;

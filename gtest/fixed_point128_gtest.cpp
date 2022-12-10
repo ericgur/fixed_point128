@@ -15,6 +15,10 @@ using namespace fp128;
 
 
 // Construct fixed_point128 and convert back to/from various elements.
+TEST(fixed_point128, DefaultConstructor) {
+    fixed_point128<20> f;
+    EXPECT_EQ(static_cast<uint64_t>(f), 0ull);
+}
 TEST(fixed_point128, ConstructorFromDouble) {
     double values[] = { 0.0, 1.0, 2.5, 0.001, 255.000001, 1e38 };
     for (auto i = 0u; i < array_length(values); ++i) {
@@ -89,5 +93,39 @@ TEST(fixed_point128, ConstructorFromString) {
         double d1 = strtod(values[i], nullptr);
         double d2 = strtod(static_cast<char*>(f), nullptr);
         EXPECT_DOUBLE_EQ(d1, d2);
+    }
+}
+TEST(fixed_point128, CopyConstructor) {
+    double values[] = { 0.0, 1.0, 2.5, 0.001, 255.000001, -13.5433, 1e38 };
+    for (auto i = 0u; i < array_length(values); ++i) {
+        fixed_point128<20> f1 = values[i];
+        fixed_point128<20> f2 = f1;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+    }
+}
+TEST(fixed_point128, MoveConstructor) {
+    double values[] = { 0.0, 1.0, 2.5, 0.001, 255.000001, -13.5433, 1e38 };
+    for (auto i = 0u; i < array_length(values); ++i) {
+        fixed_point128<20> f1 = values[i];
+        fixed_point128<20> f2(std::move(f1));
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+    }
+}
+TEST(fixed_point128, AssignmentOperator) {
+    double values[] = { 0.0, 1.0, 2.5, 0.001, 255.000001, -13.5433, 1e38 };
+    for (auto i = 0u; i < array_length(values); ++i) {
+        fixed_point128<20> f1 = values[i];
+        fixed_point128<20> f2;
+        f2 = f1;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+    }
+}
+TEST(fixed_point128, MoveAssignmentOperator) {
+    double values[] = { 0.0, 1.0, 2.5, 0.001, 255.000001, -13.5433, 1e38 };
+    for (auto i = 0u; i < array_length(values); ++i) {
+        fixed_point128<20> f1 = values[i];
+        fixed_point128<20> f2;
+        f2 = std::move(f1);
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
     }
 }
