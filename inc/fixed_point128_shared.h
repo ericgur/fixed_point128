@@ -276,10 +276,10 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
     for (j = m - n; j >= 0; j--) { // Main loop. 
         // Compute estimate qhat of q[j]. 
         k = (((uint64_t)un[j + n] << 32) + (uint64_t)un[j + n - 1]);
-        qhat = k / vn[n - 1];
+        qhat = k / (uint64_t)vn[n - 1];
         //rhat = k % vn[n - 1];
-        rhat = k - qhat * vn[n - 1];
-        while (qhat >= b || qhat * vn[n - 2] > (rhat << 32) + un[j + n - 2]) {
+        rhat = k - qhat * (uint64_t)vn[n - 1];
+        while (qhat >= b || qhat * (uint64_t)vn[n - 2] > (rhat << 32) + (uint64_t)un[j + n - 2]) {
             --qhat;
             rhat += vn[n - 1];
             if (rhat >= b)
