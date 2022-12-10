@@ -90,7 +90,7 @@ private:
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits; // mask of the integer bits in the upper QWORD
     static constexpr int32_t max_frac_digits = (int)(1 + F / 3.1);      // meaningful base 10 digits for the fraction
 public:
-    static constexpr uint64_t max_int_value = int_mask;
+    static constexpr uint64_t max_int_value = int_mask >> upper_frac_bits;
     typedef fixed_point128<I> type;
     typedef fixed_point128<I>* ptr_type;
     typedef fixed_point128<I>& ref_type;
