@@ -57,7 +57,6 @@ TEST(fixed_point128, ConstructorFromDouble) {
         double value = get_double_random();
         fixed_point128<20> f = value;
         if (fabs(value) > f.max_int_value) {
-            printf("Warning: test used a value which is too high: %lf\n", value);
             continue;
         }
         double f_value = static_cast<double>(f);
@@ -73,7 +72,6 @@ TEST(fixed_point128, ConstructorFromFloat) {
         float value = (float)get_double_random();
         fixed_point128<20> f = value;
         if (fabs(value) > f.max_int_value) {
-            printf("Warning: test used a value which is too high: %f\n", value);
             continue;
         }
         EXPECT_FLOAT_EQ(static_cast<float>(f), value);
@@ -85,7 +83,6 @@ TEST(fixed_point128, ConstructorFromInt32) {
         int32_t value = get_int32_random();
         fixed_point128<32> f = value;
         if (abs(value) > f.max_int_value) {
-            printf("Warning: test used a value which is too high: %d\n", value);
             continue;
         }
         EXPECT_EQ(static_cast<int32_t>(f), value);
@@ -97,7 +94,6 @@ TEST(fixed_point128, ConstructorFromUnsignedInt32) {
         uint32_t value = get_uint32_random();
         fixed_point128<32> f = value;
         if (value > f.max_int_value) {
-            printf("Warning: test used a value which is too high: %u\n", value);
             continue;
         }
         EXPECT_EQ(static_cast<uint32_t>(f), value);
@@ -109,7 +105,6 @@ TEST(fixed_point128, ConstructorFromInt64) {
         int64_t value = get_int64_random();
         fixed_point128<32> f = value;
         if (abs(value) > f.max_int_value) {
-            printf("Warning: test used a value which is too high: %lld\n", value);
             continue;
         }
         EXPECT_EQ(static_cast<int64_t>(f), value);
@@ -121,7 +116,6 @@ TEST(fixed_point128, ConstructorFromUnsignedInt64) {
         uint64_t value = get_uint64_random();
         fixed_point128<32> f = value;
         if (value > f.max_int_value) {
-            printf("Warning: test used a value which is too high: %llu\n", value);
             continue;
         }
         EXPECT_EQ(static_cast<uint64_t>(f), value);
@@ -137,7 +131,6 @@ TEST(fixed_point128, ConstructorFromString) {
     }
 }
 TEST(fixed_point128, CopyConstructor) {
-
     srand(RANDOM_SEED); // must have a repeatable seed for debugging
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
@@ -166,7 +159,6 @@ TEST(fixed_point128, AssignmentOperator) {
     }
 }
 TEST(fixed_point128, AssignmentOperatorOtherType) {
-
     srand(RANDOM_SEED); // must have a repeatable seed for debugging
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
@@ -187,12 +179,71 @@ TEST(fixed_point128, MoveAssignmentOperator) {
     }
 }
 TEST(fixed_point128, CopyConstructorOtherType) {
-
     srand(RANDOM_SEED); // must have a repeatable seed for debugging
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         fixed_point128<20> f1 = value;
         fixed_point128<22> f2 = f1;
         EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+    }
+}
+TEST(fixed_point128, AddSameSign) {
+    srand(RANDOM_SEED); // must have a repeatable seed for debugging
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(get_double_random());
+        double value2 = value1 * 2.5;
+        double res = value1 + value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f2 = value2;
+        fixed_point128<40> f3 = f1 + f2;
+        if (res > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res);
+    }
+}
+TEST(fixed_point128, AddDifferentSign) {
+    srand(RANDOM_SEED); // must have a repeatable seed for debugging
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(get_double_random());
+        double value2 = value1 * -2.5;
+        double res = value1 + value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f2 = value2;
+        fixed_point128<40> f3 = f1 + f2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "Value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, SubtractSameSign) {
+    srand(RANDOM_SEED); // must have a repeatable seed for debugging
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(get_double_random());
+        double value2 = value1 * 2.5;
+        double res = value1 - value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f2 = value2;
+        fixed_point128<40> f3 = f1 - f2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res);
+    }
+}
+TEST(fixed_point128, SubtractDifferentSign) {
+    srand(RANDOM_SEED); // must have a repeatable seed for debugging
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(get_double_random());
+        double value2 = value1 * -2.5;
+        double res = value1 - value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f2 = value2;
+        fixed_point128<40> f3 = f1 - f2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "Value1=" << value1 << ", value2=" << value2;
     }
 }
