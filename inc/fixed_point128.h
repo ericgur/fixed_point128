@@ -111,6 +111,35 @@ public:
     fixed_point128(const fixed_point128& other) noexcept :
         low(other.low), high(other.high), sign(other.sign) {}
     /**
+     * @brief cross-template Copy constructor, can be used between two different fixed_point128 templates
+     * @param other fixed_point128 instance with from a different template instance.
+     * @return This object.
+    */
+    template<int32_t I2>
+    fixed_point128(const fixed_point128<I2>& other)
+    {
+        sign = other.sign;
+        if constexpr (I == I2) {
+            high = other.high;
+            low = other.low;
+        }
+        // other has less integer bits and more fraction bits
+        else if constexpr (I < I2) {
+            // shift left by I2 - I bits
+            const int shift = I2 - I;
+            low = other.low << shift;
+            high = shift_left128(other.low, other.high, (uint8_t)(64 - shift));
+        }
+        // other has more integer bits and less fraction bits
+        else { // I > I2
+            // shift right by I - I2 bits
+            const int shift = I - I2;
+            low = shift_right128_round(other.low, other.high, (uint8_t)shift);
+            high = other.high >> shift;
+        }
+    }
+
+    /**
      * @brief Move constructor
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param other Object to copy from
