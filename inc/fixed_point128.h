@@ -597,10 +597,9 @@ public:
             return *this;
         }
 
-        // different sign: convert other to negative and use operator -=
+        // different sign: invert the sign for other and subtract
         if (other.sign != sign) {
-            fixed_point128 temp = -other;
-            return subtract(temp);
+            return subtract(-other);
         }
 
         return add(other);
@@ -615,10 +614,9 @@ public:
             return *this;
         }
 
-        // different sign: convert other to negative and use operator +=
+        // different sign: invert the sign for other and add
         if (other.sign != sign) {
-            fixed_point128 temp = -other;
-            return add(temp);
+            return add(-other);
         }
 
         return subtract(other);
@@ -754,6 +752,9 @@ public:
     inline fixed_point128& operator/=(const fixed_point128& other) {
         uint64_t q[4]{}; 
         bool need_rounding = false;
+        // trivial case, this object is zero
+        if (!*this)
+            return *this;
 
         // optimization for when dividing by an integer
         if (other.is_int() && (uint64_t)other <= UINT64_MAX) {
@@ -766,12 +767,13 @@ public:
                 low = q[0];
             }
             else { // error
-                FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
+                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
             }
         }
         else {
             uint64_t nom[4] = {0, 0, low, high};
             uint64_t denom[2] = {other.low, other.high};
+
             if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
                 static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
                 need_rounding = (q[0] & half) != 0;
@@ -781,7 +783,7 @@ public:
                 low = shift_right128(q[0], q[1], I);
             }
             else { // error
-                FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
+                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
             }
         }
 
@@ -1254,22 +1256,21 @@ private:
      * @return This object.
     */
     FP128_INLINE fixed_point128& subtract(const fixed_point128& other) {
-        unsigned char carry;
         FP128_ASSERT(other.sign == sign); // bug if asserted, calling method should take care of this
 
         // convert other high/low to 2's complement (flip bits, add +1)
-        uint64_t other_low = static_cast<uint64_t>(-(int64_t)other.low);
-        uint64_t other_high = ~other.high + (other_low == 0);
+        uint64_t other_low = other.low;
+        uint64_t other_high = other.high;
+        twos_complement128(other_low, other_high);
 
         //add the other value
-        carry = _addcarry_u64(0, low, other_low, &low);
+        unsigned char carry = _addcarry_u64(0, low, other_low, &low);
         high += other_high + carry;
 
         // if result is is negative, invert it along with the sign.
         if (high & FP128_ONE_SHIFT(63)) {
             sign ^= 1;
-            low = static_cast<uint64_t>(-(int64_t)low);
-            high = ~high + (low == 0);
+            twos_complement128(low, high);
         }
 
         // set sign to 0 when both low and high are zero (avoid having negative zero value)

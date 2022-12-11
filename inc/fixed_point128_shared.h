@@ -113,6 +113,7 @@ static_assert(sizeof(Float) == sizeof(float));
 */
 template<typename T>
 constexpr uint32_t array_length(const T& a) {
+    static_assert(sizeof(a[0]) != 0);
     return sizeof(a) / sizeof(a[0]);
 }
 /**
@@ -124,7 +125,7 @@ constexpr uint32_t array_length(const T& a) {
 */
 __forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 {
-    assert(shift > 0 && shift < 64);
+    FP128_ASSERT(shift > 0 && shift < 64);
     x += 1ull << (shift - 1);
     return x >> shift;
 }
@@ -138,7 +139,7 @@ __forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 */
 __forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
-    assert(shift > 0 && shift < 128);
+    FP128_ASSERT(shift > 0 && shift < 128);
     if (shift < 64) {
         return (l >> shift) | (h << (64 - shift));
     }
@@ -156,7 +157,7 @@ __forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcep
 */
 __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
-    assert(shift > 0 && shift < 128);
+    FP128_ASSERT(shift > 0 && shift < 128);
     if (shift < 64) {
         const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
         return need_rounding + ((l >> shift) | (h << (64 - shift)));
@@ -176,7 +177,7 @@ __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) n
 */
 __forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
-    assert(shift > 0 && shift < 128);
+    FP128_ASSERT(shift > 0 && shift < 128);
     if (shift < 64)
         return (h << shift) | (l >> (64 - shift));
     shift -= 64;
@@ -203,23 +204,23 @@ __forceinline void twos_complement128(uint64_t& l, uint64_t& h) noexcept
     * @return 0 for success
 */
 FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, uint32_t v, int64_t m) noexcept
-    {
-        if (u == nullptr || q == nullptr)
-            return 1;
+{
+    if (u == nullptr || q == nullptr || v == 0)
+        return 1;
 
-        while (m > 0 && u[m - 1] == 0) --m;
+    while (m > 0 && u[m - 1] == 0) --m;
 
-        uint64_t k = 0;
-        for (auto j = m - 1; j >= 0; --j) {
-            k = (k << 32) + u[j];
-            q[j] = (uint32_t)(k / v);
-            k -= (uint64_t)q[j] * v;
-        }
-
-        if (r != nullptr)
-            *r = (uint32_t)k;
-        return 0;
+    uint64_t k = 0;
+    for (auto j = m - 1; j >= 0; --j) {
+        k = (k << 32) + u[j];
+        q[j] = (uint32_t)(k / v);
+        k -= (uint64_t)q[j] * v;
     }
+
+    if (r != nullptr)
+        *r = (uint32_t)k;
+    return 0;
+}
 /**
     * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
     * @param q (output) Pointer to receive the quote
@@ -230,94 +231,98 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
     * @param n Count of elements in v
     * @return 0 for success
 */
-FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int64_t m, int64_t n) noexcept
+FP128_INLINE static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
 {
     constexpr uint64_t b = 1ull << 32; // Number base (32 bits).
-    constexpr uint64_t mask = b - 1;
-    uint64_t qhat{};                 // Estimated quotient digit.
-    uint64_t rhat{};                 // A remainder.
-    uint64_t p{};                    // Product of two digits.
-    int64_t s{}, s_comp{}, i{}, j{}, t{}, k{};
-    if (v == nullptr || u == nullptr || q == nullptr)
-        return 1;
+    constexpr uint64_t mask = b - 1;   // 32 bit mask
+    uint32_t *un, *vn;                 // Normalized form of u, v.
+    uint64_t qhat;                     // Estimated quotient digit.
+    uint64_t rhat;                     // A remainder.
+    uint64_t p;                        // Product of two digits.
+    int64_t t, k;
+    int32_t i, j;
+    // disable various warnings, some are bogus in VS2022.
+#pragma warning(push)
+#pragma warning(disable: 6255)
+#pragma warning(disable: 4244)
+#pragma warning(disable: 6297)
+#pragma warning(disable: 6385)
+#pragma warning(disable: 6386)
+#pragma warning(disable: 26451)
 
-    // shrink the arrays to avoid extra work on small numbers
+// shrink the arrays to avoid extra work on small numbers
     while (m > 0 && u[m - 1] == 0) --m;
     while (n > 0 && v[n - 1] == 0) --n;
 
-    if (m < n || n <= 0)
+    if (m < n || n <= 0 || v[n - 1] == 0)
         return 1; // Return if invalid param.
 
     // Take care of the case of a single-digit divisor here.
-    if (n == 1) {
+    if (n == 1)
         return div_32bit(q, r, u, v[0], m);
-    }
-    // Normalize by shifting v left just enough so that its high-order bit is on, and shift u left the same amount.
-    // We may have to append a high-order digit on the dividend; we do that unconditionally.
-    s = (uint64_t)__lzcnt(v[n - 1]); // 0 <= s <= 32. 
-    s_comp = 32 - s; // complementry of the shift value to 32
-#pragma warning(push)
-#pragma warning(disable: 6255)
-    uint32_t* vn = (uint32_t*)_alloca(sizeof(uint32_t) * n);
 
-    // Normalize v - shift left by s
-    for (i = n - 1; i > 0; i--)
-        vn[i] = (uint32_t)(v[i] << s) | (v[i - 1] >> s_comp);
+    /* Normalize by shifting v left just enough so that its high-order
+    bit is on, and shift u left the same amount. We may have to append a
+    high-order digit on the dividend; we do that unconditionally. */
+
+    const int32_t s = __lzcnt(v[n - 1]);             // 0 <= s <= 31.
+    const int32_t s_comp = 32 - s;
+    vn = (uint32_t*)_alloca(sizeof(uint32_t) * n);
+    for (i = n - 1; i > 0; --i)
+        vn[i] = (v[i] << s) | ((uint64_t)v[i - 1] >> s_comp);
     vn[0] = v[0] << s;
-    uint32_t* un = (uint32_t*)_alloca(sizeof(uint32_t) * (m + 2));
-#pragma warning(pop)
 
-    // Normalize u - shift left by s
-    un[m] = u[m - 1] >> s_comp;
-    for (i = m - 1; i > 0; i--)
-        un[i] = (u[i] << s) | (u[i - 1] >> s_comp);
-
+    un = (uint32_t*)_alloca(sizeof(uint32_t) * (m + 1));
+    un[m] = (uint64_t)u[m - 1] >> s_comp;
+    for (i = m - 1; i > 0; --i)
+        un[i] = (u[i] << s) | ((uint64_t)u[i - 1] >> s_comp);
     un[0] = u[0] << s;
-    for (j = m - n; j >= 0; j--) { // Main loop. 
-        // Compute estimate qhat of q[j]. 
-        k = (((uint64_t)un[j + n] << 32) + (uint64_t)un[j + n - 1]);
-        qhat = k / (uint64_t)vn[n - 1];
-        //rhat = k % vn[n - 1];
-        rhat = k - qhat * (uint64_t)vn[n - 1];
-        while (qhat >= b || qhat * (uint64_t)vn[n - 2] > (rhat << 32) + (uint64_t)un[j + n - 2]) {
-            --qhat;
-            rhat += vn[n - 1];
-            if (rhat >= b)
-                break;
+
+    for (j = m - n; j >= 0; --j) {       // Main loop.
+        // Compute estimate qhat of q[j].
+        qhat = (un[j + n] * b + un[j + n - 1]) / vn[n - 1];
+        rhat = (un[j + n] * b + un[j + n - 1]) - qhat * vn[n - 1];
+    again:
+        if (qhat >= b || qhat* vn[n - 2] > b* rhat + un[j + n - 2]) {
+            qhat = qhat - 1;
+            rhat = rhat + vn[n - 1];
+            if (rhat < b) goto again;
         }
-        // Multiply and subtract. 
+
+        // Multiply and subtract.
         k = 0;
         for (i = 0; i < n; ++i) {
-            p = (uint32_t)qhat * (uint64_t)vn[i];
-            t = (uint64_t)un[i + j] - k - (p & mask);
-            un[i + j] = (uint32_t)t;
+            p = qhat * vn[i];
+            t = un[i + j] - k - (p & mask);
+            un[i + j] = t;
             k = (p >> 32) - (t >> 32);
         }
+        t = un[j + n] - k;
+        un[j + n] = t;
 
-        t = (uint64_t)un[j + n] - k;
-        un[j + n] = (uint32_t)t;
-        q[j] = (uint32_t)qhat;  // Store quotient digit. 
-        if (t < 0) {            // If we subtracted too much, add back. 
-            --q[j];
+        q[j] = qhat;          // Store quotient digit.
+        if (t < 0) {          // If we subtracted too
+            q[j] = q[j] - 1;  // much, add back.
             k = 0;
-            for (i = 0; i < n; i++) {
-                t = k + un[i + j] + vn[i];
-                un[i + j] = (uint32_t)t;
+            for (i = 0; i < n; ++i) {
+                t = (uint64_t)un[i + j] + vn[i] + k;
+                un[i + j] = t;
                 k = t >> 32;
             }
-            un[j + n] = (uint32_t)(k + un[j + n]);
+            un[j + n] = un[j + n] + k;
         }
-    } // End j.
-
-    // If the caller wants the remainder, unnormalize it and pass it back. 
-    if (r != nullptr) {
-        for (i = 0; i < n; ++i) {
-            r[i] = (un[i] >> s) | (un[i + 1] << s_comp);
-        }
+        } // End j.
+        // If the caller wants the remainder, unnormalize
+        // it and pass it back.
+    if (r != NULL) {
+        for (i = 0; i < n - 1; ++i)
+            r[i] = (un[i] >> s) | ((uint64_t)un[i + 1] << s_comp);
+        
+        r[n - 1] = un[n - 1] >> s;
     }
     return 0;
+#pragma warning(pop)
 }
-
 /**
     * @brief 64 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
     * @param q (output) Pointer to receive the quote
@@ -337,7 +342,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
     }
 
     while (m > 0 && u[m - 1] == 0) --m;
-    if (m == 0) // error case
+    if (m == 0 || v == 0) // error case
         return 1;
 
     if (m == 1) {
