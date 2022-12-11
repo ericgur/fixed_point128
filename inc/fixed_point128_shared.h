@@ -52,8 +52,10 @@
 #define FP128_NOT_IMPLEMENTED_EXCEPTION throw std::exception("Not implemented!")
 #if defined _DEBUG || defined DEBUG
 #define FP128_ASSERT(x) { if (!(x)) throw std::exception("FP128_ASSERT failed: "#x); } 
+#define FP128_THROW_ONLY_IN_DEBUG
 #else
 #define FP128_ASSERT(x)
+#define FP128_THROW_ONLY_IN_DEBUG noexcept
 #endif // _DEBUG
 
 #if FP128_DISABLE_INLINE != FALSE
@@ -123,7 +125,7 @@ constexpr uint32_t array_length(const T& a) {
     * @param shift how many bits to shift
     * @return result of 'x' right shifed by 'shift'.
 */
-__forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
+__forceinline uint64_t shift_right64_round(uint64_t x, int shift) FP128_THROW_ONLY_IN_DEBUG
 {
     FP128_ASSERT(shift > 0 && shift < 64);
     x += 1ull << (shift - 1);
@@ -137,7 +139,7 @@ __forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
     * @param shift Bits to shift, between 1-63
     * @return Lower 64 bit of the result
 */
-__forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
+__forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) FP128_THROW_ONLY_IN_DEBUG
 {
     FP128_ASSERT(shift > 0 && shift < 128);
     if (shift < 64) {
@@ -155,7 +157,7 @@ __forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcep
     * @param shift Bits to shift, between 1-127
     * @return Lower 64 bit of the result
 */
-__forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
+__forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) FP128_THROW_ONLY_IN_DEBUG
 {
     FP128_ASSERT(shift > 0 && shift < 128);
     if (shift < 64) {
@@ -175,7 +177,7 @@ __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) n
     * @param shift Bits to shift, between 0-127
     * @return Upper 64 bit of the result
 */
-__forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
+__forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift) FP128_THROW_ONLY_IN_DEBUG
 {
     FP128_ASSERT(shift > 0 && shift < 128);
     if (shift < 64)

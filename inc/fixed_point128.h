@@ -826,7 +826,8 @@ public:
     inline fixed_point128& operator%=(const fixed_point128& other) {
         uint64_t nom[4] = {0, 0, low, high};
         uint64_t denom[2] = {other.low, other.high};
-        uint64_t q[4] = {0}, r[4] = {0};
+        uint64_t q[4]{};
+        uint64_t r[2]{}; // same size as the denominator
         
         //do the division in with positive numbers
         if (0 == div_32bit((uint32_t*)q, (uint32_t*)r, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
@@ -1239,7 +1240,7 @@ private:
      * @param other The right side of the addition operation
      * @return This object.
     */
-    FP128_INLINE fixed_point128& add(const fixed_point128& other) {
+    FP128_INLINE fixed_point128& add(const fixed_point128& other) FP128_THROW_ONLY_IN_DEBUG {
         unsigned char carry;
         FP128_ASSERT(other.sign == sign); // bug if asserted, calling method should take care of this
         // equal sign: simple case
@@ -1255,7 +1256,7 @@ private:
      * @param other The right side of the subtraction operation.
      * @return This object.
     */
-    FP128_INLINE fixed_point128& subtract(const fixed_point128& other) {
+    FP128_INLINE fixed_point128& subtract(const fixed_point128& other) FP128_THROW_ONLY_IN_DEBUG {
         FP128_ASSERT(other.sign == sign); // bug if asserted, calling method should take care of this
 
         // convert other high/low to 2's complement (flip bits, add +1)
