@@ -30,7 +30,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <stdexcept>
-
+#include <type_traits>
 
 /***********************************************************************************
 *                                  Build Options

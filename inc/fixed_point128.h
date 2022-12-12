@@ -497,27 +497,14 @@ public:
         return temp *= x;
     }
     /**
-    /**
-     * @brief Divides this object by the right hand side operand and returns the result.
-     * @param other Right hand side operand (denominator)
-     * @return Temporary object with the result of the operation
-    */
-    FP128_INLINE fixed_point128 operator/(const fixed_point128& other) const {
-        fixed_point128 temp(*this);
-        return temp /= other;
-    }
-    /**
      * @brief Divides this object by the right hand side operand and returns the result.
      * @param x Right hand side operand (denominator)
      * @return Temporary object with the result of the operation
     */
-    FP128_INLINE fixed_point128 operator/(double x) const {
-        if (x == 0)
-            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
-
+    template<typename T>
+    FP128_INLINE fixed_point128 operator/(T x) const {
         fixed_point128 temp(*this);
-        temp /= x;
-        return temp;
+        return temp /= x;
     }
     /**
      * @brief Calculates modulo.
@@ -533,18 +520,20 @@ public:
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
     */
-    FP128_INLINE fixed_point128 operator>>(int32_t shift) const {
+    template<typename T>
+    FP128_INLINE fixed_point128 operator>>(T shift) const {
         fixed_point128 temp(*this);
-        return temp >>= shift;
+        return temp >>= static_cast<int32_t>(shift);
     }
     /**
      * @brief Performs left shift operation.
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
     */
-    FP128_INLINE fixed_point128 operator<<(int32_t shift) const {
+    template<typename T>
+    FP128_INLINE fixed_point128 operator<<(T shift) const {
         fixed_point128 temp(*this);
-        return temp <<= shift;
+        return temp <<= static_cast<int32_t>(shift);
     }
     /**
      * @brief Performs bitwise AND (&)
@@ -689,41 +678,6 @@ public:
      * @param x Right hand side operand
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator*=(int32_t x) {
-        // alway do positive multiplication
-        if (x < 0) {
-            x = -x;
-            sign ^= 1;
-        }
-
-        return operator*=(static_cast<uint64_t>(x));
-    }
-    /**
-     * @brief Multiplies a value to this object
-     * @param x Right hand side operand
-     * @return This object.
-    */
-    FP128_INLINE fixed_point128& operator*=(uint32_t x) {
-        return operator*=(static_cast<uint64_t>(x));
-    }
-    /**
-     * @brief Multiplies a value to this object
-     * @param x Right hand side operand
-     * @return This object.
-    */
-    FP128_INLINE fixed_point128& operator*=(int64_t x) {
-        // alway do positive multiplication
-        if (x < 0) {
-            x = -x;
-            sign ^= 1;
-        }
-        return operator*=(static_cast<uint64_t>(x));
-    }
-    /**
-     * @brief Multiplies a value to this object
-     * @param x Right hand side operand
-     * @return This object.
-    */
     FP128_INLINE fixed_point128& operator*=(uint64_t x) {
         uint64_t temp;
 
@@ -733,6 +687,26 @@ public:
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
         sign &= (0 != low || 0 != high);
         return *this;
+    }
+    /**
+     * @brief Multiplies a value to this object
+     * @param x Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE fixed_point128& operator*=(T x) {
+        if constexpr (std::is_floating_point<T>::value) {
+            return operator*=(fixed_point128(x));
+        }
+        if constexpr (std::is_signed<T>::value) {
+            // alway do positive multiplication
+            if (x < 0) {
+                x = -x;
+                sign ^= 1;
+            }
+        }
+
+        return operator*=(static_cast<uint64_t>(x));
     }
     /**
      * @brief Divide this object by x.
@@ -791,7 +765,17 @@ public:
      * @param x Denominator.
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator/=(double x) {
+    template<typename T>
+    FP128_INLINE fixed_point128& operator/=(T x) {
+        return operator/=(static_cast<double>(x));
+    }
+    /**
+     * @brief Divide this object by x.
+     * @param x Denominator.
+     * @return This object.
+    */
+    template<>
+    FP128_INLINE fixed_point128& operator/=<double>(double x) {
         const uint64_t i = *((uint64_t*)(&x));
         // infinity
         if (0 == i) FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
@@ -801,9 +785,9 @@ public:
         if (0 == f) {
             sign ^= int32_t(i >> 63);
             int32_t e = FP128_GET_BITS(i, dbl_frac_bits, dbl_exp_bits) - 1023;
-            return (e >= 0) ? *this >>= e  : *this <<= e;
+            return (e >= 0) ? *this >>= e : *this <<= e;
         }
-        
+
         // normal division
         *this /= fixed_point128(x);
         return *this;
