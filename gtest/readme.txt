@@ -6,5 +6,6 @@ One time:
 
 After code changes:
 1) Build the test app via build.bat
-2) Run the tests via test.bat
+2a) Run all the tests via test.bat
+2b) Run only the failed tests with run_failed.bat
 

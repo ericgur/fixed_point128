@@ -1,4 +1,9 @@
+// remove warnings from gtest itself
+#pragma warning(push)
+#pragma warning(disable: 26439) 
+#pragma warning(disable: 26495) 
 #include <gtest/gtest.h>
+#pragma warning(pop)
 #include <ostream>
 #include <ctime>
 #include "..\inc\fixed_point128.h"
@@ -29,7 +34,7 @@ uint64_t get_uint64_random()
 }
 
 // returns a positive random number
-uint64_t get_int64_random()
+int64_t get_int64_random()
 {
     return (int64_t)rand() * (int64_t)rand() * (int64_t)get_random_sign();
 }
@@ -41,7 +46,7 @@ uint32_t get_uint32_random()
 }
 
 // returns a random number
-uint32_t get_int32_random()
+int32_t get_int32_random()
 {
     return rand() * get_random_sign();
 }
@@ -217,6 +222,90 @@ TEST(fixed_point128, AddDifferentSign) {
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(fixed_point128, AddDouble) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        double res = value1 + value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 + value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, AddFloat) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        float value1 = (float)get_double_random();
+        float value2 = (float)get_double_random();
+        float res = value1 + value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 + value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, AddInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int32_random();
+        auto value2 = get_int32_random();
+        auto res = value1 + value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 + value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, AddUnsignedInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint32_random();
+        auto value2 = get_uint32_random();
+        auto res = value1 + value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 + value2;
+        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, AddInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int64_random();
+        auto value2 = get_int64_random();
+        auto res = value1 + value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 + value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, AddUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint64_random();
+        auto value2 = get_uint64_random();
+        auto res = value1 + value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 + value2;
+        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
 TEST(fixed_point128, SubtractSameSign) {
     srand(RANDOM_SEED); 
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -247,7 +336,7 @@ TEST(fixed_point128, SubtractDifferentSign) {
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(fixed_point128, Multiply) {
+TEST(fixed_point128, MultiplyByFP128) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -262,7 +351,91 @@ TEST(fixed_point128, Multiply) {
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(fixed_point128, Divide) {
+TEST(fixed_point128, MultiplyByDouble) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        double res = value1 * value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 * value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, MultiplyByFloat) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        float value1 = (float)get_double_random();
+        float value2 = (float)get_double_random();
+        float res = value1 * value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 * value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, MultiplyByInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int32_random();
+        auto value2 = get_int32_random();
+        int64_t res = (int64_t)value1 * (int64_t)value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 * value2;
+        if (abs(res) > f1.max_int_value || abs(value2) > f1.max_int_value || abs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, MultiplyByUnsignedInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint32_random();
+        auto value2 = get_uint32_random();
+        uint64_t res = (uint64_t)value1 * (uint64_t)value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 * value2;
+        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, MultiplyByInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int64_random();
+        auto value2 = get_int64_random();
+        int64_t res = value1 * value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 * value2;
+        if (abs(res) > f1.max_int_value || abs(value2) > f1.max_int_value || abs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, MultiplyByUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint64_random();
+        auto value2 = get_uint64_random();
+        uint64_t res = value1 * value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 * value2;
+        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, DivideByFP128) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -275,7 +448,25 @@ TEST(fixed_point128, Divide) {
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 / f2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, DivideByDouble) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        //double value1 = 48034.270022883298, value2 = 168.09205560447856;
+        //printf("%u\n", i);
+        double res = value1 / value2;
+        if (value2 == 0)
+            continue;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 / value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
