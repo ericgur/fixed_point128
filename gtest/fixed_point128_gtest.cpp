@@ -336,6 +336,68 @@ TEST(fixed_point128, SubtractDifferentSign) {
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(fixed_point128, SubtractInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int32_random();
+        auto value2 = get_int32_random();
+        auto res = value1 - value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 - value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, SubtractUnsignedInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint32_random();
+        auto value2 = get_uint32_random();
+        if (value1 < value2) {
+            std::swap(value1, value2);
+        }
+        auto res = value1 - value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 - value2;
+        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, SubtractInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int64_random();
+        auto value2 = get_int64_random();
+        auto res = value1 - value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 - value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, SubtractUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint64_random();
+        auto value2 = get_uint64_random();
+        if (value1 < value2) {
+            std::swap(value1, value2);
+        }
+        auto res = value1 - value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 - value2;
+        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
 TEST(fixed_point128, MultiplyByFP128) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
