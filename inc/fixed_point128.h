@@ -511,9 +511,10 @@ public:
      * @param other Right hand side operand (denominator)
      * @return Temporary object with the result of the operation
     */
-    FP128_INLINE fixed_point128 operator%(const fixed_point128& other) const {
+    template<typename T>
+    FP128_INLINE fixed_point128 operator%(T x) const {
         fixed_point128 temp(*this);
-        return temp %= other;
+        return temp %= x;
     }
     /**
      * @brief Performs right shift operation.
@@ -797,35 +798,54 @@ public:
      * @param other Modulo operand.
      * @return This object.
     */
-    inline fixed_point128& operator%=(const fixed_point128& other) {
-        uint64_t nom[4] = {0, 0, low, high};
-        uint64_t denom[2] = {other.low, other.high};
+    FP128_INLINE fixed_point128& operator%=(const fixed_point128& other) {
+        // trivial case, this object is zero
+        if (!*this)
+            return *this;
+
+        // simple case, both are integers (fractions is zero)
+        if (is_int() && other.is_int()) {
+            if (!other)
+                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+            return operator=(static_cast<int64_t>(*this) % static_cast<int64_t>(other));
+        }
+        // num or denom are fractions
+        // x mod y =  x - y * floor(x/y)
+        // do the division in with positive numbers
+        uint64_t nom[4] = { 0, 0, low, high };
+        uint64_t denom[2] = { other.low, other.high };
         uint64_t q[4]{};
         uint64_t r[2]{}; // same size as the denominator
-        
-        //do the division in with positive numbers
         if (0 == div_32bit((uint32_t*)q, (uint32_t*)r, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
-            // simple case, both are integers (fractions is zero)
-            if (is_int() && other.is_int()) {
-                // result is in r (remainder) needs to shift left by F
-                low = r[0];
-                high = r[1];
-            }
-            // nom or denom are fractions
-            // x mod root =  x - root * floor(x/root)
-            else { 
-                fixed_point128 x_div_y; // x / root. 
-                x_div_y.high = (q[2] << upper_frac_bits) | (q[1] >> I);
-                x_div_y.low = (q[1] << upper_frac_bits) | (q[0] >> I);
-                x_div_y.sign = sign ^ other.sign;
-                *this -= other * floor(x_div_y);
-            }
+            fixed_point128 x_div_y; // x/root. 
+            x_div_y.high = (q[2] << upper_frac_bits) | (q[1] >> I);
+            x_div_y.low = (q[1] << upper_frac_bits) | (q[0] >> I);
+            x_div_y.sign = sign ^ other.sign;
+        #if FP128_CPP_STYLE_MODULO == TRUE
+            bool this_was_positive = is_positive();
+            //x_div_y = (x_div_y.is_positive()) ? floor(x_div_y) : ceil(x_div_y);
+            //*this -= other * x_div_y; 
+            *this -= other * floor(x_div_y);
             
+            // this was positive, return positive modulo
+            if (this_was_positive) {
+                if (is_negative())
+                    *this += other.is_positive() ? other : -other;
+            }
+            // this was negative, return negative modulo
+            else { 
+                if (is_positive())
+                    *this += other.is_positive() ? -other : other;
+            }
+        #else
+            *this -= other * floor(x_div_y);
             // common case (fractions and integers) where one of the values is negative
             if (sign != other.sign) {
                 // the remainder + denominator
                 *this += other;
-            }
+        }
+        #endif
+
 
             // Note if signs are the same, for nom/denom, the result keeps the sign.
             // set sign to 0 when both low and high are zero (avoid having negative zero value)
@@ -835,6 +855,10 @@ public:
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
         }
         return *this;
+    }
+    template<typename T>
+    FP128_INLINE fixed_point128& operator%=(T other) {
+        return operator%=(fixed_point128(other));
     }
     /**
      * @brief Shift right this object.
@@ -1277,7 +1301,7 @@ public:
         if (x.is_int()) return x;
 
         int64_t val = (int64_t)x;
-        return (val < 0) ? --val : val;
+        return val - x.is_negative();
     }
 
     /**
@@ -1290,7 +1314,7 @@ public:
         if (x.is_int()) return x;
 
         int64_t val = (int64_t)x;
-        return (val >= 0) ? ++val : val;
+        return val + x.is_positive();
     }
 
     /**

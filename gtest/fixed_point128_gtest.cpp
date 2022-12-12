@@ -613,3 +613,120 @@ TEST(fixed_point128, DivideByUnsignedInt64) {
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(fixed_point128, ModuloByFP128) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        //double value1 = 48034.270022883298, value2 = 168.09205560447856;
+        //printf("%u\n", i);
+        double res = value1 / value2;
+        if (value2 == 0)
+            continue;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f2 = value2;
+        fixed_point128<40> f3 = f1 / f2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, ModuloByDouble) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        //value1=-15943.387313816127, value2=-53860.693251533739;
+        double res = fmod(value1, value2);
+        if (value2 == 0)
+            continue;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 % value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, ModuloByFloat) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        float value1 = (float)get_double_random();
+        float value2 = (float)get_double_random();
+        float res = fmodf(value1, value2);
+        if (value2 == 0)
+            continue;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 % value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, ModuloByInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        int32_t value2 = get_int32_random();
+        double res = fmod(value1, value2); 
+        if (value2 == 0)
+            continue;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 % value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, ModuloByUnsignedInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        uint32_t value2 = get_uint32_random();
+        double res = fmod(value1, value2);
+        if (value2 == 0)
+            continue;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 % value2;
+        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+
+TEST(fixed_point128, ModuloByInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        int64_t value2 = get_int32_random(); // on purpose
+        double res = fmod(value1, value2);
+        if (value2 == 0)
+            continue;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 % value2;
+        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, ModuloByUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        uint64_t value2 = get_uint32_random(); // on purpose
+        double res = fmod(value1, value2);
+        if (value2 == 0)
+            continue;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f3 = f1 % value2;
+        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
