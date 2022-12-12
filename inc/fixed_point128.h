@@ -102,13 +102,13 @@ public:
     /**
      * @brief Default constructor, creates an instance with a value of zero.
     */
-    fixed_point128() noexcept :
+    constexpr fixed_point128() noexcept :
         low(0), high(0), sign(0) {}
     /**
      * @brief Copy constructor
      * @param other Object to copy from
     */
-    fixed_point128(const fixed_point128& other) noexcept :
+    constexpr fixed_point128(const fixed_point128& other) noexcept :
         low(other.low), high(other.high), sign(other.sign) {}
     /**
      * @brief cross-template Copy constructor, can be used between two different fixed_point128 templates
@@ -116,7 +116,7 @@ public:
      * @return This object.
     */
     template<int32_t I2>
-    fixed_point128(const fixed_point128<I2>& other)
+    constexpr fixed_point128(const fixed_point128<I2>& other) noexcept
     {
         sign = other.sign;
         if constexpr (I == I2) {
@@ -126,14 +126,14 @@ public:
         // other has less integer bits and more fraction bits
         else if constexpr (I < I2) {
             // shift left by I2 - I bits
-            const int shift = I2 - I;
+            constexpr int shift = I2 - I;
             low = other.low << shift;
             high = shift_left128(other.low, other.high, (uint8_t)(64 - shift));
         }
         // other has more integer bits and less fraction bits
         else { // I > I2
             // shift right by I - I2 bits
-            const int shift = I - I2;
+            constexpr int shift = I - I2;
             low = shift_right128_round(other.low, other.high, (uint8_t)shift);
             high = other.high >> shift;
         }
@@ -144,14 +144,14 @@ public:
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param other Object to copy from
     */
-    fixed_point128(const fixed_point128&& other) noexcept :
+    constexpr fixed_point128(const fixed_point128&& other) noexcept :
         low(other.low), high(other.high), sign(other.sign) {}
     /**
      * @brief Constructor from the double type
      * Underflow goes to zero. Overflow, NaN and +-INF go to max supported positive value.
      * @param x Input value
     */
-    fixed_point128(double x) noexcept {
+    constexpr fixed_point128(double x) noexcept {
         // brute convert to uint64_t for easy bit manipulation
         const uint64_t i = *reinterpret_cast<uint64_t*>(&x);
         // very common case
@@ -211,7 +211,7 @@ public:
      * @brief Constructor from uint64_t type
      * @param x Input value
     */
-    fixed_point128(uint64_t x) noexcept {
+    constexpr fixed_point128(uint64_t x) noexcept {
         low = 0;
         sign = 0;
         high = x << upper_frac_bits;
@@ -220,7 +220,7 @@ public:
      * @brief Constructor from int64_t type
      * @param x Input value
     */
-    fixed_point128(int64_t x) noexcept {
+    constexpr fixed_point128(int64_t x) noexcept {
         low = 0;
         sign = FP128_GET_BIT(x, 63);
         high = ((sign != 0) ? -x : x) << upper_frac_bits;
@@ -229,7 +229,7 @@ public:
      * @brief Constructor from uint32_t type
      * @param x Input value
    */
-    fixed_point128(uint32_t x) noexcept {
+    constexpr fixed_point128(uint32_t x) noexcept {
         low = 0;
         sign = 0;
         high = (uint64_t)x << upper_frac_bits;
@@ -238,7 +238,7 @@ public:
      * @brief Constructor from int32_t type
      * @param x Input value
    */
-    fixed_point128(int32_t x) noexcept {
+    constexpr fixed_point128(int32_t x) noexcept {
         low = 0;
         sign = FP128_GET_BIT(x, 31);
         high = (uint64_t)((sign != 0) ? -x : x) << upper_frac_bits;
@@ -318,7 +318,7 @@ public:
      * @param h High QWORD
      * @param s Sign - zero for positive, 1 for negative.
     */
-    fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept:
+    constexpr fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept:
         low(l), high(h) ,sign(s) {
         sign = (sign != 0);
     }
@@ -332,7 +332,7 @@ public:
      * @param other Object to copy from 
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator=(const fixed_point128& other) noexcept {
+    constexpr FP128_INLINE fixed_point128& operator=(const fixed_point128& other) noexcept {
         high = other.high;
         low = other.low;
         sign = other.sign;
@@ -343,7 +343,7 @@ public:
      * @param other Object to copy from
      * @return This object.
     */
-     FP128_INLINE fixed_point128& operator=(const fixed_point128&& other) noexcept {
+    constexpr FP128_INLINE fixed_point128& operator=(const fixed_point128&& other) noexcept {
         high = other.high;
         low = other.low;
         sign = other.sign;
@@ -355,7 +355,7 @@ public:
      * @return This object.
     */
     template<int32_t I2>
-    FP128_INLINE fixed_point128<I>& operator=(const fixed_point128<I2>& other)
+    constexpr FP128_INLINE fixed_point128<I>& operator=(const fixed_point128<I2>& other)
     {
         sign = other.sign;
         if constexpr (I == I2) {
@@ -387,14 +387,14 @@ public:
      * @brief operator uint64_t - converts to a uint64_t
      * @return Object value.
     */
-    FP128_INLINE operator uint64_t() const noexcept {
+    constexpr FP128_INLINE operator uint64_t() const noexcept {
         return (high >> upper_frac_bits) & UINT64_MAX;
     }
     /**
      * @brief operator int64_t - converts to a int64_t
      * @return Object value.
     */
-    FP128_INLINE operator int64_t() const noexcept {
+    constexpr FP128_INLINE operator int64_t() const noexcept {
         int64_t res = (sign) ? -1ll : 1ll;
         return res * ((high >> upper_frac_bits) & UINT64_MAX);
     }
@@ -462,7 +462,8 @@ public:
      * @param other Right hand side operand
      * @return Temporary object with the result of the operation
     */
-    FP128_INLINE fixed_point128 operator+(const fixed_point128& other) const {
+    template<typename T>
+    FP128_INLINE fixed_point128 operator+(const T& other) const {
         fixed_point128 temp(*this);
         return temp += other;
     }
@@ -471,7 +472,8 @@ public:
      * @param other Right hand side operand
      * @return Temporary object with the result of the operation
     */
-    FP128_INLINE fixed_point128 operator-(const fixed_point128& other) const {
+    template<typename T>
+    FP128_INLINE fixed_point128 operator-(const T& other) const {
         fixed_point128 temp(*this);
         return temp -= other;
     }
@@ -489,28 +491,12 @@ public:
      * @param x Right hand side operand
      * @return Temporary object with the result of the operation
     */
-    FP128_INLINE fixed_point128 operator*(double x) const {
-        fixed_point128 temp(*this);
-        return temp *= fixed_point128(x);
-    }
-    /**
-     * @brief Multiplies the right hand side operand with this object to and returns the result.
-     * @param x Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    FP128_INLINE fixed_point128 operator*(int64_t x) const {
+    template<typename T>
+    FP128_INLINE fixed_point128 operator*(T x) const {
         fixed_point128 temp(*this);
         return temp *= x;
     }
     /**
-     * @brief Multiplies the right hand side operand with this object to and returns the result.
-     * @param x Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    FP128_INLINE fixed_point128 operator*(int32_t x) const {
-        fixed_point128 temp(*this);
-        return temp *= x;
-    }
     /**
      * @brief Divides this object by the right hand side operand and returns the result.
      * @param other Right hand side operand (denominator)
@@ -605,6 +591,15 @@ public:
         return add(other);
     }
     /**
+     * @brief Add a value to this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE fixed_point128& operator+=(const T& other) {
+        return operator+=(fixed_point128(other));
+    }
+    /**
      * @brief Subtract a value to this object
      * @param other Right hand side operand
      * @return This object.
@@ -620,6 +615,15 @@ public:
         }
 
         return subtract(other);
+    }
+    /**
+     * @brief Subtract a value to this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE fixed_point128& operator-=(const T& other) {
+        return operator-=(fixed_point128(other));
     }
     /**
      * @brief Multiplies a value to this object
@@ -677,21 +681,22 @@ public:
      * @param x Right hand side operand
      * @return This object.
     */
+    FP128_INLINE fixed_point128& operator*=(double x) {
+        return operator*=(fixed_point128(x));
+    }
+    /**
+     * @brief Multiplies a value to this object
+     * @param x Right hand side operand
+     * @return This object.
+    */
     FP128_INLINE fixed_point128& operator*=(int32_t x) {
         // alway do positive multiplication
         if (x < 0) {
             x = -x;
             sign ^= 1;
         }
-        uint64_t uval = (uint64_t)x;
-        uint64_t temp;
 
-        // multiply low QWORDs
-        low = _umul128(low, uval, &temp);
-        high = high * uval + temp;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
-        return *this;
+        return operator*=(static_cast<uint64_t>(x));
     }
     /**
      * @brief Multiplies a value to this object
@@ -699,14 +704,7 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator*=(uint32_t x) {
-        uint64_t temp;
-
-        // multiply low QWORDs
-        low = _umul128(low, x, &temp);
-        high = high * x + temp;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
-        return *this;
+        return operator*=(static_cast<uint64_t>(x));
     }
     /**
      * @brief Multiplies a value to this object
@@ -719,15 +717,7 @@ public:
             x = -x;
             sign ^= 1;
         }
-        uint64_t uval = (uint64_t)x;
-        uint64_t temp;
-
-        // multiply low QWORDs
-        low = _umul128(low, uval, &temp);
-        high = high * uval + temp;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
-        return *this;
+        return operator*=(static_cast<uint64_t>(x));
     }
     /**
      * @brief Multiplies a value to this object
@@ -858,7 +848,7 @@ public:
             sign &= (0 != low || 0 != high);
         }
         else { // error
-            FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
+            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
         }
         return *this;
     }
