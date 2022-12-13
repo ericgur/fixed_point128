@@ -1058,12 +1058,30 @@ public:
         return (sign) ? high > other.high : high < other.high;
     }
     /**
+     * @brief Return true if this object is small than the other
+     * @param other Righthand operand.
+     * @return True when this object is smaller.
+    */
+    template<typename T>
+    FP128_INLINE bool operator<(T other) const noexcept {
+        return operator<(fixed_point128(other));
+    }
+    /**
      * @brief Return true this object is small or equal than the other
      * @param other Righthand operand.
      * @return True when this object is smaller or equal.
     */
     FP128_INLINE bool operator<=(const fixed_point128& other) const noexcept {
         return !(*this > other);
+    }
+    /**
+     * @brief Return true this object is small or equal than the other
+     * @param other Righthand operand.
+     * @return True when this object is smaller or equal.
+    */
+    template<typename T>
+    FP128_INLINE bool operator<=(T other) const noexcept {
+        return !(*this > fixed_point128(other));
     }
     /**
      * @brief Return true this object is larger than the other
@@ -1082,12 +1100,30 @@ public:
         return (sign) ? high < other.high : high > other.high;
     }
     /**
+     * @brief Return true this object is larger than the other
+     * @param other Righthand operand.
+     * @return True when this objext is larger.
+    */
+    template<typename T>
+    FP128_INLINE bool operator>(T other) const noexcept {
+        return *this > fixed_point128(other);
+    }
+    /**
      * @brief Return true this object is larger or equal than the other
      * @param other Righthand operand.
      * @return True when this objext is larger or equal.
     */
     FP128_INLINE bool operator>=(const fixed_point128& other) const noexcept {
         return !(*this < other);
+    }
+    /**
+     * @brief Return true this object is larger or equal than the other
+     * @param other Righthand operand.
+     * @return True when this objext is larger or equal.
+    */
+    template<typename T>
+    FP128_INLINE bool operator>=(T other) const noexcept {
+        return !(*this < fixed_point128(other));
     }
     //
     // useful public functions

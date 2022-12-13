@@ -730,3 +730,190 @@ TEST(fixed_point128, ModuloByUnsignedInt64) {
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(fixed_point128, CompareFP128) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        bool res = value1 > value2;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f2 = value2;
+        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+            continue;
+
+        bool fp128_res = f1 > f2;
+        EXPECT_TRUE(fp128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+        
+        res = value1 >= value2;
+        fp128_res = f1 >= f2;
+        EXPECT_TRUE(fp128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 < value2;
+        fp128_res = f1 < f2;
+        EXPECT_TRUE(fp128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 <= value2;
+        fp128_res = f1 <= f2;
+        EXPECT_TRUE(fp128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, CompareDouble) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        bool res = value1 > value2;
+        fixed_point128<40> f1 = value1;
+        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+            continue;
+
+        bool fp128_res = f1 > value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 >= value2;
+        fp128_res = f1 >= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 < value2;
+        fp128_res = f1 < value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 <= value2;
+        fp128_res = f1 <= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, CompareFloat) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        float value1 = (float)get_double_random();
+        float value2 = (float)get_double_random();
+        bool res = value1 > value2;
+        fixed_point128<40> f1 = value1;
+        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+            continue;
+
+        bool fp128_res = f1 > value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 >= value2;
+        fp128_res = f1 >= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 < value2;
+        fp128_res = f1 < value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 <= value2;
+        fp128_res = f1 <= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, CompareInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        int32_t value1 = get_int32_random();
+        int32_t value2 = get_int32_random();
+        bool res = value1 > value2;
+        fixed_point128<40> f1 = value1;
+        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+            continue;
+
+        bool fp128_res = f1 > value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 >= value2;
+        fp128_res = f1 >= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 < value2;
+        fp128_res = f1 < value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 <= value2;
+        fp128_res = f1 <= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, CompareUnsignedInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        uint32_t value1 = get_uint32_random();
+        uint32_t value2 = get_uint32_random();
+        bool res = value1 > value2;
+        fixed_point128<40> f1 = value1;
+        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+            continue;
+
+        bool fp128_res = f1 > value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 >= value2;
+        fp128_res = f1 >= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 < value2;
+        fp128_res = f1 < value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 <= value2;
+        fp128_res = f1 <= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, CompareInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        int64_t value1 = get_int64_random();
+        int64_t value2 = get_int64_random();
+        bool res = value1 > value2;
+        fixed_point128<40> f1 = value1;
+        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+            continue;
+
+        bool fp128_res = f1 > value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 >= value2;
+        fp128_res = f1 >= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 < value2;
+        fp128_res = f1 < value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 <= value2;
+        fp128_res = f1 <= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(fixed_point128, CompareUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        uint64_t value1 = get_uint64_random();
+        uint64_t value2 = get_uint64_random();
+        bool res = value1 > value2;
+        fixed_point128<40> f1 = value1;
+        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+            continue;
+
+        bool fp128_res = f1 > value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 >= value2;
+        fp128_res = f1 >= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 < value2;
+        fp128_res = f1 < value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 <= value2;
+        fp128_res = f1 <= value2;
+        EXPECT_TRUE(fp128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+
+
+
+
