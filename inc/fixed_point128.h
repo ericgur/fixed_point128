@@ -1034,12 +1034,30 @@ public:
         return sign == other.sign && high == other.high && low == other.low;
     }
     /**
+     * @brief Compare logical/bitwise equal.
+     * @param other Righthand operand
+     * @return True if this and other are equal.
+    */
+    template<typename T>
+    FP128_INLINE bool operator==(T other) const noexcept {
+        return *this == fixed_point128(other);
+    }
+    /**
      * @brief Return true when objects are not equal. Can be used as logical XOR.
      * @param other Righthand operand.
      * @return True of not equal.
     */
     FP128_INLINE bool operator!=(const fixed_point128& other) const noexcept {
         return sign != other.sign || high != other.high || low != other.low;
+    }
+    /**
+     * @brief Return true when objects are not equal. Can be used as logical XOR.
+     * @param other Righthand operand.
+     * @return True of not equal.
+    */
+    template<typename T>
+    FP128_INLINE bool operator!=(T other) const noexcept {
+        return *this != fixed_point128(other);
     }
     /**
      * @brief Return true if this object is small than the other

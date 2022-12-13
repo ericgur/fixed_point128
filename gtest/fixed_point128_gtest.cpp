@@ -968,6 +968,44 @@ TEST(fixed_point128, OperatorEqual) {
         EXPECT_TRUE(fp128_res == true) << "operator==: " << "value1=" << value1;
     }
 }
+TEST(fixed_point128, TemplateOperatorEqual) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        fixed_point128<40> f1 = value1;
+        bool fp128_res = f1 == value1;
+
+        if (fabs(value1) > f1.max_int_value)
+            continue;
+
+        EXPECT_TRUE(fp128_res == true) << "operator==<double>: " << "value1=" << value1;
+
+        f1 = static_cast<float>(value1);
+        fp128_res = f1 == static_cast<float>(value1);
+
+        EXPECT_TRUE(fp128_res == true) << "operator==<float>: " << "value1=" << value1;
+
+        f1 = static_cast<uint64_t>(value1);
+        fp128_res = f1 == static_cast<uint64_t>(value1);
+
+        EXPECT_TRUE(fp128_res == true) << "operator==<uint64_t>: " << "value1=" << value1;
+
+        f1 = static_cast<int64_t>(value1);
+        fp128_res = f1 == static_cast<int64_t>(value1);
+
+        EXPECT_TRUE(fp128_res == true) << "operator==<int64_t>: " << "value1=" << value1;
+
+        f1 = static_cast<uint32_t>(value1);
+        fp128_res = f1 == static_cast<uint32_t>(value1);
+
+        EXPECT_TRUE(fp128_res == true) << "operator==<uint32_t>: " << "value1=" << value1;
+
+        f1 = static_cast<int32_t>(value1);
+        fp128_res = f1 == static_cast<int32_t>(value1);
+
+        EXPECT_TRUE(fp128_res == true) << "operator==<int32_t>: " << "value1=" << value1;
+    }
+}
 TEST(fixed_point128, OperatorNotEqual) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -979,5 +1017,43 @@ TEST(fixed_point128, OperatorNotEqual) {
             continue;
 
         EXPECT_TRUE(fp128_res == false) << "operator!=: " << "value1=" << value1;
+    }
+}
+TEST(fixed_point128, TemplateOperatorNotEqual) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        fixed_point128<40> f1 = value1;
+        bool fp128_res = f1 != value1;
+
+        if (fabs(value1) > f1.max_int_value)
+            continue;
+
+        EXPECT_TRUE(fp128_res == false) << "operator!=<double>: " << "value1=" << value1;
+
+        f1 = static_cast<float>(value1);
+        fp128_res = f1 != static_cast<float>(value1);
+
+        EXPECT_TRUE(fp128_res == false) << "operator!=<float>: " << "value1=" << value1;
+
+        f1 = static_cast<uint64_t>(value1);
+        fp128_res = f1 != static_cast<uint64_t>(value1);
+
+        EXPECT_TRUE(fp128_res == false) << "operator!=<uint64_t>: " << "value1=" << value1;
+
+        f1 = static_cast<int64_t>(value1);
+        fp128_res = f1 != static_cast<int64_t>(value1);
+
+        EXPECT_TRUE(fp128_res == false) << "operator!=<int64_t>: " << "value1=" << value1;
+
+        f1 = static_cast<uint32_t>(value1);
+        fp128_res = f1 != static_cast<uint32_t>(value1);
+
+        EXPECT_TRUE(fp128_res == false) << "operator!=<uint32_t>: " << "value1=" << value1;
+
+        f1 = static_cast<int32_t>(value1);
+        fp128_res = f1 != static_cast<int32_t>(value1);
+
+        EXPECT_TRUE(fp128_res == false) << "operator!=<int32_t>: " << "value1=" << value1;
     }
 }
