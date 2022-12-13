@@ -955,3 +955,29 @@ TEST(fixed_point128, OperatorMinusMinus) {
         EXPECT_DOUBLE_EQ(static_cast<double>(f2), res) << "operator--()" << "value1=" << value1;
     }
 }
+TEST(fixed_point128, OperatorEqual) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        fixed_point128<40> f1 = value1;
+        bool fp128_res = f1 == f1;
+
+        if (fabs(value1) > f1.max_int_value)
+            continue;
+
+        EXPECT_TRUE(fp128_res == true) << "operator==: " << "value1=" << value1;
+    }
+}
+TEST(fixed_point128, OperatorNotEqual) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        fixed_point128<40> f1 = value1;
+        bool fp128_res = f1 != f1;
+
+        if (fabs(value1) > f1.max_int_value)
+            continue;
+
+        EXPECT_TRUE(fp128_res == false) << "operator!=: " << "value1=" << value1;
+    }
+}
