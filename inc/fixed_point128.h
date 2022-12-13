@@ -84,7 +84,7 @@ private:
     // useful const calculations
     static constexpr int32_t F = 128 - I;                               // fraction bit count
     static constexpr int32_t upper_frac_bits = F - 64;                  // how many bits of the fraction exist in the upper QWORD
-    static constexpr uint64_t unity = 1ull << (64 - I);                 // upper QWORD value equal to '1'
+    static constexpr uint64_t unity = 1ull << upper_frac_bits;          // upper QWORD value equal to '1'
     static inline const double upper_unity = pow(2, 64 - F);     // convert upper QWORD to floating point
     static inline const double lower_unity = pow(2, -F);         // convert lower QWORD to floating point
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits; // mask of the integer bits in the upper QWORD
@@ -1300,8 +1300,12 @@ public:
     {
         if (x.is_int()) return x;
 
-        int64_t val = (int64_t)x;
-        return val - x.is_negative();
+        fixed_point128 res;
+        res.high = x.high & x.int_mask;
+        res.high += (uint64_t)x.is_negative() << upper_frac_bits;
+        res.low = 0;
+        res.sign = x.sign;
+        return res;
     }
 
     /**
@@ -1313,8 +1317,12 @@ public:
     {
         if (x.is_int()) return x;
 
-        int64_t val = (int64_t)x;
-        return val + x.is_positive();
+        fixed_point128 res;
+        res.high = x.high & x.int_mask;
+        res.high += (uint64_t)x.is_positive() << upper_frac_bits;
+        res.low = 0;
+        res.sign = x.sign;
+        return res;
     }
 
     /**
@@ -1337,9 +1345,9 @@ public:
     */
     friend FP128_INLINE fixed_point128 modf(const fixed_point128& x, fixed_point128* iptr) noexcept
     {
-        if (iptr == nullptr) {
+        if (iptr == nullptr)
             return 0;
-        }
+
         iptr->high = x.high & x.int_mask; // lose the fraction
         iptr->low = 0;
         iptr->sign = x.sign;
