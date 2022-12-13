@@ -913,7 +913,45 @@ TEST(fixed_point128, CompareUnsignedInt64) {
         EXPECT_TRUE(fp128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(fixed_point128, OperatorPlusPlus) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
 
+        double res = value1 + 1;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f2 = f1;
+        f2++;
 
+        if (fabs(value1 + 1.0) > f1.max_int_value)
+            continue;
 
+        EXPECT_DOUBLE_EQ(static_cast<double>(f2), res) << "operator++(int)" << "value1=" << value1;
 
+        f2 = f1;
+        ++f2;
+
+        EXPECT_DOUBLE_EQ(static_cast<double>(f2), res) << "operator++()" << "value1=" << value1;
+    }
+}
+TEST(fixed_point128, OperatorMinusMinus) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+
+        double res = value1 - 1;
+        fixed_point128<40> f1 = value1;
+        fixed_point128<40> f2 = f1;
+        f2--;
+
+        if (fabs(value1) > f1.max_int_value)
+            continue;
+
+        EXPECT_DOUBLE_EQ(static_cast<double>(f2), res) << "operator--(int)" << "value1=" << value1;
+
+        f2 = f1;
+        --f2;
+
+        EXPECT_DOUBLE_EQ(static_cast<double>(f2), res) << "operator--()" << "value1=" << value1;
+    }
+}
