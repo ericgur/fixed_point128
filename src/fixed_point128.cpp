@@ -541,7 +541,8 @@ void bench()
 
 
     // slower functions
-    iterations /= 30;
+    //iterations /= 30;
+    iterations /= 10;
     fixed_point128<10> f4 = 5;
 
     QueryPerformanceCounter(&time_start);

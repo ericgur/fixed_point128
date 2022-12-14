@@ -128,13 +128,13 @@ public:
             // shift left by I2 - I bits
             constexpr int shift = I2 - I;
             low = other.low << shift;
-            high = shift_left128(other.low, other.high, (uint8_t)(64 - shift));
+            high = shift_left128(other.low, other.high, 64 - shift);
         }
         // other has more integer bits and less fraction bits
         else { // I > I2
             // shift right by I - I2 bits
             constexpr int shift = I - I2;
-            low = shift_right128_round(other.low, other.high, (uint8_t)shift);
+            low = shift_right128_round(other.low, other.high, shift);
             high = other.high >> shift;
         }
     }
@@ -715,7 +715,6 @@ public:
      * @return this object.
     */
     inline fixed_point128& operator/=(const fixed_point128& other) {
-        uint64_t q[4]{}; 
         bool need_rounding = false;
         // trivial case, this object is zero
         if (!*this)
@@ -723,6 +722,7 @@ public:
 
         // optimization for when dividing by an integer
         if (other.is_int() && (uint64_t)other <= UINT64_MAX) {
+            uint64_t q[2]{};
             uint64_t nom[2] = { low, high };
             uint64_t denom = (uint64_t)other;
             uint64_t r;
@@ -736,13 +736,14 @@ public:
             }
         }
         else {
+            uint64_t q[4]{};
             uint64_t nom[4] = {0, 0, low, high};
             uint64_t denom[2] = {other.low, other.high};
 
             if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
                 static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
                 need_rounding = (q[0] & half) != 0;
-                // result in q needs to shifted left by F
+                // result in q needs to shifted left by F (F bits were added to the right)
                 // shifting right by 128-F is simpler.
                 high = shift_right128(q[1], q[2], I);
                 low = shift_right128(q[0], q[1], I);

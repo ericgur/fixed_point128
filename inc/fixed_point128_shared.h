@@ -55,7 +55,7 @@
 #define FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Floating point divide by zero!")
 #define FP128_NOT_IMPLEMENTED_EXCEPTION throw std::exception("Not implemented!")
 #if defined _DEBUG || defined DEBUG
-#define FP128_ASSERT(x) { if (!(x)) throw std::exception("FP128_ASSERT failed: "#x); } 
+#define FP128_ASSERT assert
 #define FP128_THROW_ONLY_IN_DEBUG
 #else
 #define FP128_ASSERT(x)
@@ -100,8 +100,8 @@ union Float {
     };
     float val;
 };
-static_assert(sizeof(Double) == sizeof(double));
-static_assert(sizeof(Float) == sizeof(float));
+static_assert(sizeof(Double) == sizeof(double), "The Double union should have the same size as a double variable!");
+static_assert(sizeof(Float) == sizeof(float), "The Float union should have the same size as a float variable!");
 
 #pragma warning(pop)
 /***********************************************************************************
@@ -119,75 +119,94 @@ static_assert(sizeof(Float) == sizeof(float));
 */
 template<typename T>
 constexpr uint32_t array_length(const T& a) {
-    static_assert(sizeof(a[0]) != 0);
+    static_assert(sizeof(a[0]) != 0, "Requires an array of non-zero sized elements!");
     return sizeof(a) / sizeof(a[0]);
+}
+/**
+    * @brief shift right by 'shift' bits
+    * Undefined behavior when shift is outside the range [0, 31]
+    * @param x value to shift
+    * @param shift how many bits to shift
+    * @return result of 'x' the combined 64 bit element right shifted by 'shift' bits.
+*/
+__forceinline uint32_t shift_right64(uint32_t l, uint32_t h, int shift) 
+{
+    FP128_ASSERT(shift >= 0 && shift < 32);
+    return (shift > 0) ? (l >> shift) | (h << (32 - shift)) : l;
+}
+/**
+    * @brief shift left by 'shift' bits
+    * Undefined behavior when shift is outside the range [0, 31]
+    * @param x value to shift
+    * @param shift how many bits to shift
+    * @return result of the combined 64 bit element left shifted by 'shift' bits.
+*/
+__forceinline uint32_t shift_left64(uint32_t l, uint32_t h, int shift) 
+{
+    FP128_ASSERT(shift >= 0 && shift < 32);
+    return (shift > 0) ?  (h << shift) | (l >> (32 - shift)) : h;
 }
 /**
     * @brief shift right 'x' by 'shift' bits with rounding
     * Undefined behavior when shift is outside the range [1, 63]
     * @param x value to shift
     * @param shift how many bits to shift
-    * @return result of 'x' right shifed by 'shift'.
+    * @return result of 'x' right shifted by 'shift' bits.
 */
-__forceinline uint64_t shift_right64_round(uint64_t x, int shift) FP128_THROW_ONLY_IN_DEBUG
+__forceinline uint64_t shift_right64_round(uint64_t x, int shift) 
 {
-    FP128_ASSERT(shift > 0 && shift < 64);
+    FP128_ASSERT(shift >= 0 && shift < 64);
     x += 1ull << (shift - 1);
     return x >> shift;
 }
 /**
     * @brief Right shift a 128 bit integer.
-    * Undefined behavior when shift is outside the range [1, 63]
     * @param l Low QWORD
     * @param h High QWORD
-    * @param shift Bits to shift, between 1-63
+    * @param shift Bits to shift, between 0-127
     * @return Lower 64 bit of the result
 */
-__forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) FP128_THROW_ONLY_IN_DEBUG
+__forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift)
 {
-    FP128_ASSERT(shift > 0 && shift < 128);
-    if (shift < 64) {
-        return (l >> shift) | (h << (64 - shift));
-    }
-
-    shift -= 64;
-    return h >> shift;
+    if (shift == 0) return l;
+    if (shift < 64) return (l >> shift) | (h << (64 - shift));
+    if (shift < 128) return h >> (shift ^ 64);
+    return 0;
 }
 /**
     * @brief Right shift a 128 bit integer with rounding.
-    * Undefined behavior when shift is outside the range [1, 63]
     * @param l Low QWORD
     * @param h High QWORD
-    * @param shift Bits to shift, between 1-127
+    * @param shift Bits to shift, between 0-127
     * @return Lower 64 bit of the result
 */
-__forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) FP128_THROW_ONLY_IN_DEBUG
+__forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift)
 {
-    FP128_ASSERT(shift > 0 && shift < 128);
+    if (shift == 0) return l;
     if (shift < 64) {
         const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
         return need_rounding + ((l >> shift) | (h << (64 - shift)));
     }
-
-    shift -= 64;
-    const bool need_rounding = (h & 1ull << (shift - 1)) != 0;
-    return need_rounding + (h >> shift);
+    if (shift < 128) {
+        shift ^= 64;
+        const bool need_rounding = (h & 1ull << (shift - 1)) != 0;
+        return need_rounding + (h >> shift);
+    }
+    return 0;
 }
 /**
     * @brief Left shift a 128 bit integer.
-    * Undefined behavior when shift is outside the range [1, 63]
     * @param l Low QWORD
     * @param h High QWORD
     * @param shift Bits to shift, between 0-127
     * @return Upper 64 bit of the result
 */
-__forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift) FP128_THROW_ONLY_IN_DEBUG
+__forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift)
 {
-    FP128_ASSERT(shift > 0 && shift < 128);
-    if (shift < 64)
-        return (h << shift) | (l >> (64 - shift));
-    shift -= 64;
-    return l << shift;
+    if (shift == 0) return h;
+    if (shift < 64) return (h << shift) | (l >> (64 - shift));
+    if (shift < 128) return l << (shift ^ 64);
+    return 0;
 }
 /**
     * @brief converts a 128 integer to negavite via 2's complement.
@@ -237,7 +256,7 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
     * @param n Count of elements in v
     * @return 0 for success
 */
-FP128_INLINE static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
+static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
 {
     constexpr uint64_t b = 1ull << 32; // Number base (32 bits).
     constexpr uint64_t mask = b - 1;   // 32 bit mask
@@ -245,9 +264,10 @@ FP128_INLINE static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, c
     uint64_t qhat;                     // Estimated quotient digit.
     uint64_t rhat;                     // A remainder.
     uint64_t p;                        // Product of two digits.
-    int64_t t, k;
-    int32_t i, j;
+    int64_t t, k;                      // Temporary variables
+    int32_t i, j;                      // Indexes
     // disable various warnings, some are bogus in VS2022.
+    // the below code relies on the implied truncation (to 32 bit) of several expressions.
 #pragma warning(push)
 #pragma warning(disable: 6255)
 #pragma warning(disable: 4244)
@@ -274,8 +294,10 @@ FP128_INLINE static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, c
     const int32_t s = __lzcnt(v[n - 1]);             // 0 <= s <= 31.
     const int32_t s_comp = 32 - s;
     vn = (uint32_t*)_alloca(sizeof(uint32_t) * n);
-    for (i = n - 1; i > 0; --i)
+    for (i = n - 1; i > 0; --i) {
+        //vn[i] = shift_left64(v[i - 1], v[i], s);
         vn[i] = (v[i] << s) | ((uint64_t)v[i - 1] >> s_comp);
+    }
     vn[0] = v[0] << s;
 
     un = (uint32_t*)_alloca(sizeof(uint32_t) * (m + 1));
@@ -286,12 +308,13 @@ FP128_INLINE static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, c
 
     for (j = m - n; j >= 0; --j) {       // Main loop.
         // Compute estimate qhat of q[j].
-        qhat = (un[j + n] * b + un[j + n - 1]) / vn[n - 1];
-        rhat = (un[j + n] * b + un[j + n - 1]) - qhat * vn[n - 1];
+        qhat = _udiv128(0, un[j + n] * b + un[j + n - 1], vn[n - 1], &rhat);
+        //qhat = (un[j + n] * b + un[j + n - 1]) / vn[n - 1];
+        //rhat = (un[j + n] * b + un[j + n - 1]) - qhat * vn[n - 1];
     again:
-        if (qhat >= b || qhat* vn[n - 2] > b* rhat + un[j + n - 2]) {
-            qhat = qhat - 1;
-            rhat = rhat + vn[n - 1];
+        if (qhat >= b || qhat * vn[n - 2] > (rhat << 32) + un[j + n - 2]) {
+            --qhat;
+            rhat += vn[n - 1];
             if (rhat < b) goto again;
         }
 
@@ -331,7 +354,7 @@ FP128_INLINE static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, c
 }
 /**
     * @brief 64 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
-    * @param q (output) Pointer to receive the quote
+    * @param q (output) Pointer to receive the quote. Expected to be initialized to zero
     * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
     * @param u Pointer to Numerator, an array of uint64_t
     * @param v denominator (uint64_t)
@@ -347,19 +370,20 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
         r = &dummy_reminder;
     }
 
-    while (m > 0 && u[m - 1] == 0) --m;
-    if (m == 0 || v == 0) // error case
+    if (v == 0) // error case
         return 1;
 
-    if (m == 1) {
+    while (m > 0 && u[m - 1] == 0) --m;
+
+    // Trivial cases
+    if (m < 2) {
+        if (m == 0 || u[0] < v) {
+            *r = v;
+            return 0;
+        }
         if (u[0] == v) {
             *q = 1;
             *r = 0;
-            return 0;
-        }
-        else if (u[0] < v) {
-            *q = 0;
-            *r = v;
             return 0;
         }
     }
