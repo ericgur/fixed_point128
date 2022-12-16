@@ -39,6 +39,7 @@
 #define FIXED_POINT128_H
 
 #include "fixed_point128_shared.h"
+#include "uint128_t.h"
 
 namespace fp128 {
 
@@ -73,6 +74,7 @@ class fixed_point128
 
     // friends
     friend class fixed_point128; // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
+    friend class uint128_t;
 private:
     //
     // members
@@ -427,8 +429,8 @@ public:
      * @return Object value.
     */
     FP128_INLINE operator double() const noexcept {
-        double res = (double)(high * upper_unity); // bits [64:127]
-        res += (double)(low * lower_unity);        // bits [0:63]
+        double res = upper_unity * high; // bits [64:127]
+        res += lower_unity * low;        // bits [0:63]
         return (sign) ? -res : res;
     }
     /**
@@ -824,19 +826,18 @@ public:
             x_div_y.sign = sign ^ other.sign;
         #if FP128_CPP_STYLE_MODULO == TRUE
             bool this_was_positive = is_positive();
-            //x_div_y = (x_div_y.is_positive()) ? floor(x_div_y) : ceil(x_div_y);
-            //*this -= other * x_div_y; 
             *this -= other * floor(x_div_y);
-            
-            // this was positive, return positive modulo
-            if (this_was_positive) {
-                if (is_negative())
-                    *this += other.is_positive() ? other : -other;
-            }
-            // this was negative, return negative modulo
-            else { 
-                if (is_positive())
-                    *this += other.is_positive() ? -other : other;
+            if (!x_div_y.is_int()) {
+                // this was positive, return positive modulo
+                if (this_was_positive) {
+                    if (is_negative())
+                        *this += other.is_positive() ? other : -other;
+                }
+                // this was negative, return negative modulo
+                else {
+                    if (is_positive())
+                        *this += other.is_positive() ? -other : other;
+                }
             }
         #else
             *this -= other * floor(x_div_y);
@@ -1312,6 +1313,8 @@ private:
     FP128_INLINE fixed_point128& subtract(const fixed_point128& other) FP128_THROW_ONLY_IN_DEBUG {
         FP128_ASSERT(other.sign == sign); // bug if asserted, calling method should take care of this
 
+        bool negative_result = (sign) ? other < *this : other > *this;
+
         // convert other high/low to 2's complement (flip bits, add +1)
         uint64_t other_low = other.low;
         uint64_t other_high = other.high;
@@ -1322,7 +1325,7 @@ private:
         high += other_high + carry;
 
         // if result is is negative, invert it along with the sign.
-        if (high & FP128_ONE_SHIFT(63)) {
+        if (negative_result) {
             sign ^= 1;
             twos_complement128(low, high);
         }
@@ -1765,6 +1768,108 @@ public:
 
         return y * inv_log2_10;
     }
+    /*
+    static int div_64bit_test(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v, int m, int n) noexcept
+    {
+        constexpr uint128_t b(0, 1); // Number base (64 bits).
+        constexpr uint128_t mask(UINT64_MAX, 0);   // 64 bit mask
+        uint64_t* un, * vn;                // Normalized form of u, v.
+        uint128_t qhat;                     // Estimated quotient digit.
+        uint128_t rhat;                     // A remainder.
+        uint128_t p;                        // Product of two digits.
+        //int128_t t, k;                      // Temporary variables
+        int64_t t, k;                      // Temporary variables
+        int32_t i, j;                      // Indexes
+        // disable various warnings, some are bogus in VS2022.
+        // the below code relies on the implied truncation (to 32 bit) of several expressions.
+    #pragma warning(push)
+    #pragma warning(disable: 6255)
+    #pragma warning(disable: 4244)
+    #pragma warning(disable: 6297)
+    #pragma warning(disable: 6385)
+    #pragma warning(disable: 6386)
+    #pragma warning(disable: 26451)
+
+    // shrink the arrays to avoid extra work on small numbers
+        while (m > 0 && u[m - 1] == 0) --m;
+        while (n > 0 && v[n - 1] == 0) --n;
+
+        if (m < n || n <= 0 || v[n - 1] == 0)
+            return 1; // Return if invalid param.
+
+        // Take care of the case of a single-digit divisor here.
+        if (n == 1)
+            return div_64bit(q, r, u, v[0], m);
+
+        // Normalize by shifting v left just enough so that its high-order
+        // bit is on, and shift u left the same amount. We may have to append a
+        // high-order digit on the dividend; we do that unconditionally.
+
+        const int32_t s = __lzcnt64(v[n - 1]);             // 0 <= s <= 64.
+        const int32_t s_comp = 64 - s;
+        vn = (uint64_t*)_alloca(sizeof(uint64_t) * n);
+        for (i = n - 1; i > 0; --i) {
+            vn[i] = shift_left128(v[i - 1], v[i], s);
+            //vn[i] = (v[i] << s) | ((uint64_t)v[i - 1] >> s_comp);
+        }
+        vn[0] = v[0] << s;
+
+        un = (uint64_t*)_alloca(sizeof(uint64_t) * (m + 1));
+        un[m] = (uint128_t)u[m - 1] >> s_comp;
+        for (i = m - 1; i > 0; --i)
+            un[i] = (u[i] << s) | (uint64_t)((uint128_t)u[i - 1] >> s_comp);
+        un[0] = u[0] << s;
+
+        for (j = m - n; j >= 0; --j) {       // Main loop.
+            // Compute estimate qhat of q[j].
+            uint128_t d(un[j + n - 1], un[j + n]);
+            qhat = d / vn[n - 1];
+            rhat = d - qhat * vn[n - 1];
+            //qhat = (un[j + n] * b + un[j + n - 1]) / vn[n - 1];
+            //rhat = (un[j + n] * b + un[j + n - 1]) - qhat * vn[n - 1];
+        again:
+            if (qhat >= b || qhat * vn[n - 2] > (rhat << 64) + un[j + n - 2]) {
+                --qhat;
+                rhat += vn[n - 1];
+                if (rhat < b) goto again;
+            }
+
+            // Multiply and subtract.
+            k = 0;
+            for (i = 0; i < n; ++i) {
+                p = qhat * vn[i];
+                t = (uint128_t)un[i + j] - k - (p & mask);
+                un[i + j] = t;
+                k = (p.high) - (t.high);
+            }
+            t = un[j + n] - k;
+            un[j + n] = t;
+
+            q[j] = qhat;          // Store quotient digit.
+            if (t < 0) {          // If we subtracted too
+                q[j] = q[j] - 1;  // much, add back.
+                k = 0;
+                for (i = 0; i < n; ++i) {
+                    t = (uint64_t)un[i + j] + vn[i] + k;
+                    un[i + j] = t;
+                    k = t >> 32;
+                }
+                un[j + n] = un[j + n] + k;
+            }
+        } // End j.
+        // If the caller wants the remainder, unnormalize
+        // it and pass it back.
+        if (r != NULL) {
+            for (i = 0; i < n - 1; ++i)
+                r[i] = (un[i] >> s) | ((uint64_t)un[i + 1] << s_comp);
+
+            r[n - 1] = un[n - 1] >> s;
+        }
+        return 0;
+    #pragma warning(pop)
+    }
+    */
+
 }; //class fixed_point128
 
 
