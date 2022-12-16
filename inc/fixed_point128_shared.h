@@ -399,6 +399,26 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
         *r = k[0];
     return 0;
 }
+/**
+ * @brief Calculates the Log base 2 of x: log2(x)
+ * Rounding is always towards zero so the maximum error is close to 1.
+ * @param x The number to perform log2 on.
+ * @return log2(x). Returns zero when x is zero.
+*/
+__forceinline uint64_t log2(uint64_t x)
+{
+    return (x) ? 63ull - __lzcnt64(x) : 0;
+}
+/**
+ * @brief Calculates the Log base 2 of x: log2(x)
+ * Rounding is always towards zero so the maximum error is close to 1.
+ * @param x The number to perform log2 on.
+ * @return log2(x). Returns zero when x is zero.
+*/
+__forceinline uint32_t log2(uint32_t x)
+{
+    return (x) ? 31ull - __lzcnt(x) : 0;
+}
 
 } //namespace fp128 {
 #endif // FIXED_POINT128_SHARED_H
