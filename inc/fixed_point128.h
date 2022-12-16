@@ -197,8 +197,9 @@ public:
                 // shift f into low QWORD
                 else {
                     high = 0;
-                    bits_to_shift -= dbl_frac_bits;
+                    // f has bit 52 high, shift it left to moves to bit 63
                     f <<= 63 - dbl_frac_bits;
+                    bits_to_shift -= 64 - (63 - dbl_frac_bits);
                     low = f >> bits_to_shift;
                 }
             }
@@ -420,18 +421,59 @@ public:
      * @return Object value.
     */
     FP128_INLINE operator float() const noexcept {
-        double res = (double)(high * upper_unity); // bits [64:127]
-        res += (double)(low * lower_unity);        // bits [0:63]
-        return (float)((sign) ? -res : res);
+        if (!*this)
+            return 0.0f;
+
+        Float res;
+        res.s = sign;
+        int32_t s = (int32_t)lzcnt128(*this);
+        int32_t msb = 127 - s;
+        auto expo = I - 1 - s;
+
+        res.e = 127u + expo;
+        // get the 52 bits right of the msb.
+        fixed_point128 temp(*this);
+        int shift = msb - flt_frac_bits;
+        if (shift > 0) {
+            temp >>= shift;
+        }
+        if (shift < 0) {
+            temp <<= -shift;
+        }
+        res.f = FP128_GET_BITS(temp.low, 0, flt_frac_bits);
+
+        return res.val;
     }
     /**
      * @brief operator double - converts to a double
      * @return Object value.
     */
     FP128_INLINE operator double() const noexcept {
-        double res = upper_unity * high; // bits [64:127]
-        res += lower_unity * low;        // bits [0:63]
-        return (sign) ? -res : res;
+        if (!*this)
+            return 0.0;
+
+        Double res;
+        res.s = sign;
+        int32_t s = (int32_t)lzcnt128(*this);
+        int32_t msb = 127 - s;
+        auto expo = I - 1 - s;
+
+        res.e = 1023ull + expo;
+        // get the 52 bits right of the msb.
+        fixed_point128 temp(*this);
+        int shift = msb - dbl_frac_bits;
+        if (shift > 0) {
+            temp >>= shift;
+        }
+        if (shift < 0) {
+            temp <<= -shift;
+        }
+        res.f = FP128_GET_BITS(temp.low, 0, dbl_frac_bits);
+
+        return res.val;
+        //double res = upper_unity * high; // bits [64:127]
+        //res += lower_unity * low;        // bits [0:63]
+        //return (sign) ? -res : res;
     }
     /**
      * @brief operator long double - converts to a long double
@@ -824,7 +866,7 @@ public:
         if (0 == f) {
             sign ^= int32_t(i >> 63);
             int32_t e = FP128_GET_BITS(i, dbl_frac_bits, dbl_exp_bits) - 1023;
-            return (e >= 0) ? *this >>= e : *this <<= e;
+            return (e >= 0) ? *this >>= e : *this <<= -e;
         }
 
         // normal division
@@ -861,8 +903,8 @@ public:
             x_div_y.sign = sign ^ other.sign;
         #if FP128_CPP_STYLE_MODULO == TRUE
             bool this_was_positive = is_positive();
-            *this -= other * floor(x_div_y);
             if (!x_div_y.is_int()) {
+                *this -= other * floor(x_div_y);
                 // this was positive, return positive modulo
                 if (this_was_positive) {
                     if (is_negative())
@@ -873,6 +915,9 @@ public:
                     if (is_positive())
                         *this += other.is_positive() ? -other : other;
                 }
+            }
+            else {
+                *this = 0;
             }
         #else
             *this -= other * floor(x_div_y);

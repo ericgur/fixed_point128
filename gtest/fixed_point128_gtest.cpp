@@ -31,7 +31,7 @@ __forceinline int32_t get_random_sign()
 double get_double_random()
 {
     Double res{};
-    res.e = (get_uint32_random() % 63) + 1023; // only positive exponents
+    res.e = ((uint64_t)get_uint32_random() % 73) - 10 + 1023; // exponents [-10,63]
     res.f = get_uint64_random();
     res.s = get_random_sign();
     return res.val;
@@ -40,13 +40,13 @@ double get_double_random()
 // returns a positive random number
 uint64_t get_uint64_random()
 {
-    return (uint64_t)rand() * (uint64_t)rand();
+    return ((uint64_t)rand() + 1) * (uint64_t)rand();
 }
 
 // returns a positive random number
 int64_t get_int64_random()
 {
-    return (int64_t)rand() * (int64_t)rand() * (int64_t)get_random_sign();
+    return (int64_t)(rand() + 1) * (int64_t)rand() * (int64_t)get_random_sign();
 }
 
 // returns a positive random number
@@ -97,6 +97,8 @@ TEST(fixed_point128, ConstructorFromDouble) {
     srand(RANDOM_SEED); 
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
+        //double value = -0.00048828129930906378;
+        
         fixed_point128<20> f = value;
         if (check_overflow(value, f)) {
             continue;
@@ -234,6 +236,7 @@ TEST(fixed_point128, AddSameSign) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = fabs(get_double_random());
         double value2 = value1 * 2.5;
+        //double value1 = 3.6379791744728668e-12, value2 = 9.0949479361821669e-12;
         double res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
@@ -241,7 +244,12 @@ TEST(fixed_point128, AddSameSign) {
         if (check_overflow(value1, f1) || check_overflow(value2, f2) || check_overflow(res, f3)) {
             continue;
         }
-        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res);
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
 TEST(fixed_point128, AddDifferentSign) {
@@ -256,6 +264,11 @@ TEST(fixed_point128, AddDifferentSign) {
         if (check_overflow(value1, f1) || check_overflow(value2, f2) || check_overflow(res, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -270,6 +283,12 @@ TEST(fixed_point128, AddDouble) {
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -356,6 +375,11 @@ TEST(fixed_point128, SubtractSameSign) {
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res);
     }
 }
@@ -371,6 +395,11 @@ TEST(fixed_point128, SubtractDifferentSign) {
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -441,13 +470,22 @@ TEST(fixed_point128, MultiplyByFP128) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
         double value2 = get_double_random();
+        //double value1 = -9.5367434602401654e-07, value2 = -3.8146973747715616e-06;
         double res = value1 * value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 * f2;
+        //assert((double)f1 == value1);
+        //assert((double)f2 == value2);
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -462,6 +500,11 @@ TEST(fixed_point128, MultiplyByDouble) {
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -476,6 +519,11 @@ TEST(fixed_point128, MultiplyByFloat) {
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -540,7 +588,7 @@ TEST(fixed_point128, DivideByFP128) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
         double value2 = get_double_random();
-        //double value1 = -1.0000000010122618, value2 = -549755853860.83606;
+        //double value1 = -9.5367438958301344e-07, value2=-549755865672.46912;
         //printf("%u\n", i);
         if (value2 == 0)
             continue;
@@ -584,6 +632,7 @@ TEST(fixed_point128, DivideByFloat) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value1 = (float)get_double_random();
         float value2 = (float)get_double_random();
+        //float value1 = -4194304, value2 = -0.03125;
         float res = value1 / value2;
         if (value2 == 0)
             continue;
@@ -695,7 +744,7 @@ TEST(fixed_point128, ModuloByDouble) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 % value2;
-        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(value1 / value2, f3)) {
             continue;
         }
         double fp128_res = static_cast<double>(f3);
@@ -711,15 +760,19 @@ TEST(fixed_point128, ModuloByFloat) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value1 = (float)get_double_random();
         float value2 = (float)get_double_random();
-        //float value1 = -17179871232, value2 = -524288.0625;
+        //float value1=-274877917612.19153, value2=-0.062500000199658484;
         if (value2 == 0)
             continue;
         float res = fmodf(value1, value2);
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 % value2;
-        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(value1 / value2, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
         EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
