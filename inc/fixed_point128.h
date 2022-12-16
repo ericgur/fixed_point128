@@ -447,14 +447,49 @@ public:
      * @return object string representation
     */
     FP128_INLINE operator std::string() const {
-        return fp2s();
+        return operator char*();
     }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
      * @return object string representation
     */
     explicit FP128_INLINE operator char*() const {
-        return fp2s();
+        static thread_local char str[128]; // need roughly a (meaningful) decimal digit per 3.2 bits
+
+        char* p = str;
+        fixed_point128 temp = *this;
+
+        //number is negative
+        if (temp.sign)
+            *p++ = '-';
+
+        uint64_t integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
+        p += snprintf(p, sizeof(str) + p - str, "%llu", integer);
+        temp.high &= ~int_mask; // remove the integer part
+        // check if temp has additional digits (not zero)
+        if (temp) {
+            *p++ = '.';
+        }
+        // the faster way, requires temp *= 10 not overflowing
+        int digits = 0;
+        uint64_t res[2]{};
+        while (digits++ < max_frac_digits && temp) {
+            if constexpr (I < 4) {
+
+                res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
+                // extract the integer part
+                integer = shift_right128_round(res[0], res[1], upper_frac_bits);
+                temp *= 10; // move another digit to the integer area
+            }
+            else {
+                temp *= 10; // move another digit to the integer area
+                integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
+            }
+            *p++ = '0' + (char)integer;
+            temp.high &= ~int_mask;
+        }
+        *p = '\0';
+        return str;
     }
     //
     // math operators
@@ -1200,8 +1235,7 @@ public:
     FP128_INLINE int32_t get_exponent() const
     {
         int32_t s = (int32_t)lzcnt128(*this);
-        s = I - s - 1;
-        return s;
+        return I - 1 - s;
     }
     /**
      * @brief Returns an instance of fixed_point128 with the value of pi
@@ -1245,50 +1279,6 @@ public:
     }
 
 private:
-    /**
-     * @brief Converts this object to a C string.
-     * The returned string is a statically thread-allocated buffer.
-     * Additional calls to this function from the same thread, overwrite the previous result.
-     * @return C string with describing the value of the object.
-    */
-    FP128_INLINE char* fp2s() const {
-        static thread_local char str[128]; // need roughly a (meaningful) decimal digit per 3.2 bits
-
-        char* p = str;
-        fixed_point128 temp = *this;
-
-        //number is negative
-        if (temp.sign)
-            *p++ = '-';
-
-        uint64_t integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
-        p += snprintf(p, sizeof(str) + p - str, "%llu", integer);
-        temp.high &= ~int_mask; // remove the integer part
-        // check if temp has additional digits (not zero)
-        if (temp) {
-            *p++ = '.';
-        }
-        // the faster way, requires temp *= 10 not overflowing
-        int digits = 0;
-        uint64_t res[2]{};
-        while (digits++ < max_frac_digits && temp) {
-            if constexpr (I < 4) {
-                
-                res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
-                // extract the integer part
-                integer = shift_right128_round(res[0], res[1], upper_frac_bits);
-                temp *= 10; // move another digit to the integer area
-            }
-            else {
-                temp *= 10; // move another digit to the integer area
-                integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
-            }
-            *p++ = '0' + (char)integer;
-            temp.high &= ~int_mask;
-        }
-        *p = '\0';
-        return str;
-    }
     /**
      * @brief Adds 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
      * @param other The right side of the addition operation
