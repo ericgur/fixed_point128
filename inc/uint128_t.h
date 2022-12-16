@@ -536,6 +536,7 @@ public:
     }
     /**
      * @brief Add a value to this object
+     * like other uint types, overflow will result in a small value
      * @param other Right hand side operand
      * @return This object.
     */
@@ -546,6 +547,7 @@ public:
     }
     /**
      * @brief Add a value to this object
+     * like other uint types, overflow will result in a small value
      * @param other Right hand side operand
      * @return This object.
     */
@@ -555,7 +557,8 @@ public:
         return operator+=(uint128_t(other));
     }
     /**
-     * @brief Subtract a value to this object
+     * @brief Subtract a value from this object
+     * like other uint types, underflow will result in a large value
      * @param other Right hand side operand
      * @return This object.
     */
@@ -568,12 +571,12 @@ public:
     }
     /**
      * @brief Subtract a value to this object
+     * like other uint types, underflow will result in a large value
      * @param other Right hand side operand
      * @return This object.
     */
     template<typename T>
     UINT128_T_INLINE uint128_t& operator-=(T other) {
-
         return operator-=(uint128_t(other));
     }
     /**
@@ -602,7 +605,7 @@ public:
     template<typename T>
     UINT128_T_INLINE uint128_t& operator*=(T x) {
         // check if the type is signed or not
-        // for negative values, convert to uint128 and multiply.
+        // for negative values, convert to uint128_t and multiply.
         if constexpr (std::is_signed<T>::value) {
             if (x < 0) return operator*=(uint128_t(x));
         }
@@ -616,7 +619,7 @@ public:
         return *this;
     }
     /**
-     * @brief Divide this object by x.
+     * @brief Divide this object by other.
      * @param other Right hand side operator (denominator)
      * @return this object.
     */
