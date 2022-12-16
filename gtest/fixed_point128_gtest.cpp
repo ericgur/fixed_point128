@@ -15,6 +15,12 @@ using namespace fp128;
 
 static constexpr int RANDOM_TEST_COUNT = 32768;
 static constexpr int RANDOM_SEED = 0x12345678; // must have a repeatable seed for debugging
+static constexpr double DOUBLE_REL_EPS = 1.0e-10;
+
+uint64_t get_uint64_random();
+int64_t get_int64_random();
+uint32_t get_uint32_random();
+int32_t get_int32_random();
 
 __forceinline int32_t get_random_sign()
 {
@@ -24,7 +30,11 @@ __forceinline int32_t get_random_sign()
 // returns a random number
 double get_double_random()
 {
-    return (double)rand() * (double)rand() / (double)(rand() + 1) * (double)get_random_sign();
+    Double res{};
+    res.e = (get_uint32_random() % 63) + 1023; // only positive exponents
+    res.f = get_uint64_random();
+    res.s = get_random_sign();
+    return res.val;
 }
 
 // returns a positive random number
@@ -51,6 +61,33 @@ int32_t get_int32_random()
     return rand() * get_random_sign();
 }
 
+// return true on overflow
+template<typename T, int I>
+bool check_overflow(T value, const fixed_point128<I>& d)
+{
+    if constexpr (std::is_floating_point<T>::value) {
+        value = fabs(value);
+        if (value <= 1.0) return false;
+    }
+    else if constexpr (std::is_signed<T>::value) {
+        value = abs(value);
+        if (value <= 1) return false;
+    }
+
+    return floor(log2(value)) >= I;
+}
+
+bool is_similar_double(double v1, double v2)
+{
+    if (v1 == 0.0 || v2 == 0.0) {
+        v1 += 1.0e-30;
+        v2 += 1.0e-30;
+    }
+    double ratio = fabs(v1 / v2 - 1.0);
+    return ratio < DOUBLE_REL_EPS;
+        
+}
+
 // Construct fixed_point128 and convert back to/from various elements.
 TEST(fixed_point128, DefaultConstructor) {
     fixed_point128<20> f;
@@ -61,7 +98,7 @@ TEST(fixed_point128, ConstructorFromDouble) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         fixed_point128<20> f = value;
-        if (fabs(value) > f.max_int_value) {
+        if (check_overflow(value, f)) {
             continue;
         }
         double f_value = static_cast<double>(f);
@@ -76,7 +113,7 @@ TEST(fixed_point128, ConstructorFromFloat) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value = (float)get_double_random();
         fixed_point128<20> f = value;
-        if (fabs(value) > f.max_int_value) {
+        if (check_overflow(value, f)) {
             continue;
         }
         EXPECT_FLOAT_EQ(static_cast<float>(f), value);
@@ -87,7 +124,7 @@ TEST(fixed_point128, ConstructorFromInt32) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         int32_t value = get_int32_random();
         fixed_point128<32> f = value;
-        if (abs(value) > f.max_int_value) {
+        if (check_overflow(value, f)) {
             continue;
         }
         EXPECT_EQ(static_cast<int32_t>(f), value);
@@ -98,7 +135,7 @@ TEST(fixed_point128, ConstructorFromUnsignedInt32) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint32_t value = get_uint32_random();
         fixed_point128<32> f = value;
-        if (value > f.max_int_value) {
+        if (check_overflow(value, f)) {
             continue;
         }
         EXPECT_EQ(static_cast<uint32_t>(f), value);
@@ -109,7 +146,7 @@ TEST(fixed_point128, ConstructorFromInt64) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         int64_t value = get_int64_random();
         fixed_point128<32> f = value;
-        if (abs(value) > f.max_int_value) {
+        if (check_overflow(value, f)) {
             continue;
         }
         EXPECT_EQ(static_cast<int64_t>(f), value);
@@ -120,7 +157,7 @@ TEST(fixed_point128, ConstructorFromUnsignedInt64) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint64_t value = get_uint64_random();
         fixed_point128<32> f = value;
-        if (value > f.max_int_value) {
+        if (check_overflow(value, f)) {
             continue;
         }
         EXPECT_EQ(static_cast<uint64_t>(f), value);
@@ -201,7 +238,7 @@ TEST(fixed_point128, AddSameSign) {
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 + f2;
-        if (res > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f2) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res);
@@ -216,7 +253,7 @@ TEST(fixed_point128, AddDifferentSign) {
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 + f2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f2) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -230,7 +267,7 @@ TEST(fixed_point128, AddDouble) {
         double res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -241,10 +278,11 @@ TEST(fixed_point128, AddFloat) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value1 = (float)get_double_random();
         float value2 = (float)get_double_random();
+        //float value1 = -4096.00048828125, value2 = -1099511627776;
         float res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -258,7 +296,7 @@ TEST(fixed_point128, AddInt32) {
         auto res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -272,7 +310,7 @@ TEST(fixed_point128, AddUnsignedInt32) {
         auto res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -286,7 +324,7 @@ TEST(fixed_point128, AddInt64) {
         auto res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -300,7 +338,7 @@ TEST(fixed_point128, AddUnsignedInt64) {
         auto res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -315,7 +353,7 @@ TEST(fixed_point128, SubtractSameSign) {
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 - f2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res);
@@ -330,7 +368,7 @@ TEST(fixed_point128, SubtractDifferentSign) {
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 - f2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -344,7 +382,7 @@ TEST(fixed_point128, SubtractInt32) {
         auto res = value1 - value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 - value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -361,7 +399,7 @@ TEST(fixed_point128, SubtractUnsignedInt32) {
         auto res = value1 - value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 - value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -375,7 +413,7 @@ TEST(fixed_point128, SubtractInt64) {
         auto res = value1 - value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 - value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -392,7 +430,7 @@ TEST(fixed_point128, SubtractUnsignedInt64) {
         auto res = value1 - value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 - value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -407,7 +445,7 @@ TEST(fixed_point128, MultiplyByFP128) {
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 * f2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -421,7 +459,7 @@ TEST(fixed_point128, MultiplyByDouble) {
         double res = value1 * value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 * value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -435,7 +473,7 @@ TEST(fixed_point128, MultiplyByFloat) {
         float res = value1 * value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 * value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -449,7 +487,7 @@ TEST(fixed_point128, MultiplyByInt32) {
         int64_t res = (int64_t)value1 * (int64_t)value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 * value2;
-        if (abs(res) > f1.max_int_value || abs(value2) > f1.max_int_value || abs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -463,7 +501,7 @@ TEST(fixed_point128, MultiplyByUnsignedInt32) {
         uint64_t res = (uint64_t)value1 * (uint64_t)value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 * value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -477,7 +515,7 @@ TEST(fixed_point128, MultiplyByInt64) {
         int64_t res = value1 * value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 * value2;
-        if (abs(res) > f1.max_int_value || abs(value2) > f1.max_int_value || abs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -491,7 +529,7 @@ TEST(fixed_point128, MultiplyByUnsignedInt64) {
         uint64_t res = value1 * value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 * value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -502,18 +540,22 @@ TEST(fixed_point128, DivideByFP128) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
         double value2 = get_double_random();
-        //double value1 = 48034.270022883298, value2 = 168.09205560447856;
+        //double value1 = -1.0000000010122618, value2 = -549755853860.83606;
         //printf("%u\n", i);
-        double res = value1 / value2;
         if (value2 == 0)
             continue;
+        double res = value1 / value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 / f2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
 TEST(fixed_point128, DivideByDouble) {
@@ -526,9 +568,14 @@ TEST(fixed_point128, DivideByDouble) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 / value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -542,7 +589,7 @@ TEST(fixed_point128, DivideByFloat) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 / value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -558,7 +605,7 @@ TEST(fixed_point128, DivideByInt32) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 / value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -574,7 +621,7 @@ TEST(fixed_point128, DivideByUnsignedInt32) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 / value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -591,7 +638,7 @@ TEST(fixed_point128, DivideByInt64) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 / value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -607,7 +654,7 @@ TEST(fixed_point128, DivideByUnsignedInt64) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 / value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -626,9 +673,14 @@ TEST(fixed_point128, ModuloByFP128) {
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 / f2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -643,9 +695,14 @@ TEST(fixed_point128, ModuloByDouble) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 % value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
+        double fp128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(fp128_res, res))
+            continue;
+
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -654,12 +711,13 @@ TEST(fixed_point128, ModuloByFloat) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value1 = (float)get_double_random();
         float value2 = (float)get_double_random();
-        float res = fmodf(value1, value2);
+        //float value1 = -17179871232, value2 = -524288.0625;
         if (value2 == 0)
             continue;
+        float res = fmodf(value1, value2);
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 % value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -675,7 +733,7 @@ TEST(fixed_point128, ModuloByInt32) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 % value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -691,7 +749,7 @@ TEST(fixed_point128, ModuloByUnsignedInt32) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 % value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -708,7 +766,7 @@ TEST(fixed_point128, ModuloByInt64) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 % value2;
-        if (fabs(res) > f1.max_int_value || fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -724,7 +782,7 @@ TEST(fixed_point128, ModuloByUnsignedInt64) {
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 % value2;
-        if (res > f1.max_int_value || value2 > f1.max_int_value || value1 > f1.max_int_value) {
+        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
@@ -738,7 +796,7 @@ TEST(fixed_point128, CompareFP128) {
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
-        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1) || check_overflow(value2, f1))
             continue;
 
         bool fp128_res = f1 > f2;
@@ -764,7 +822,7 @@ TEST(fixed_point128, CompareDouble) {
         double value2 = get_double_random();
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
-        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1) || check_overflow(value2, f1))
             continue;
 
         bool fp128_res = f1 > value2;
@@ -790,7 +848,7 @@ TEST(fixed_point128, CompareFloat) {
         float value2 = (float)get_double_random();
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
-        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1) || check_overflow(value2, f1))
             continue;
 
         bool fp128_res = f1 > value2;
@@ -816,7 +874,7 @@ TEST(fixed_point128, CompareInt32) {
         int32_t value2 = get_int32_random();
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
-        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1) || check_overflow(value2, f1))
             continue;
 
         bool fp128_res = f1 > value2;
@@ -842,7 +900,7 @@ TEST(fixed_point128, CompareUnsignedInt32) {
         uint32_t value2 = get_uint32_random();
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
-        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1) || check_overflow(value2, f1))
             continue;
 
         bool fp128_res = f1 > value2;
@@ -868,7 +926,7 @@ TEST(fixed_point128, CompareInt64) {
         int64_t value2 = get_int64_random();
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
-        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1) || check_overflow(value2, f1))
             continue;
 
         bool fp128_res = f1 > value2;
@@ -894,7 +952,7 @@ TEST(fixed_point128, CompareUnsignedInt64) {
         uint64_t value2 = get_uint64_random();
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
-        if (fabs(value2) > f1.max_int_value || fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1) || check_overflow(value2, f1))
             continue;
 
         bool fp128_res = f1 > value2;
@@ -917,13 +975,14 @@ TEST(fixed_point128, OperatorPlusPlus) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
+        //double value1 = -549755845143.65332;
 
         double res = value1 + 1;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = f1;
         f2++;
 
-        if (fabs(value1 + 1.0) > f1.max_int_value)
+        if (check_overflow(value1+2, f1))
             continue;
 
         EXPECT_DOUBLE_EQ(static_cast<double>(f2), res) << "operator++(int)" << "value1=" << value1;
@@ -944,7 +1003,7 @@ TEST(fixed_point128, OperatorMinusMinus) {
         fixed_point128<40> f2 = f1;
         f2--;
 
-        if (fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1 + 2, f1) || check_overflow(value1 - 2, f1))
             continue;
 
         EXPECT_DOUBLE_EQ(static_cast<double>(f2), res) << "operator--(int)" << "value1=" << value1;
@@ -962,7 +1021,7 @@ TEST(fixed_point128, OperatorEqual) {
         fixed_point128<40> f1 = value1;
         bool fp128_res = f1 == f1;
 
-        if (fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1))
             continue;
 
         EXPECT_TRUE(fp128_res == true) << "operator==: " << "value1=" << value1;
@@ -975,7 +1034,7 @@ TEST(fixed_point128, TemplateOperatorEqual) {
         fixed_point128<40> f1 = value1;
         bool fp128_res = f1 == value1;
 
-        if (fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1))
             continue;
 
         EXPECT_TRUE(fp128_res == true) << "operator==<double>: " << "value1=" << value1;
@@ -1013,7 +1072,7 @@ TEST(fixed_point128, OperatorNotEqual) {
         fixed_point128<40> f1 = value1;
         bool fp128_res = f1 != f1;
 
-        if (fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1))
             continue;
 
         EXPECT_TRUE(fp128_res == false) << "operator!=: " << "value1=" << value1;
@@ -1026,7 +1085,7 @@ TEST(fixed_point128, TemplateOperatorNotEqual) {
         fixed_point128<40> f1 = value1;
         bool fp128_res = f1 != value1;
 
-        if (fabs(value1) > f1.max_int_value)
+        if (check_overflow(value1, f1))
             continue;
 
         EXPECT_TRUE(fp128_res == false) << "operator!=<double>: " << "value1=" << value1;
@@ -1057,3 +1116,22 @@ TEST(fixed_point128, TemplateOperatorNotEqual) {
         EXPECT_TRUE(fp128_res == false) << "operator!=<int32_t>: " << "value1=" << value1;
     }
 }
+//TEST(fixed_point128, ShiftRight) {
+//    srand(RANDOM_SEED);
+//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+//        double value1 = get_double_random();
+//        fixed_point128<40> f1 = value1;
+//        if (check_overflow(value1, f1))
+//            continue;
+//
+//        uint32_t shift = get_uint32_random() % 127u;
+//        if (shift < 64) {
+//
+//        }
+//        else {
+//
+//        }
+//
+//        //EXPECT_TRUE(fp128_res == false) << "operator!=: " << "value1=" << value1;
+//    }
+//}
