@@ -72,6 +72,7 @@ class uint128_t
 {
     // build time validation of template parameters
     static_assert(sizeof(void*) == 8, "uint128_t is supported in 64 bit builds only!");
+    template<int32_t I> friend class fixed_point128;
 
 private:
     //
@@ -167,26 +168,22 @@ public:
      * @brief Constructor from uint64_t type
      * @param x Input value
     */
-    uint128_t(uint64_t x) noexcept {
-        low = x;
-        high = 0;
-    }
+    uint128_t(uint64_t x) noexcept :
+        low(x), high(0) {}
     /**
      * @brief Constructor from int64_t type
      * @param x Input value
     */
     uint128_t(int64_t x) noexcept {
         low = static_cast<uint64_t>(x);
-        high = (x < 0) ? UINT64_MAX : 0; // sign extend tge value to the higher QWORD
+        high = (x < 0) ? UINT64_MAX : 0; // sign extend the value to the higher QWORD
     }
     /**
      * @brief Constructor from uint32_t type
      * @param x Input value
    */
-    uint128_t(uint32_t x) noexcept {
-        low = x;
-        high = 0;
-    }
+    uint128_t(uint32_t x) noexcept :
+        low(x), high(0) {}
     /**
      * @brief Constructor from int32_t type
      * @param x Input value
@@ -252,8 +249,7 @@ public:
      * @param x Input string
     */
     uint128_t(const std::string& x) noexcept {
-        uint128_t temp = x.c_str();
-        *this = temp;
+        *this = x.c_str();
     }
     /**
      * @brief Constructor from the 2 uint128_t base elements, useful for creating special constants.
@@ -261,9 +257,7 @@ public:
      * @param h High QWORD
     */
     uint128_t(uint64_t l, uint64_t h) noexcept:
-        low(l), high(h) {
-    }
-    
+        low(l), high(h) {}    
     /**
      * @brief Destructor
     */
@@ -276,6 +270,16 @@ public:
     UINT128_T_INLINE uint128_t& operator=(const uint128_t& other) noexcept {
         high = other.high;
         low = other.low;
+        return *this;
+    }
+    /**
+     * @brief Assignment operator
+     * @param other Value to copy from
+     * @return This object.
+    */
+    template<typename T>
+    UINT128_T_INLINE uint128_t& operator=(T other) noexcept {
+        *this = uint128_t(other);
         return *this;
     }
     /**
@@ -400,11 +404,31 @@ public:
         return temp += other;
     }
     /**
+     * @brief Adds the right hand side operand to this object to and returns the result.
+     * @param other Right hand side operand
+     * @return Temporary object with the result of the operation
+    */
+    template<typename T>
+    UINT128_T_INLINE uint128_t operator+(T other) const {
+        uint128_t temp(*this);
+        return temp += other;
+    }
+    /**
      * @brief subtracts the right hand side operand to this object to and returns the result.
      * @param other Right hand side operand
      * @return Temporary object with the result of the operation
     */
     UINT128_T_INLINE uint128_t operator-(const uint128_t& other) const {
+        uint128_t temp(*this);
+        return temp -= other;
+    }
+    /**
+     * @brief subtracts the right hand side operand to this object to and returns the result.
+     * @param other Right hand side operand
+     * @return Temporary object with the result of the operation
+    */
+    template<typename T>
+    UINT128_T_INLINE uint128_t operator-(T other) const {
         uint128_t temp(*this);
         return temp -= other;
     }
@@ -419,31 +443,13 @@ public:
     }
     /**
      * @brief Multiplies the right hand side operand with this object to and returns the result.
-     * @param x Right hand side operand
+     * @param other Right hand side operand
      * @return Temporary object with the result of the operation
     */
-    UINT128_T_INLINE uint128_t operator*(double x) const {
-        // TODO: check what is the correct behavior
+    template<typename T>
+    UINT128_T_INLINE uint128_t operator*(T other) const {
         uint128_t temp(*this);
-        return temp *= uint128_t(x);
-    }
-    /**
-     * @brief Multiplies the right hand side operand with this object to and returns the result.
-     * @param x Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    UINT128_T_INLINE uint128_t operator*(uint64_t x) const {
-        uint128_t temp(*this);
-        return temp *= x;
-    }
-    /**
-     * @brief Multiplies the right hand side operand with this object to and returns the result.
-     * @param x Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    UINT128_T_INLINE uint128_t operator*(uint32_t x) const {
-        uint128_t temp(*this);
-        return temp *= x;
+        return temp *= other;
     }
     /**
      * @brief Divides this object by the right hand side operand and returns the result.
@@ -456,16 +462,13 @@ public:
     }
     /**
      * @brief Divides this object by the right hand side operand and returns the result.
-     * @param x Right hand side operand (denominator)
+     * @param other Right hand side operand (denominator)
      * @return Temporary object with the result of the operation
     */
-    UINT128_T_INLINE uint128_t operator/(double x) const {
-        if (x == 0)
-            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
-
+    template<typename T>
+    UINT128_T_INLINE uint128_t operator/(T other) const {
         uint128_t temp(*this);
-        temp /= x;
-        return temp;
+        return temp /= other;
     }
     /**
      * @brief Calculates modulo.
@@ -473,6 +476,16 @@ public:
      * @return Temporary object with the result of the operation
     */
     UINT128_T_INLINE uint128_t operator%(const uint128_t& other) const {
+        uint128_t temp(*this);
+        return temp %= other;
+    }
+    /**
+     * @brief Calculates modulo.
+     * @param other Right hand side operand (denominator)
+     * @return Temporary object with the result of the operation
+    */
+    template<typename T>
+    UINT128_T_INLINE uint128_t operator%(T other) const {
         uint128_t temp(*this);
         return temp %= other;
     }
@@ -532,6 +545,16 @@ public:
         return *this;
     }
     /**
+     * @brief Add a value to this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    UINT128_T_INLINE uint128_t& operator+=(T other) {
+        
+        return operator+=(uint128_t(other));
+    }
+    /**
      * @brief Subtract a value to this object
      * @param other Right hand side operand
      * @return This object.
@@ -542,6 +565,16 @@ public:
         unsigned char carry = _addcarry_u64(0, low, temp.low, &low);
         high += temp.high + carry;
         return *this;
+    }
+    /**
+     * @brief Subtract a value to this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    UINT128_T_INLINE uint128_t& operator-=(T other) {
+
+        return operator-=(uint128_t(other));
     }
     /**
      * @brief Multiplies a value to this object
@@ -566,60 +599,20 @@ public:
      * @param x Right hand side operand
      * @return This object.
     */
-    UINT128_T_INLINE uint128_t& operator*=(int32_t x) {
-        bool sign = (x < 0);
-        // alway do positive multiplication
-        uint64_t uval = (uint64_t)((sign) ? -x : x);
-        uint64_t temp;
-
-        // multiply low QWORDs
-        low = _umul128(low, uval, &temp);
-        high = high * uval + temp;
-        if (sign) {
-            twos_complement128(low, high);
+    template<typename T>
+    UINT128_T_INLINE uint128_t& operator*=(T x) {
+        // check if the type is signed or not
+        // for negative values, convert to uint128 and multiply.
+        if constexpr (std::is_signed<T>::value) {
+            if (x < 0) return operator*=(uint128_t(x));
         }
-        return *this;
-    }
-    /**
-     * @brief Multiplies a value to this object
-     * @param x Right hand side operand
-     * @return This object.
-    */
-    UINT128_T_INLINE uint128_t& operator*=(uint32_t x) {
-        uint64_t temp;
 
-        // multiply low QWORDs
-        low = _umul128(low, x, &temp);
-        high = high * x + temp;
-        return *this;
-    }
-    /**
-     * @brief Multiplies a value to this object
-     * @param x Right hand side operand
-     * @return This object.
-    */
-    UINT128_T_INLINE uint128_t& operator*=(int64_t x) {
-        bool sign = (x < 0);
-        // alway do positive multiplication
-        uint64_t uval = (uint64_t)((sign) ? -x : x);
         uint64_t temp;
-
+        uint64_t uval = static_cast<uint64_t>(x);
         // multiply low QWORDs
         low = _umul128(low, uval, &temp);
         high = high * uval + temp;
-        return *this;
-    }
-    /**
-     * @brief Multiplies a value to this object
-     * @param x Right hand side operand
-     * @return This object.
-    */
-    UINT128_T_INLINE uint128_t& operator*=(uint64_t x) {
-        uint64_t temp;
 
-        // multiply low QWORDs
-        low = _umul128(low, x, &temp);
-        high = high * x + temp;
         return *this;
     }
     /**
@@ -667,6 +660,51 @@ public:
         return *this;
     }
     /**
+     * @brief Divide this object by x.
+     * @param x Right hand side operator (denominator)
+     * @return this object.
+    */
+    template<typename T>
+    inline uint128_t& operator/=(T x) {
+        // check if the type is signed or not
+        // for negative values, convert to uint128 and divide.
+        if constexpr (std::is_signed<T>::value) {
+            if (x < 0) return operator/=(uint128_t(x));
+        }
+
+        uint64_t uval = static_cast<uint64_t>(x);
+
+        // check some trivial cases
+        if (uval == 0) {
+            FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
+        }
+        if (is_zero() || *this < uval) {
+            low = high = 0;
+            return *this;
+        }
+
+        if (*this == uval) {
+            low = 1;
+            high = 0;
+            return *this;
+        }
+
+        // exponent of 2, convert to a much faster shift operation
+        if (1 == __popcnt64(uval)) {
+            return *this >>= (int32_t)log2(uval);
+        }
+
+        uint64_t q[2]{};
+        uint64_t nom[2] = { low, high };
+
+        if (div_64bit((uint64_t*)q, nullptr, (uint64_t*)nom, uval, 2)) {
+            FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
+        }
+        low = q[0];
+        high = q[1];
+        return *this;
+    }
+    /**
      * @brief %= operator
      * @param other Modulo operand.
      * @return This object.
@@ -702,6 +740,15 @@ public:
         return *this;
     }
     /**
+     * @brief %= operator
+     * @param x Modulo operand.
+     * @return This object.
+    */
+    template<typename T>
+    inline uint128_t& operator%=(T x) {
+        return operator%=(uint128_t(x));
+    }
+    /**
      * @brief Shift right this object.
      * Shifting is done without rounding to match uint64_t behavior
      * @param shift Bits to shift. Negative or very high values cause undefined behavior.
@@ -712,7 +759,7 @@ public:
             return *this;
         // 1-64 bit shift - most common
         if (shift < 64) {
-            low = shift_right128(low, high, (uint8_t)shift);
+            low = shift_right128(low, high, shift);
             high >>= shift;
         }
         else {
@@ -856,12 +903,30 @@ public:
         return high == other.high && low == other.low;
     }
     /**
+     * @brief Compare logical/bitwise equal.
+     * @param other Righthand operand
+     * @return True if this and other are equal.
+    */
+    template<typename T>
+    UINT128_T_INLINE bool operator==(T other) const noexcept {
+        return *this == uint128_t(other);
+    }
+    /**
      * @brief Return true when objects are not equal. Can be used as logical XOR.
      * @param other Righthand operand.
      * @return True of not equal.
     */
     UINT128_T_INLINE bool operator!=(const uint128_t& other) const noexcept {
         return low != other.low || high != other.high;
+    }
+    /**
+     * @brief Return true when objects are not equal. Can be used as logical XOR.
+     * @param other Righthand operand.
+     * @return True of not equal.
+    */
+    template<typename T>
+    UINT128_T_INLINE bool operator!=(T other) const noexcept {
+        return *this != uint128_t(other);
     }
     /**
      * @brief Return true if this object is small than the other
@@ -872,12 +937,30 @@ public:
         return high < other.high || (high == other.high && low < other.low);
     }
     /**
+     * @brief Return true if this object is small than the other
+     * @param other Righthand operand.
+     * @return True when this object is smaller.
+    */
+    template<typename T>
+    UINT128_T_INLINE bool operator<(T other) const noexcept {
+        return *this < uint128_t(other);
+    }
+    /**
      * @brief Return true this object is small or equal than the other
      * @param other Righthand operand.
      * @return True when this object is smaller or equal.
     */
     UINT128_T_INLINE bool operator<=(const uint128_t& other) const noexcept {
         return !(*this > other);
+    }
+    /**
+     * @brief Return true this object is small or equal than the other
+     * @param other Righthand operand.
+     * @return True when this object is smaller or equal.
+    */
+    template<typename T>
+    UINT128_T_INLINE bool operator<=(T other) const noexcept {
+        return !(*this > uint128_t(other));
     }
     /**
      * @brief Return true this object is larger than the other
@@ -888,6 +971,15 @@ public:
         return high > other.high || (high == other.high && low > other.low);
     }
     /**
+     * @brief Return true this object is larger than the other
+     * @param other Righthand operand.
+     * @return True when this objext is larger.
+    */
+    template<typename T>
+    UINT128_T_INLINE bool operator>(T other) const noexcept {
+        return *this > uint128_t(other);
+    }
+    /**
      * @brief Return true this object is larger or equal than the other
      * @param other Righthand operand.
      * @return True when this objext is larger or equal.
@@ -895,6 +987,16 @@ public:
     UINT128_T_INLINE bool operator>=(const uint128_t& other) const noexcept {
         return !(*this < other);
     }
+    /**
+     * @brief Return true this object is larger or equal than the other
+     * @param other Righthand operand.
+     * @return True when this objext is larger or equal.
+    */
+    template<typename T>
+    UINT128_T_INLINE bool operator>=(T other) const noexcept {
+        return !(*this < uint128_t(other));
+    }
+
     //
     // useful public functions
     //
@@ -954,20 +1056,13 @@ public:
     /**
      * @brief Converts this object to a hex C string.
      * The returned string is a statically thread-allocated buffer.
-     * Additional calls to this function from the same thread, overwrite the previous result.
-     * @return C string with describing the value of the object.
+     * Additional calls to this function from the same thread overwrite the previous result.
+     * @return C string containing the HEX value of the object.
     */
     UINT128_T_INLINE char* hex() const {
         constexpr int buff_size = 35;
         static thread_local char str[buff_size];
-        
-        if (high) {
-            snprintf(str, buff_size, "0x%llX%016llX", high, low);
-        }
-        else {
-            snprintf(str, buff_size, "0x%llX", low);
-        }
-        
+        snprintf(str, buff_size, "0x%llX%016llX", high, low);
         return str;
     }
 private:
@@ -991,6 +1086,7 @@ private:
         uint128_t base = 10;
         uint64_t q[2]{};
         uint64_t digit{};
+        // as long as the intermediate value is >64 bit, use the more expensive long division.
         while (temp.high) {
             --p;
             uint64_t nom[2] = { temp.low, temp.high };
@@ -999,7 +1095,7 @@ private:
             temp.high = q[1];
             *p = static_cast<char>(digit + '0');
         }
-
+        // the intermediate value fits in 64 bit, use the much faster native-64 bit division 
         while (temp.low) {
             --p;
             uint64_t r = temp.low % 10ull;
@@ -1074,7 +1170,7 @@ public:
         //static const uint128_t inv_log2_e = 12786308645202655659; // (1/log2(e)) * 2^64
         //return (inv_log2_e * log2(x)) >> 64;
         if (!x) return 0;
-        double res = log((double)x);
+        double res = ::log((double)x);
         return  (uint64_t)(res + 0.5);
     }
     /**
@@ -1089,7 +1185,7 @@ public:
         //uint128_t res = inv_log2_10 * l;
         //return static_cast<uint32_t>(res.high);
         if (!x) return 0;
-        double res = log10((double)x);
+        double res = ::log10((double)x);
         return  (uint64_t)(res + 0.5);
     }
 
