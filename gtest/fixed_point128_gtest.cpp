@@ -7,6 +7,7 @@
 #include <ostream>
 #include <ctime>
 #include "..\inc\fixed_point128.h"
+#include "..\inc\uint128_t.h"
 
 /*************************************************
 * Fixed point 128 tests
@@ -45,7 +46,7 @@ __forceinline int32_t get_random_sign()
 // returns a random number
 double get_double_random()
 {
-    Double res{};
+    Double res;
     res.e = ((uint64_t)get_uint32_random() % 73) - 10 + 1023; // exponents [-10,63]
     res.f = get_uint64_random();
     res.s = get_random_sign();
@@ -102,7 +103,9 @@ bool is_similar_double(double v1, double v2)
     return ratio < DOUBLE_REL_EPS;
         
 }
-
+/**********************************************************************
+* fixed_point128 tests
+***********************************************************************/
 // Construct fixed_point128 and convert back to/from various elements.
 TEST(fixed_point128, DefaultConstructor) {
     fixed_point128<20> f;
@@ -1218,4 +1221,12 @@ TEST(fixed_point128, ShiftLeft) {
         }
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "double value1=" << value1 << "; uint32_t shift=" << shift << ";";
     }
+}
+/**********************************************************************
+* uint128_t tests
+***********************************************************************/
+// Construct fixed_point128 and convert back to/from various elements.
+TEST(uint128_t, DefaultConstructor) {
+    uint128_t i;
+    EXPECT_EQ(static_cast<uint64_t>(i), 0ull);
 }

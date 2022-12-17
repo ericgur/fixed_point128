@@ -40,9 +40,13 @@
 #define FP128_DISABLE_INLINE FALSE
 #endif 
 
-#ifndef FP128_CPP_STYLE_MODULO 
-#define FP128_CPP_STYLE_MODULO TRUE
-#endif 
+#if FP128_DISABLE_INLINE != FALSE
+#define FP128_INLINE __declspec(noinline)
+#else
+#define FP128_INLINE __forceinline
+#endif
+
+static constexpr bool FP128_CPP_STYLE_MODULO = true;
 
 /***********************************************************************************
 *                                  Macros
@@ -61,12 +65,6 @@
 #define FP128_ASSERT(x)
 #define FP128_THROW_ONLY_IN_DEBUG noexcept
 #endif // _DEBUG
-
-#if FP128_DISABLE_INLINE != FALSE
-#define FP128_INLINE __declspec(noinline)
-#else
-#define FP128_INLINE __forceinline
-#endif
 
 namespace fp128 {
 

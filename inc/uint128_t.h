@@ -130,7 +130,7 @@ public:
      * @param x Input value
     */
     uint128_t(double x) noexcept {
-        Double d{};
+        Double d;
         d.val = x;
         // very common case
         if (x == 0) {
@@ -361,7 +361,7 @@ public:
             return 0;
         
         uint64_t expo = log2(*this); // returns the bit location of the msb
-        Double d{};
+        Double d;
         d.e = expo + 1023;
         
         // move bits to the high QWORD so the msb goes to bit 52. bit [51:0] will contain the fraction.

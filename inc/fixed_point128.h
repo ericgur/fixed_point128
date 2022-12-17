@@ -857,21 +857,19 @@ public:
     */
     template<>
     FP128_INLINE fixed_point128& operator/=<double>(double x) {
-        const uint64_t i = *((uint64_t*)(&x));
-        // infinity
-        if (0 == i) FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+        if (0 == x) FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
 
-        uint64_t f = (i & FP128_MAX_VALUE_64(dbl_frac_bits));
-        // simple and common case, the value is an exponent of 2
-        if (0 == f) {
-            sign ^= int32_t(i >> 63);
-            int32_t e = FP128_GET_BITS(i, dbl_frac_bits, dbl_exp_bits) - 1023;
+        // Simple and common case, the value is an exponent of 2
+        // Convert to a much faster shift operation
+        Double d(x);
+        if (0 == d.f) {
+            sign ^= d.s;
+            int32_t e = (int32_t)d.e - 1023;
             return (e >= 0) ? *this >>= e : *this <<= -e;
         }
 
         // normal division
-        *this /= fixed_point128(x);
-        return *this;
+        return *this /= fixed_point128(x);
     }
     /**
      * @brief %= operator
@@ -901,33 +899,35 @@ public:
             x_div_y.high = (q[2] << upper_frac_bits) | (q[1] >> I);
             x_div_y.low = (q[1] << upper_frac_bits) | (q[0] >> I);
             x_div_y.sign = sign ^ other.sign;
-        #if FP128_CPP_STYLE_MODULO == TRUE
-            bool this_was_positive = is_positive();
-            if (!x_div_y.is_int()) {
-                *this -= other * floor(x_div_y);
-                // this was positive, return positive modulo
-                if (this_was_positive) {
-                    if (is_negative())
-                        *this += other.is_positive() ? other : -other;
-                }
-                // this was negative, return negative modulo
-                else {
-                    if (is_positive())
-                        *this += other.is_positive() ? -other : other;
-                }
-            }
-            else {
+            // Integer result - remainder is zero.
+            if (x_div_y.is_int()) {
                 *this = 0;
             }
-        #else
-            *this -= other * floor(x_div_y);
-            // common case (fractions and integers) where one of the values is negative
-            if (sign != other.sign) {
-                // the remainder + denominator
-                *this += other;
-        }
-        #endif
-
+            // Fraction result - remainder is non zero.
+            else {
+                if constexpr (FP128_CPP_STYLE_MODULO) {
+                    bool this_was_positive = is_positive();
+                    *this -= other * floor(x_div_y);
+                    // this was positive, return positive modulo
+                    if (this_was_positive) {
+                        if (is_negative())
+                            *this += other.is_positive() ? other : -other;
+                    }
+                    // this was negative, return negative modulo
+                    else {
+                        if (is_positive())
+                            *this += other.is_positive() ? -other : other;
+                    }
+                }
+                else {
+                    *this -= other * floor(x_div_y);
+                    // common case (fractions and integers) where one of the values is negative
+                    if (sign != other.sign) {
+                        // the remainder + denominator
+                        *this += other;
+                    }
+                }
+            }
 
             // Note if signs are the same, for nom/denom, the result keeps the sign.
             // set sign to 0 when both low and high are zero (avoid having negative zero value)
