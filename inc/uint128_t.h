@@ -48,6 +48,10 @@
 
 namespace fp128 {
 
+/***********************************************************************************
+*                                  Forward declarations
+************************************************************************************/
+class fp128_gtest; // Google test class
 
 /***********************************************************************************
 *                                  Main Code
@@ -73,6 +77,7 @@ class uint128_t
     // build time validation of template parameters
     static_assert(sizeof(void*) == 8, "uint128_t is supported in 64 bit builds only!");
     template<int32_t I> friend class fixed_point128;
+    friend class fp128_gtest;
 
 private:
     //
