@@ -84,21 +84,27 @@ static constexpr int32_t dbl_exp_bits = 11;   // exponent bit count of a double 
 ************************************************************************************/
 #pragma warning(push)
 #pragma warning(disable: 4201) // nameless union/structs
-union Double {
-    struct {
-        uint64_t f : dbl_frac_bits; // mantisa/fraction
-        uint64_t e : dbl_exp_bits; // exponent 
-        uint64_t s : 1;  // sign
+struct Double {
+    Double(double v = 0) : val(v) {}
+    union {
+        struct {
+            uint64_t f : dbl_frac_bits; // mantisa/fraction
+            uint64_t e : dbl_exp_bits; // exponent 
+            uint64_t s : 1;  // sign
+        };
+        double val;
     };
-    double val;
 };
-union Float {
-    struct {
-        uint32_t f : flt_frac_bits; // mantisa/fraction
-        uint32_t e : flt_exp_bits;  // exponent 
-        uint32_t s : 1;  // sign
+struct Float {
+    Float(float v = 0) : val(v) {}
+    union {
+        struct {
+            uint32_t f : flt_frac_bits; // mantisa/fraction
+            uint32_t e : flt_exp_bits;  // exponent 
+            uint32_t s : 1;  // sign
+        };
+        float val;
     };
-    float val;
 };
 static_assert(sizeof(Double) == sizeof(double), "The Double union should have the same size as a double variable!");
 static_assert(sizeof(Float) == sizeof(float), "The Float union should have the same size as a float variable!");

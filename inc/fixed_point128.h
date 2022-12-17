@@ -44,6 +44,11 @@
 namespace fp128 {
 
 /***********************************************************************************
+*                                  Forward declarations
+************************************************************************************/
+class fp128_gtest; // Google test class
+
+/***********************************************************************************
 *                                  Main Code
 ************************************************************************************/
 
@@ -74,7 +79,7 @@ class fixed_point128
 
     // friends
     friend class fixed_point128; // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
-    friend class uint128_t;
+    friend class fp128_gtest;
 private:
     //
     // members
@@ -154,20 +159,21 @@ public:
      * @param x Input value
     */
     constexpr fixed_point128(double x) noexcept {
-        // brute convert to uint64_t for easy bit manipulation
-        const uint64_t i = *reinterpret_cast<uint64_t*>(&x);
         // very common case
-        if (i == 0) {
+        if (x == 0) {
             low = high = 0;
             sign = 0;
             return;
         }
 
-        sign = FP128_GET_BIT(i, 63);
-        const int32_t e = FP128_GET_BITS(i, dbl_frac_bits, dbl_exp_bits) - 1023;
-        uint64_t f = (i & FP128_MAX_VALUE_64(dbl_frac_bits));
+        // hack the double bit fields
+        Double d(x);
+
+        sign = d.s;
+        const int32_t e = static_cast<int32_t>(d.e) - 1023;
+        uint64_t f = d.f;
         
-        // overflow which catches NaN and Inf
+        // overflow which also catches NaN and Inf
         if (e >= I) {
             high = low = UINT64_MAX;
             sign = 0;
@@ -469,20 +475,14 @@ public:
             temp <<= -shift;
         }
         res.f = FP128_GET_BITS(temp.low, 0, dbl_frac_bits);
-
         return res.val;
-        //double res = upper_unity * high; // bits [64:127]
-        //res += lower_unity * low;        // bits [0:63]
-        //return (sign) ? -res : res;
     }
     /**
      * @brief operator long double - converts to a long double
      * @return Object value.
     */
     FP128_INLINE operator long double() const noexcept {
-        long double res = (long double)(high * upper_unity); // bits [64:127]
-        res += (long double)(low * lower_unity);             // bits [0:63]
-        return (sign) ? -res : res;
+        return operator double();
     }
     /**
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
