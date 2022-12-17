@@ -275,6 +275,7 @@ TEST(fixed_point128, AddDifferentSign) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = fabs(get_double_random());
         double value2 = value1 * -2.5;
+        //value1 = 0.0078125007889450204, value2 = -0.019531251972362551;
         double res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
@@ -330,6 +331,7 @@ TEST(fixed_point128, AddInt32) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_int32_random();
         auto value2 = get_int32_random();
+        //value1 = 23446, value2 = -6193;
         auto res = value1 + value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
@@ -398,7 +400,7 @@ TEST(fixed_point128, SubtractSameSign) {
         if (is_similar_double(fp128_res, res))
             continue;
 
-        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res);
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
 TEST(fixed_point128, SubtractDifferentSign) {

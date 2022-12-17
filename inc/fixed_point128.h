@@ -39,7 +39,7 @@
 #define FIXED_POINT128_H
 
 #include "fixed_point128_shared.h"
-#include "uint128_t.h"
+//#include "uint128_t.h"
 
 namespace fp128 {
 
@@ -648,16 +648,28 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator+=(const fixed_point128& other) {
-        if (!other) {
-            return *this;
-        }
+        bool result_has_different_sign = false;
+        fixed_point128 temp = other;
 
         // different sign: invert the sign for other and subtract
         if (other.sign != sign) {
-            return subtract(-other);
+            temp.sign ^= 1;
+            result_has_different_sign = (sign) ? temp < *this : temp > *this;
+            twos_complement128(temp.low, temp.high);
+        }
+        //add the other value
+        unsigned char carry = _addcarry_u64(0, low, temp.low, &low);
+        high += temp.high + carry;
+
+        // if result is with a different sign, invert it along with the sign.
+        if (result_has_different_sign) {
+            sign ^= 1;
+            twos_complement128(low, high);
         }
 
-        return add(other);
+        // set sign to 0 when both low and high are zero (avoid having negative zero value)
+        sign &= (0 != low || 0 != high);
+        return *this;
     }
     /**
      * @brief Add a value to this object
@@ -674,16 +686,27 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator-=(const fixed_point128& other) {
-        if (!other) {
-            return *this;
+        bool result_has_different_sign = false;
+        fixed_point128 temp = other;
+
+        // same sign: invert the sign for other and subtract
+        if (other.sign == sign) {
+            result_has_different_sign = (sign) ? temp < *this : temp > *this;
+            twos_complement128(temp.low, temp.high);
+        }
+        //add the other value
+        unsigned char carry = _addcarry_u64(0, low, temp.low, &low);
+        high += temp.high + carry;
+
+        // if result is with a different sign, invert it along with the sign.
+        if (result_has_different_sign) {
+            sign ^= 1;
+            twos_complement128(low, high);
         }
 
-        // different sign: invert the sign for other and add
-        if (other.sign != sign) {
-            return add(-other);
-        }
-
-        return subtract(other);
+        // set sign to 0 when both low and high are zero (avoid having negative zero value)
+        sign &= (0 != low || 0 != high);
+        return *this;
     }
     /**
      * @brief Subtract a value to this object
@@ -724,10 +747,10 @@ public:
         carry = _addcarry_u64(0, res[1], temp2[0], &res[1]);
         res[3] += _addcarry_u64(carry, res[2], temp2[1], &res[2]);
 
-        // extract the bits from root[] keeping the precision the same as this object
+        // extract the bits from res[] keeping the precision the same as this object
         // shift result by F
         static constexpr int32_t index = F >> 6; // / 64;
-        static constexpr int32_t lsb = F & FP128_MAX_VALUE_64(6); // bit within the 64bit data pointed by root[index]
+        static constexpr int32_t lsb = F & FP128_MAX_VALUE_64(6); // bit within the 64bit data pointed by res[index]
         static constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
         const bool need_rounding = (res[index] & half) != 0;
 
@@ -1330,56 +1353,10 @@ public:
         static const fixed_point128 epsilon(1, 0, 0);
         return epsilon;
     }
-
-private:
-    /**
-     * @brief Adds 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
-     * @param other The right side of the addition operation
-     * @return This object.
-    */
-    FP128_INLINE fixed_point128& add(const fixed_point128& other) FP128_THROW_ONLY_IN_DEBUG {
-        unsigned char carry;
-        FP128_ASSERT(other.sign == sign); // bug if asserted, calling method should take care of this
-        // equal sign: simple case
-        carry = _addcarry_u64(0, low, other.low, &low);
-        high += other.high + carry;
-
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
-        return *this;
-    }
-    /**
-     * @brief Subtracts 2 fixed_point128 objects of the same sign. Throws exception otherwise. this = this + other.
-     * @param other The right side of the subtraction operation.
-     * @return This object.
-    */
-    FP128_INLINE fixed_point128& subtract(const fixed_point128& other) FP128_THROW_ONLY_IN_DEBUG {
-        FP128_ASSERT(other.sign == sign); // bug if asserted, calling method should take care of this
-
-        bool negative_result = (sign) ? other < *this : other > *this;
-
-        // convert other high/low to 2's complement (flip bits, add +1)
-        uint64_t other_low = other.low;
-        uint64_t other_high = other.high;
-        twos_complement128(other_low, other_high);
-
-        //add the other value
-        unsigned char carry = _addcarry_u64(0, low, other_low, &low);
-        high += other_high + carry;
-
-        // if result is is negative, invert it along with the sign.
-        if (negative_result) {
-            sign ^= 1;
-            twos_complement128(low, high);
-        }
-
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
-        return *this;
-    }
-public:
+    // End of class method implemetnation
+    
     //
-    // Floating point style functions
+    // Floating point style functions, implemented as friend functions
     //
     /**
      * @brief Returns the absolute value (sets sign to 0)
