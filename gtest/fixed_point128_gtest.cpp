@@ -22,6 +22,21 @@ int64_t get_int64_random();
 uint32_t get_uint32_random();
 int32_t get_int32_random();
 
+// friend class to all containers to simplify test cases
+class fp128_gtest
+{
+    template<int32_t I>
+    inline static void get_fixed_point128_members(const fixed_point128<I>& obj, uint64_t& l, uint64_t& h, uint32_t& s) {
+        l = obj.low;
+        h = obj.high;
+        s = obj.sign;
+    }
+    inline static void get_uint128_t_members(const uint128_t& obj, uint64_t& l, uint64_t& h) {
+        l = obj.low;
+        h = obj.high;
+    }
+};
+
 __forceinline int32_t get_random_sign()
 {
     return (rand() > (RAND_MAX >> 1)) ? -1 : 1;
@@ -1169,22 +1184,38 @@ TEST(fixed_point128, TemplateOperatorNotEqual) {
         EXPECT_TRUE(fp128_res == false) << "operator!=<int32_t>: " << "value1=" << value1;
     }
 }
-//TEST(fixed_point128, ShiftRight) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value1 = get_double_random();
-//        fixed_point128<40> f1 = value1;
-//        if (check_overflow(value1, f1))
-//            continue;
-//
-//        uint32_t shift = get_uint32_random() % 127u;
-//        if (shift < 64) {
-//
-//        }
-//        else {
-//
-//        }
-//
-//        //EXPECT_TRUE(fp128_res == false) << "operator!=: " << "value1=" << value1;
-//    }
-//}
+TEST(fixed_point128, ShiftRight) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_uint32_random();
+        uint32_t shift = get_uint32_random() % 40u;
+        //double value1 = 284; uint32_t shift = 125;
+        fixed_point128<40> f1 = value1;
+
+        double expo = pow(2, -static_cast<int32_t>(shift));
+        double res = value1 * expo; // double doesn't lose any bits with this operation!
+        fixed_point128 f3 = f1 >> shift;
+
+        if (check_overflow(value1, f1) || check_overflow(res, f3)) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "double value1=" << value1 << "; uint32_t shift=" << shift << ";";
+    }
+}
+TEST(fixed_point128, ShiftLeft) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = 1.0 / get_int32_random();
+        uint32_t shift = get_uint32_random() % 40u;
+        //double value1 = 284; uint32_t shift = 125;
+        fixed_point128<40> f1 = value1;
+        double expo = pow(2, static_cast<int32_t>(shift));
+        double res = value1 * expo; // double doesn't lose any bits with this operation!
+        fixed_point128 f3 = f1 << shift;
+
+        if (check_overflow(value1, f1) || check_overflow(res, f3)) {
+            continue;
+        }
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "double value1=" << value1 << "; uint32_t shift=" << shift << ";";
+    }
+}
