@@ -607,7 +607,6 @@ TEST(fixed_point128, DivideByFP128) {
         double value1 = get_double_random();
         double value2 = get_double_random();
         //double value1 = -9.5367438958301344e-07, value2=-549755865672.46912;
-        //printf("%u\n", i);
         if (value2 == 0)
             continue;
         double res = value1 / value2;

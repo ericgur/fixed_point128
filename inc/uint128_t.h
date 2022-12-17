@@ -644,7 +644,7 @@ public:
         }
         
         // exponent of 2, convert to a much faster shift operation
-        if (1 == popcnt128(other)) {
+        if (1 == popcnt128(other.low, other.high)) {
             return *this >>= (int32_t)log2(other);
         }
 
@@ -674,6 +674,8 @@ public:
     */
     template<typename T>
     inline uint128_t& operator/=(T x) {
+        if (x == 0) FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
+
         // check if the type is signed or not
         // for negative values, convert to uint128 and divide.
         if constexpr (std::is_signed<T>::value) {
@@ -683,9 +685,6 @@ public:
         uint64_t uval = static_cast<uint64_t>(x);
 
         // check some trivial cases
-        if (uval == 0) {
-            FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
-        }
         if (is_zero() || *this < uval) {
             low = high = 0;
             return *this;
@@ -702,14 +701,11 @@ public:
             return *this >>= (int32_t)log2(uval);
         }
 
-        uint64_t q[2]{};
         uint64_t nom[2] = { low, high };
 
-        if (div_64bit((uint64_t*)q, nullptr, (uint64_t*)nom, uval, 2)) {
+        if (div_64bit(words, nullptr, (uint64_t*)nom, uval, 2)) {
             FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
         }
-        low = q[0];
-        high = q[1];
         return *this;
     }
     /**
@@ -719,12 +715,10 @@ public:
     */
     inline uint128_t& operator%=(const uint128_t& other) {
         // check some trivial cases
-        if (other.is_zero()) {
-            FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
-        }
-        if (*this < other) {
-            return *this;
-        }
+        if (other.is_zero()) FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
+
+        if (*this < other) return *this;
+
         if (*this == other) {
             low = 0; high = 0;
         }
@@ -1121,15 +1115,6 @@ public:
     friend __forceinline uint64_t lzcnt128(const uint128_t& x) noexcept
     {
         return (x.high != 0) ? __lzcnt64(x.high) : 64 + __lzcnt64(x.low);
-    }
-    /**
-     * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
-     * @param x input value.
-     * @return Number of 1 bits in x.
-    */
-    friend __forceinline uint64_t popcnt128(const uint128_t& x) noexcept
-    {
-        return __popcnt64(x.low) + __popcnt64(x.high);
     }
     /**
      * @brief Calculates the square root using Newton's method.

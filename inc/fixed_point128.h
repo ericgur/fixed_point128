@@ -799,8 +799,16 @@ public:
         if (!*this)
             return *this;
 
+        // exponent of 2, convert to a much faster shift operation
+        if (1 == popcnt128(other.low, other.high)) {
+            auto expo = other.get_exponent();
+            if (expo > 0)
+                *this >>= (int32_t)expo;
+            else if (expo < 0)
+                *this <<= (int32_t)-expo;
+        }
         // optimization for when dividing by an integer
-        if (other.is_int() && (uint64_t)other <= UINT64_MAX) {
+        else if (other.is_int() && (uint64_t)other <= UINT64_MAX) {
             uint64_t q[2]{};
             uint64_t nom[2] = { low, high };
             uint64_t denom = (uint64_t)other;

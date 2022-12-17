@@ -46,7 +46,7 @@
 #define FP128_INLINE __forceinline
 #endif
 
-static constexpr bool FP128_CPP_STYLE_MODULO = true;
+static constexpr bool FP128_CPP_STYLE_MODULO = true; // set to false to test python style modulo
 
 /***********************************************************************************
 *                                  Macros
@@ -422,6 +422,16 @@ __forceinline uint64_t log2(uint64_t x)
 __forceinline uint32_t log2(uint32_t x)
 {
     return (x) ? 31ull - __lzcnt(x) : 0;
+}
+
+/**
+ * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
+ * @param x input value.
+ * @return Number of 1 bits in x.
+*/
+__forceinline uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
+{
+    return __popcnt64(l) + __popcnt64(h);
 }
 
 } //namespace fp128 {
