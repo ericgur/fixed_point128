@@ -161,7 +161,7 @@ public:
             }
             // shift right
             else {
-                *this >>= bits_to_shift;
+                *this >>= -bits_to_shift;
             }
         }
         // too small to be represented, no need to bother.
@@ -1168,13 +1168,34 @@ public:
     */
     friend UINT128_T_INLINE uint64_t log10(const uint128_t& x)
     {
-        //static const uint128_t inv_log2_10 = 5553023288523357132; // (1/log2(10)) * 2^64
-        //uint32_t l = log2(x);
-        //uint128_t res = inv_log2_10 * l;
-        //return static_cast<uint32_t>(res.high);
+        static uint128_t log10_table[128]; // holds all log10 values
+        // initialize the table
+        if (!log10_table[38]) {
+            log10_table[0] = 1ull;
+            for (int i = 1; i < 128; ++i) {
+                log10_table[i] = log10_table[i - 1] * 10ull;
+            }
+        }
+
         if (!x) return 0;
-        double res = ::log10((double)x);
-        return  (uint64_t)(res + 0.5);
+
+        // binary search the result
+        uint64_t l = 0, h = 38, res = (h + l) >> 1;
+
+        while (l < h) {
+            if (x < log10_table[res]) {
+                h = res;
+            }
+            else if (l == res)
+                break;
+            else {
+                l = res;
+            }
+            res = (h + l) >> 1;
+        }
+        return res;
+        //double res = ::log10((double)x);
+        //return  (uint64_t)(res + 0.5);
     }
 
 }; //class uint128_t

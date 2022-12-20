@@ -24,19 +24,21 @@ uint32_t get_uint32_random();
 int32_t get_int32_random();
 
 // friend class to all containers to simplify test cases
-class fp128_gtest
-{
-    template<int32_t I>
-    inline static void get_fixed_point128_members(const fixed_point128<I>& obj, uint64_t& l, uint64_t& h, uint32_t& s) {
-        l = obj.low;
-        h = obj.high;
-        s = obj.sign;
-    }
-    inline static void get_uint128_t_members(const uint128_t& obj, uint64_t& l, uint64_t& h) {
-        l = obj.low;
-        h = obj.high;
-    }
-};
+namespace fp128 {
+    class fp128_gtest
+    {
+        template<int32_t I>
+        inline static void get_fixed_point128_members(const fixed_point128<I>& obj, uint64_t& l, uint64_t& h, uint32_t& s) {
+            l = obj.low;
+            h = obj.high;
+            s = obj.sign;
+        }
+        inline static void get_uint128_t_members(const uint128_t& obj, uint64_t& l, uint64_t& h) {
+            l = obj.low;
+            h = obj.high;
+        }
+    };
+}
 
 __forceinline int32_t get_random_sign()
 {
@@ -91,6 +93,11 @@ bool check_overflow(T value, const fixed_point128<I>& d)
     }
 
     return floor(log2(value)) >= I;
+}
+
+bool check_overflow_uint128(double value)
+{
+    return floor(log2(value)) > 127;
 }
 
 bool is_similar_double(double v1, double v2)
@@ -1230,4 +1237,21 @@ TEST(fixed_point128, ShiftLeft) {
 TEST(uint128_t, DefaultConstructor) {
     uint128_t i;
     EXPECT_EQ(static_cast<uint64_t>(i), 0ull);
+}
+
+TEST(uint128_t, log10) {
+
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = floor(1.0 + fabs(get_double_random()));
+        uint64_t res = (uint64_t)floor(log10(value1)); // double doesn't lose any bits with this operation!
+
+        if (check_overflow_uint128(value1)) {
+            continue;
+        }
+        uint128_t i1 = value1;
+        uint64_t  i_res = log10(i1);
+
+        EXPECT_EQ(i_res, res) << "double value1=" << value1;
+    }
 }
