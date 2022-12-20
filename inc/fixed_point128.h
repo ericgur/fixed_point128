@@ -1353,7 +1353,7 @@ public:
         static const fixed_point128 epsilon(1, 0, 0);
         return epsilon;
     }
-    // End of class method implemetnation
+    // End of class method implementation
     
     //
     // Floating point style functions, implemented as friend functions

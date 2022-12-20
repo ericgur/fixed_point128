@@ -338,7 +338,7 @@ public:
             return 0;
 
         uint64_t expo = log2(*this); // returns the bit location of the msb
-        Float d{};
+        Float d;
         d.e = expo + 127;
 
         // move bits to the high QWORD so the msb goes to bit 23. bit [22:0] will contain the fraction.
@@ -387,14 +387,46 @@ public:
      * @return object string representation
     */
     UINT128_T_INLINE operator std::string() const {
-        return uint128tostr();
+        return operator char*();
     }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
+     * The returned string is a statically, thread-allocated buffer.
+     * Additional calls to this function from the same thread, overwrite the previous result.
+     * @return C string with describing the value of the object.
      * @return object string representation
     */
     explicit UINT128_T_INLINE operator char*() const {
-        return uint128tostr();
+        static thread_local char str[45];
+        // small number, use the fast snprintf method
+        if (high == 0) {
+            snprintf(str, sizeof(str), "%llu", low);
+            return str;
+        }
+
+        uint128_t temp = *this;
+        str[32] = 0;
+        char* p = str + 31; // writing the string in reverse
+        uint128_t base = 10;
+        uint64_t q[2]{};
+        uint64_t digit{};
+        // as long as the intermediate value is >64 bit, use the more expensive long division.
+        while (temp.high) {
+            --p;
+            uint64_t nom[2] = { temp.low, temp.high };
+            div_64bit((uint64_t*)q, &digit, (uint64_t*)nom, 10ull, 2);
+            temp.low = q[0];
+            temp.high = q[1];
+            *p = static_cast<char>(digit + '0');
+        }
+        // the intermediate value fits in 64 bit, use the much faster native-64 bit division 
+        while (temp.low) {
+            --p;
+            uint64_t r = temp.low % 10ull;
+            temp.low /= 10ull;
+            *p = static_cast<char>(r + '0');
+        }
+        return p;
     }
     //
     // math operators
@@ -657,6 +689,7 @@ public:
                 FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
             }
         }
+        // divide by a 128 bit divisor
         else {
             uint64_t denom[2] = {other.low, other.high};
             if (div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
@@ -677,7 +710,7 @@ public:
         if (x == 0) FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
 
         // check if the type is signed or not
-        // for negative values, convert to uint128 and divide.
+        // for negative values only, convert to uint128 and divide.
         if constexpr (std::is_signed<T>::value) {
             if (x < 0) return operator/=(uint128_t(x));
         }
@@ -886,6 +919,7 @@ public:
     }
     /**
      * @brief Unary -. Returns a copy of the object with sign inverted.
+     * Performs a 2's complement operation just like native unsigned types
     */
     UINT128_T_INLINE uint128_t operator-() const {
         uint128_t temp = *this;
@@ -1066,45 +1100,6 @@ public:
         static thread_local char str[buff_size];
         snprintf(str, buff_size, "0x%llX%016llX", high, low);
         return str;
-    }
-private:
-    /**
-     * @brief Converts this object to a C string.
-     * The returned string is a statically thread-allocated buffer.
-     * Additional calls to this function from the same thread, overwrite the previous result.
-     * @return C string with describing the value of the object.
-    */
-    UINT128_T_INLINE char* uint128tostr() const {
-        static thread_local char str[45];
-        // small number, use the fast snprintf method
-        if (high == 0) {
-            snprintf(str, sizeof(str), "%llu", low);
-            return str;
-        }
-
-        uint128_t temp = *this;
-        str[32] = 0;
-        char* p = str + 31; // writing the string in reverse
-        uint128_t base = 10;
-        uint64_t q[2]{};
-        uint64_t digit{};
-        // as long as the intermediate value is >64 bit, use the more expensive long division.
-        while (temp.high) {
-            --p;
-            uint64_t nom[2] = { temp.low, temp.high };
-            div_64bit((uint64_t*)q, &digit, (uint64_t*)nom, 10ull, 2);
-            temp.low = q[0];
-            temp.high = q[1];
-            *p = static_cast<char>(digit + '0');
-        }
-        // the intermediate value fits in 64 bit, use the much faster native-64 bit division 
-        while (temp.low) {
-            --p;
-            uint64_t r = temp.low % 10ull;
-            temp.low /= 10ull;
-            *p = static_cast<char>(r + '0');
-        }
-        return p;
     }
 public:
     /**
