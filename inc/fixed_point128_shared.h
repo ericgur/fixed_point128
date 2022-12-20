@@ -319,7 +319,8 @@ static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t
         if (qhat >= b || qhat * vn[n - 2] > (rhat << 32) + un[j + n - 2]) {
             --qhat;
             rhat += vn[n - 1];
-            if (rhat < b) goto again;
+            if (rhat < b) 
+                goto again;
         }
 
         // Multiply and subtract.

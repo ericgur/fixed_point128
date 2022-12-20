@@ -1526,7 +1526,7 @@ public:
             ll = x;     // lower limit
         }
 
-        // yeh old binary search - need an int256 type to use Newton-Raphson or similar methods
+        // yeh old binary search
         t = (ul + ll) >> 1;
         while (ul > ll + e) {
             // check if the guess (t) is too big
