@@ -195,7 +195,7 @@ public:
    */
     uint128_t(int32_t x) noexcept {
         low = static_cast<uint64_t>(x);
-        high = (x < 0) ? UINT64_MAX : 0; // sign extend tge value to the higher QWORD
+        high = (x < 0) ? UINT64_MAX : 0; // sign extend the value to the higher QWORD
     }
     /**
      * @brief Constructor from const char* (C string).

@@ -1238,20 +1238,80 @@ TEST(uint128_t, DefaultConstructor) {
     uint128_t i;
     EXPECT_EQ(static_cast<uint64_t>(i), 0ull);
 }
-
+TEST(uint128_t, ConstructorFromDouble) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(floor(get_double_random()));
+        uint128_t f = value;
+        if (check_overflow_uint128(value)) {
+            continue;
+        }
+        double f_value = static_cast<double>(f);
+        EXPECT_DOUBLE_EQ(f_value, value) << "value=" << value;
+    }
+}
+TEST(uint128_t, ConstructorFromFloat) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        float value = (float)fabs(floor(get_double_random()));
+        uint128_t f = value;
+        if (check_overflow_uint128(value)) {
+            continue;
+        }
+        EXPECT_FLOAT_EQ(static_cast<float>(f), value) << "value=" << value;
+    }
+}
+TEST(uint128_t, ConstructorFromInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        int32_t value = get_int32_random();
+        uint128_t f = value;
+        EXPECT_EQ(static_cast<int32_t>(f), value);
+    }
+}
+TEST(uint128_t, ConstructorFromUnsignedInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        uint32_t value = get_uint32_random();
+        uint128_t f = value;
+        EXPECT_EQ(static_cast<uint32_t>(f), value);
+    }
+}
+TEST(uint128_t, ConstructorFromInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        int64_t value = get_int64_random();
+        uint128_t f = value;
+        EXPECT_EQ(static_cast<int64_t>(f), value);
+    }
+}
+TEST(uint128_t, ConstructorFromUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        uint64_t value = get_uint64_random();
+        uint128_t f = value;
+        EXPECT_EQ(static_cast<uint64_t>(f), value);
+    }
+}
+TEST(uint128_t, ConstructorFromString) {
+    const char* values[] = { "0xDEADBEAF", "1234", "123456789012345678"};
+    for (auto i = 0u; i < array_length(values); ++i) {
+        uint128_t f = values[i];
+        double d1 = strtod(values[i], nullptr);
+        double d2 = strtod(static_cast<char*>(f), nullptr);
+        EXPECT_DOUBLE_EQ(d1, d2);
+    }
+}
 TEST(uint128_t, log10) {
-
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = floor(1.0 + fabs(get_double_random()));
         uint64_t res = (uint64_t)floor(log10(value1)); // double doesn't lose any bits with this operation!
-
         if (check_overflow_uint128(value1)) {
             continue;
         }
         uint128_t i1 = value1;
         uint64_t  i_res = log10(i1);
-
         EXPECT_EQ(i_res, res) << "double value1=" << value1;
     }
 }
