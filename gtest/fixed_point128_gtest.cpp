@@ -1,4 +1,5 @@
 // remove warnings from gtest itself
+// remove warnings from gtest itself
 #pragma warning(push)
 #pragma warning(disable: 26439) 
 #pragma warning(disable: 26495) 
@@ -1313,5 +1314,203 @@ TEST(uint128_t, log10) {
         uint128_t i1 = value1;
         uint64_t  i_res = log10(i1);
         EXPECT_EQ(i_res, res) << "double value1=" << value1;
+    }
+}
+TEST(uint128_t, CopyConstructor) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        uint128_t f1 = value;
+        uint128_t f2 = f1;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+    }
+}
+TEST(uint128_t, MoveConstructor) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        uint128_t f1 = value;
+        uint128_t f2(std::move(f1));
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+    }
+}
+TEST(uint128_t, AssignmentOperator) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        uint128_t f1 = value;
+        uint128_t f2;
+        f2 = f1;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+    }
+}
+TEST(uint128_t, MoveAssignmentOperator) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        uint128_t f1 = value;
+        uint128_t f2;
+        f2 = std::move(f1);
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+    }
+}
+TEST(uint128_t, Add) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(floor(get_double_random()));
+        double value2 = floor(value1 * 2.5);
+        double res = value1 + value2;
+        uint128_t f1 = value1;
+        uint128_t f2 = value2;
+        uint128_t f3 = f1 + f2;
+        if (check_overflow_uint128(value1) || check_overflow_uint128(value2) || check_overflow_uint128(res))
+            continue;
+        double uint128_res = static_cast<double>(f3);
+        // note that uint128_t is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(uint128_res, res))
+            continue;
+
+        EXPECT_DOUBLE_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, AddDifferentSign) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        uint64_t value1 = get_uint64_random();
+    #pragma warning(push)
+    #pragma warning(disable: 4146)
+        uint64_t value2 = -get_uint64_random();
+    #pragma warning(pop)
+        uint64_t res = value1 + value2;
+        uint128_t f1 = value1;
+        uint128_t f2 = value2;
+        uint128_t f3 = f1 + f2;
+        uint64_t uint128_res = static_cast<uint64_t>(f3);
+        EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, AddInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int64_random();
+        auto value2 = get_int64_random();
+        auto res = value1 + value2;
+        uint128_t f1 = value1;
+        uint128_t f3 = f1 + value2;
+        uint64_t uint128_res = static_cast<uint64_t>(f3);
+        EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, AddUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint64_random();
+        auto value2 = get_uint64_random();
+        auto res = value1 + value2;
+        uint128_t f1 = value1;
+        uint128_t f3 = f1 + value2;
+        uint64_t uint128_res = static_cast<uint64_t>(f3);
+        EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+
+TEST(uint128_t, Subtract) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(floor(get_double_random()));
+        double value2 = floor(value1 / 2.5);
+        double res = value1 - value2;
+        uint128_t f1 = value1;
+        uint128_t f2 = value2;
+        uint128_t f3 = f1 - f2;
+        if (check_overflow_uint128(value1) || check_overflow_uint128(value2) || check_overflow_uint128(res))
+            continue;
+        double uint128_res = static_cast<double>(f3);
+        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(uint128_res, res))
+            continue;
+
+        EXPECT_DOUBLE_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, SubtractDifferentSign) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        uint64_t value1 = get_uint64_random();
+    #pragma warning(push)
+    #pragma warning(disable: 4146)
+        uint64_t value2 = -get_uint64_random();
+    #pragma warning(pop)
+        uint64_t res = value1 - value2;
+        uint128_t f1 = value1;
+        uint128_t f2 = value2;
+        uint128_t f3 = f1 - f2;
+        uint64_t uint128_res = static_cast<uint64_t>(f3);
+        EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, SubtractInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int64_random();
+        auto value2 = get_int64_random();
+        auto res = value1 - value2;
+        uint128_t f1 = value1;
+        uint128_t f3 = f1 - value2;
+        uint64_t uint128_res = static_cast<uint64_t>(f3);
+        EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, SubtractUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint64_random();
+        auto value2 = get_uint64_random();
+        auto res = value1 - value2;
+        uint128_t f1 = value1;
+        uint128_t f3 = f1 - value2;
+        uint64_t uint128_res = static_cast<uint64_t>(f3);
+        EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, MultiplyByUint128) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(floor(get_double_random()));
+        double value2 = fabs(floor(get_double_random()));
+        double res = value1 * value2;
+        uint128_t f1 = value1;
+        uint128_t f2 = value2;
+        uint128_t f3 = f1 * f2;
+        if (check_overflow_uint128(value1) || check_overflow_uint128(value2) || check_overflow_uint128(res))
+            continue;
+
+        double uint128_res = static_cast<double>(f3);
+        // note that uint128_res is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(uint128_res, res))
+            continue;
+
+        EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, DivideByUint128) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(floor(get_double_random()));
+        double value2 = fabs(floor(get_double_random()));
+        if (value2 == 0)
+            continue;
+        double res = floor(value1 / value2);
+        uint128_t f1 = value1;
+        uint128_t f2 = value2;
+        uint128_t f3 = f1 / f2;
+        if (check_overflow_uint128(value1) || check_overflow_uint128(value2) || check_overflow_uint128(res))
+            continue;
+        double uint128_res = static_cast<double>(f3);
+        // note that uint128_res is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        if (is_similar_double(uint128_res, res))
+            continue;
+
+        EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
