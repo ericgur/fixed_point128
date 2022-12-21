@@ -1616,6 +1616,19 @@ TEST(uint128_t, log10) {
         EXPECT_EQ(i_res, res) << "double value1=" << value1;
     }
 }
+TEST(uint128_t, log) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = 1.0 + floor(fabs(get_double_random())) * get_uint64_random();
+        uint64_t res = (uint64_t)floor(log(value1)); // double doesn't lose any bits with this operation!
+        if (check_overflow_uint128(value1)) {
+            continue;
+        }
+        uint128_t i1 = value1;
+        uint64_t  i_res = log(i1);
+        EXPECT_EQ(i_res, res) << "double value1=" << value1;
+    }
+}
 TEST(uint128_t, sqrt) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
