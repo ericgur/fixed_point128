@@ -1119,10 +1119,10 @@ public:
     */
     friend UINT128_T_INLINE uint64_t sqrt(const uint128_t& x) noexcept
     {
-        // TODO: check if the floating point function isn't better here
         auto expo = log2(x);
-        if (expo == 0)
-            return 0;
+        if (expo == 0) {
+            return (x == 1ull) ? 1 : 0;
+        }
 
         uint128_t root = uint128_t::one();
         uint128_t e, temp;
