@@ -92,8 +92,8 @@ private:
     static constexpr int32_t F = 128 - I;                               // fraction bit count
     static constexpr int32_t upper_frac_bits = F - 64;                  // how many bits of the fraction exist in the upper QWORD
     static constexpr uint64_t unity = 1ull << upper_frac_bits;          // upper QWORD value equal to '1'
-    static inline const double upper_unity = pow(2, 64 - F);     // convert upper QWORD to floating point
-    static inline const double lower_unity = pow(2, -F);         // convert lower QWORD to floating point
+    static inline const double upper_unity = ::pow(2, 64 - F);     // convert upper QWORD to floating point
+    static inline const double lower_unity = ::pow(2, -F);         // convert lower QWORD to floating point
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits; // mask of the integer bits in the upper QWORD
     static constexpr int32_t max_frac_digits = (int)(1 + F / 3.1);      // meaningful base 10 digits for the fraction
 public:

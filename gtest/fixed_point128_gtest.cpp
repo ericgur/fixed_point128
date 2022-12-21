@@ -1642,3 +1642,18 @@ TEST(uint128_t, sqrt) {
         EXPECT_EQ(i_res, res) << "double value1=" << value1;
     }
 }
+TEST(uint128_t, pow) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_uint32_random() % 8;
+        double value2 = get_uint32_random() % 16;
+        double res = pow(value1, value2); // double doesn't lose any bits with this operation!
+        if (check_overflow_uint128(value1) || check_overflow_uint128(res)) {
+            continue;
+        }
+        uint128_t i1 = value1;
+        uint128_t i2 = pow(i1, (uint32_t)value2);
+        uint128_t uint128_res = static_cast<double>(i2);
+        EXPECT_DOUBLE_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}

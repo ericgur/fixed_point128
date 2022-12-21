@@ -1084,7 +1084,8 @@ public:
      * @brief Return an instance of uint128_t with the value of 1
      * @return 1
     */
-    UINT128_T_INLINE static const uint128_t& one() noexcept {
+    UINT128_T_INLINE static const uint128_t& one() noexcept 
+    {
         static const uint128_t one = 1;
         return one;
     }
@@ -1095,7 +1096,8 @@ public:
      * Additional calls to this function from the same thread overwrite the previous result.
      * @return C string containing the HEX value of the object.
     */
-    UINT128_T_INLINE char* hex() const {
+    UINT128_T_INLINE char* hex() const noexcept
+    {
         constexpr int buff_size = 35;
         static thread_local char str[buff_size];
         snprintf(str, buff_size, "0x%llX%016llX", high, low);
@@ -1144,7 +1146,7 @@ public:
      * @param x The number to perform log2 on.
      * @return log2(x). Returns zero when x is zero.
     */
-    friend __forceinline uint64_t log2(const uint128_t& x)
+    friend __forceinline uint64_t log2(const uint128_t& x) noexcept
     {
         return (x) ? 127ull - lzcnt128(x) : 0;
     }
@@ -1153,7 +1155,7 @@ public:
      * @param x The number to perform log on.
      * @return log(x)
     */
-    friend UINT128_T_INLINE uint64_t log(const uint128_t& x)
+    friend UINT128_T_INLINE uint64_t log(const uint128_t& x) noexcept
     {
         // the table below holds the value of various powers of e (~2.718).
         // index i holds: ceil(pow(e, i)).
@@ -1271,7 +1273,7 @@ public:
      * @param x The number to perform log on.
      * @return log10(x)
     */
-    friend UINT128_T_INLINE uint64_t log10(const uint128_t& x)
+    friend UINT128_T_INLINE uint64_t log10(const uint128_t& x) noexcept
     {
         static uint128_t log10_table[128]; // holds all log10 values
         // initialize the table
@@ -1297,6 +1299,31 @@ public:
                 l = res;
             }
             res = (h + l) >> 1;
+        }
+        return res;
+    }
+    /**
+     * @brief Calculates x to the power of y.
+     * @param x Base value
+     * @param y Exponent 
+     * @return x to the power of y
+    */
+    friend UINT128_T_INLINE uint128_t pow(const uint128_t& x, uint32_t y) noexcept
+    {
+        // zero power always yields 1
+        // Even if x is zero! Same behavior as pow(double, double) but different from Python which returns zero.
+        if (y == 0) return 1;
+
+        // special case where base is zero
+        if (!x) return x;
+
+        uint128_t res = 1;
+        uint128_t b = x;
+        while (y > 0) {
+            if (y & 1)
+                res *= b;
+            y >>= 1;
+            b *= b;
         }
         return res;
     }
