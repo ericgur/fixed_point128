@@ -1303,19 +1303,6 @@ TEST(uint128_t, ConstructorFromString) {
         EXPECT_DOUBLE_EQ(d1, d2);
     }
 }
-TEST(uint128_t, log10) {
-    srand(RANDOM_SEED);
-    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = floor(1.0 + fabs(get_double_random()));
-        uint64_t res = (uint64_t)floor(log10(value1)); // double doesn't lose any bits with this operation!
-        if (check_overflow_uint128(value1)) {
-            continue;
-        }
-        uint128_t i1 = value1;
-        uint64_t  i_res = log10(i1);
-        EXPECT_EQ(i_res, res) << "double value1=" << value1;
-    }
-}
 TEST(uint128_t, CopyConstructor) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -1511,6 +1498,134 @@ TEST(uint128_t, DivideByUint128) {
         if (is_similar_double(uint128_res, res))
             continue;
 
+        EXPECT_DOUBLE_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, ModuloByUint128) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint64_random();
+        auto value2 = get_uint32_random();
+        if (value2 == 0)
+            continue;
+        uint64_t res = value1 % value2;
+        uint128_t f1 = value1;
+        uint128_t f2 = value2;
+        uint128_t f3 = f1 % f2;
+        uint64_t uint128_res = static_cast<uint64_t>(f3);
         EXPECT_EQ(uint128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, CompareUint128) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(floor(get_double_random()));
+        double value2 = fabs(floor(get_double_random()));
+        bool res = value1 > value2;
+        uint128_t f1 = value1;
+        uint128_t f2 = value2;
+        if (check_overflow_uint128(value1) || check_overflow_uint128(value2))
+            continue;
+
+        bool uint128_res = f1 > f2;
+        EXPECT_TRUE(uint128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 >= value2;
+        uint128_res = f1 >= f2;
+        EXPECT_TRUE(uint128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 < value2;
+        uint128_res = f1 < f2;
+        EXPECT_TRUE(uint128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+
+        res = value1 <= value2;
+        uint128_res = f1 <= f2;
+        EXPECT_TRUE(uint128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(uint128_t, OperatorPlusPlus) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        uint64_t value1 = get_uint64_random();
+        uint64_t res = value1 + 1;
+        uint128_t f1 = value1;
+        uint128_t f2 = f1;
+        f2++;
+
+        EXPECT_EQ(static_cast<uint64_t>(f2), res) << "operator++(int)" << "value1=" << value1;
+
+        f2 = f1;
+        ++f2;
+
+        EXPECT_EQ(static_cast<uint64_t>(f2), res) << "operator++()" << "value1=" << value1;
+    }
+}
+TEST(uint128_t, OperatorMinusMinus) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        uint64_t value1 = get_uint64_random();
+        uint64_t res = value1 - 1;
+        uint128_t f1 = value1;
+        uint128_t f2 = f1;
+        f2--;
+
+        EXPECT_EQ(static_cast<uint64_t>(f2), res) << "operator++(int)" << "value1=" << value1;
+
+        f2 = f1;
+        --f2;
+
+        EXPECT_EQ(static_cast<uint64_t>(f2), res) << "operator++()" << "value1=" << value1;
+    }
+}
+TEST(uint128_t, OperatorEqual) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(floor(get_double_random()));
+        uint128_t f1 = value1;
+        bool fp128_res = f1 == f1;
+
+        if (check_overflow_uint128(value1))
+            continue;
+
+        EXPECT_TRUE(fp128_res == true) << "operator==: " << "value1=" << value1;
+    }
+}
+TEST(uint128_t, OperatorNotEqual) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(floor(get_double_random()));
+        uint128_t f1 = value1;
+        bool fp128_res = f1 != f1;
+
+        if (check_overflow_uint128(value1))
+            continue;
+
+        EXPECT_TRUE(fp128_res == false) << "operator==: " << "value1=" << value1;
+    }
+}
+TEST(uint128_t, log10) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = floor(1.0 + fabs(get_double_random()));
+        uint64_t res = (uint64_t)floor(log10(value1)); // double doesn't lose any bits with this operation!
+        if (check_overflow_uint128(value1)) {
+            continue;
+        }
+        uint128_t i1 = value1;
+        uint64_t  i_res = log10(i1);
+        EXPECT_EQ(i_res, res) << "double value1=" << value1;
+    }
+}
+TEST(uint128_t, sqrt) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = floor(1.0 + fabs(get_double_random()));
+        uint64_t res = (uint64_t)floor(sqrt(value1)); // double doesn't lose any bits with this operation!
+        if (check_overflow_uint128(value1)) {
+            continue;
+        }
+        uint128_t i1 = value1;
+        uint64_t  i_res = sqrt(i1);
+        EXPECT_EQ(i_res, res) << "double value1=" << value1;
     }
 }
