@@ -72,7 +72,7 @@ class fp128_gtest; // Google test class
  * </UL>
 */
 
-class uint128_t
+class __declspec(align(16)) uint128_t
 {
     // build time validation of template parameters
     static_assert(sizeof(void*) == 8, "uint128_t is supported in 64 bit builds only!");
@@ -199,13 +199,14 @@ public:
     }
     /**
      * @brief Constructor from const char* (C string).
-     * Allows creating 128 bit values. Much slower than the other constructors.<BR>
+     * Allows creating 128 bit values from a string. Much slower than the other constructors.<BR>
      * Input string can be decimal or hex. Hex initialization is faster.
      * Throws an std::invalid_argument when encountering an illegal character.
      * @param x Input string
     */
     uint128_t(const char* x) {
         low = high = 0;
+        // convert the input string to lowercase for simpler processing.
         char* str = _strdup(x);
         _strlwr_s(str, 1 + strlen(x));
         x = str;
@@ -214,6 +215,7 @@ public:
         while (*x && isspace(*x))
             ++x;
         
+        // base 10 or 16 are supported
         uint32_t base = (0 == strncmp("0x", x, 2)) ? 16u : 10u;
         if (base == 16)
             x += 2;
@@ -223,15 +225,16 @@ public:
             ++x;
         
         // convert one digit at a time
-        while (*x && !isspace(*x)) {
+        while (*x && !isspace(*x) && *x != '.') {
             uint64_t d = *x;
             if (d >= '0' && d <= '9')
                 d -= '0';
             else if (base == 16 && (d >= 'a' && d <= 'f'))
                 d = 10ull + d - 'a';
-            else {
+            else if (d == ',') // allow string to contain commas
+                continue;
+            else
                 throw std::invalid_argument("uint128_t: Invalid characters used to create an object");
-            }
             
             // 4 bits per digit
             if (base == 16) {
