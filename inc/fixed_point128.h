@@ -109,13 +109,13 @@ public:
     /**
      * @brief Default constructor, creates an instance with a value of zero.
     */
-    constexpr fixed_point128() noexcept :
+    FP128_INLINE constexpr fixed_point128() noexcept :
         low(0), high(0), sign(0) {}
     /**
      * @brief Copy constructor
      * @param other Object to copy from
     */
-    constexpr fixed_point128(const fixed_point128& other) noexcept :
+    FP128_INLINE fixed_point128(const fixed_point128& other) noexcept :
         low(other.low), high(other.high), sign(other.sign) {}
     /**
      * @brief cross-template Copy constructor, can be used between two different fixed_point128 templates
@@ -123,7 +123,7 @@ public:
      * @return This object.
     */
     template<int32_t I2>
-    constexpr fixed_point128(const fixed_point128<I2>& other) noexcept
+    FP128_INLINE fixed_point128(const fixed_point128<I2>& other) noexcept
     {
         sign = other.sign;
         if constexpr (I == I2) {
@@ -151,14 +151,14 @@ public:
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param other Object to copy from
     */
-    constexpr fixed_point128(const fixed_point128&& other) noexcept :
+    FP128_INLINE fixed_point128(const fixed_point128&& other) noexcept :
         low(other.low), high(other.high), sign(other.sign) {}
     /**
      * @brief Constructor from the double type
      * Underflow goes to zero. Overflow, NaN and +-INF go to max supported positive value.
      * @param x Input value
     */
-    constexpr fixed_point128(double x) noexcept {
+    FP128_INLINE fixed_point128(double x) noexcept {
         // very common case
         if (x == 0) {
             low = high = 0;
@@ -220,7 +220,7 @@ public:
      * @brief Constructor from uint64_t type
      * @param x Input value
     */
-    constexpr fixed_point128(uint64_t x) noexcept {
+    FP128_INLINE fixed_point128(uint64_t x) noexcept {
         low = 0;
         sign = 0;
         high = x << upper_frac_bits;
@@ -229,7 +229,7 @@ public:
      * @brief Constructor from int64_t type
      * @param x Input value
     */
-    constexpr fixed_point128(int64_t x) noexcept {
+    FP128_INLINE fixed_point128(int64_t x) noexcept {
         low = 0;
         sign = FP128_GET_BIT(x, 63);
         high = ((sign != 0) ? -x : x) << upper_frac_bits;
@@ -238,7 +238,7 @@ public:
      * @brief Constructor from uint32_t type
      * @param x Input value
    */
-    constexpr fixed_point128(uint32_t x) noexcept {
+    FP128_INLINE fixed_point128(uint32_t x) noexcept {
         low = 0;
         sign = 0;
         high = (uint64_t)x << upper_frac_bits;
@@ -247,7 +247,7 @@ public:
      * @brief Constructor from int32_t type
      * @param x Input value
    */
-    constexpr fixed_point128(int32_t x) noexcept {
+    FP128_INLINE fixed_point128(int32_t x) noexcept {
         low = 0;
         sign = FP128_GET_BIT(x, 31);
         high = (uint64_t)((sign != 0) ? -x : x) << upper_frac_bits;
@@ -317,7 +317,7 @@ public:
      * Allows creating very high precision values. Much slower than the other constructors.
      * @param x Input string
     */
-    fixed_point128(const std::string& x) noexcept {
+    FP128_INLINE fixed_point128(const std::string& x) noexcept {
         fixed_point128 temp = x.c_str();
         *this = temp;
     }
@@ -327,7 +327,7 @@ public:
      * @param h High QWORD
      * @param s Sign - zero for positive, 1 for negative.
     */
-    constexpr fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept:
+    FP128_INLINE fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept:
         low(l), high(h) ,sign(s) {
         sign = (sign != 0);
     }
@@ -341,7 +341,7 @@ public:
      * @param other Object to copy from 
      * @return This object.
     */
-    constexpr FP128_INLINE fixed_point128& operator=(const fixed_point128& other) noexcept {
+    FP128_INLINE fixed_point128& operator=(const fixed_point128& other) noexcept {
         high = other.high;
         low = other.low;
         sign = other.sign;
@@ -352,7 +352,7 @@ public:
      * @param other Object to copy from
      * @return This object.
     */
-    constexpr FP128_INLINE fixed_point128& operator=(const fixed_point128&& other) noexcept {
+    FP128_INLINE fixed_point128& operator=(const fixed_point128&& other) noexcept {
         high = other.high;
         low = other.low;
         sign = other.sign;
@@ -364,7 +364,7 @@ public:
      * @return This object.
     */
     template<int32_t I2>
-    constexpr FP128_INLINE fixed_point128<I>& operator=(const fixed_point128<I2>& other)
+    FP128_INLINE fixed_point128<I>& operator=(const fixed_point128<I2>& other)
     {
         sign = other.sign;
         if constexpr (I == I2) {
@@ -396,14 +396,14 @@ public:
      * @brief operator uint64_t - converts to a uint64_t
      * @return Object value.
     */
-    constexpr FP128_INLINE operator uint64_t() const noexcept {
+    FP128_INLINE operator uint64_t() const noexcept {
         return (high >> upper_frac_bits) & UINT64_MAX;
     }
     /**
      * @brief operator int64_t - converts to a int64_t
      * @return Object value.
     */
-    constexpr FP128_INLINE operator int64_t() const noexcept {
+    FP128_INLINE operator int64_t() const noexcept {
         int64_t res = (sign) ? -1ll : 1ll;
         return res * ((high >> upper_frac_bits) & UINT64_MAX);
     }
@@ -816,7 +816,7 @@ public:
      * @param other Right hand side operator (denominator)
      * @return this object.
     */
-    inline fixed_point128& operator/=(const fixed_point128& other) {
+    FP128_INLINE fixed_point128& operator/=(const fixed_point128& other) {
         bool need_rounding = false;
         // trivial case, this object is zero
         if (!*this)
