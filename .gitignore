@@ -9,3 +9,4 @@
 html
 gtest/build
 gtest/external
+*.bak
