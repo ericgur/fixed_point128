@@ -1092,7 +1092,6 @@ public:
         static const uint128_t one = 1;
         return one;
     }
-
     /**
      * @brief Converts this object to a hex C string.
      * The returned string is a statically thread-allocated buffer.
@@ -1278,16 +1277,20 @@ public:
     */
     friend UINT128_T_INLINE uint64_t log10(const uint128_t& x) noexcept
     {
-        static uint128_t log10_table[128]; // holds all log10 values
+        static constexpr uint64_t log10_max = 38;
+        static uint128_t log10_table[log10_max + 1]; // holds all log10 values for multiples of 10
         // initialize the table
         if (!log10_table[38]) {
             log10_table[0] = 1ull;
-            for (int i = 1; i < 128; ++i) {
+            for (int i = 1; i <= log10_max; ++i) {
                 log10_table[i] = log10_table[i - 1] * 10ull;
             }
         }
 
         if (!x) return 0;
+
+        if (x >= log10_table[log10_max])
+            return log10_max;
 
         // binary search the result
         uint64_t l = 0, h = 38, res = (h + l) >> 1;
