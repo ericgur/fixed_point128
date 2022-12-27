@@ -429,6 +429,7 @@ public:
     FP128_INLINE operator float() const noexcept {
         if (!*this)
             return 0.0f;
+        constexpr uint64_t f_mask = FP128_MAX_VALUE_64(flt_frac_bits);
 
         Float res;
         res.s = sign;
@@ -437,17 +438,20 @@ public:
         auto expo = I - 1 - s;
 
         res.e = 127u + expo;
-        // get the 52 bits right of the msb.
+        // get the 23 bits right of the msb.
         fixed_point128 temp(*this);
         int shift = msb - flt_frac_bits;
         if (shift > 0) {
-            temp >>= shift;
+            res.f = f_mask & shift_right128(temp.low, temp.high, shift);
         }
-        if (shift < 0) {
-            temp <<= -shift;
+        else {
+            res.f = f_mask & shift_left128(temp.low, temp.high, -shift);
         }
-        res.f = FP128_GET_BITS(temp.low, 0, flt_frac_bits);
-
+        // round
+        if (res.f == f_mask) {
+            res.f = 0;
+            ++res.e;
+        }
         return res.val;
     }
     /**
@@ -457,7 +461,7 @@ public:
     FP128_INLINE operator double() const noexcept {
         if (!*this)
             return 0.0;
-
+        constexpr uint64_t f_mask = FP128_MAX_VALUE_64(dbl_frac_bits);
         Double res;
         res.s = sign;
         int32_t s = (int32_t)lzcnt128(*this);
@@ -469,12 +473,17 @@ public:
         fixed_point128 temp(*this);
         int shift = msb - dbl_frac_bits;
         if (shift > 0) {
-            temp >>= shift;
+            res.f = f_mask & shift_right128(temp.low, temp.high, shift);
         }
-        if (shift < 0) {
-            temp <<= -shift;
+        else {
+            res.f = f_mask & (temp.low << -shift);
         }
-        res.f = FP128_GET_BITS(temp.low, 0, dbl_frac_bits);
+        // round
+        if (res.f == f_mask) {
+            res.f = 0;
+            ++res.e;
+        }
+
         return res.val;
     }
     /**
@@ -832,6 +841,7 @@ public:
         }
         // optimization for when dividing by an integer
         else if (other.is_int() && (uint64_t)other <= UINT64_MAX) {
+            //*this *= fabs(reciprocal(other));
             uint64_t q[2]{};
             uint64_t nom[2] = { low, high };
             uint64_t denom = (uint64_t)other;

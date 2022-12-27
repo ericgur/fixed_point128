@@ -209,11 +209,11 @@ __forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift)
 {
     if (shift == 0) return h;
     if (shift < 64) return (h << shift) | (l >> (64 - shift));
-    if (shift < 128) return l << (shift ^ 64);
+    if (shift < 128) return l << (shift - 64);
     return 0;
 }
 /**
-    * @brief converts a 128 integer to negavite via 2's complement.
+    * @brief converts a 128 integer to negative via 2's complement.
     * @param l Low QWORD (ref)
     * @param h High QWORD (ref)
     * @return void
