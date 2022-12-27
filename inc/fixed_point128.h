@@ -546,65 +546,6 @@ public:
     // math operators
     //
     /**
-     * @brief Adds the right hand side operand to this object to and returns the result.
-     * @param other Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    template<typename T>
-    __forceinline fixed_point128 operator+(const T& other) const {
-        fixed_point128 temp(*this);
-        return temp += other;
-    }
-    /**
-     * @brief subtracts the right hand side operand to this object to and returns the result.
-     * @param other Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    template<typename T>
-    __forceinline fixed_point128 operator-(const T& other) const {
-        fixed_point128 temp(*this);
-        return temp -= other;
-    }
-    /**
-     * @brief Multiplies the right hand side operand with this object to and returns the result.
-     * @param other Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    __forceinline fixed_point128 operator*(const fixed_point128& other) const {
-        fixed_point128 temp(*this);
-        return temp *= other;
-    }
-    /**
-     * @brief Multiplies the right hand side operand with this object to and returns the result.
-     * @param x Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    template<typename T>
-    __forceinline fixed_point128 operator*(T x) const {
-        fixed_point128 temp(*this);
-        return temp *= x;
-    }
-    /**
-     * @brief Divides this object by the right hand side operand and returns the result.
-     * @param x Right hand side operand (denominator)
-     * @return Temporary object with the result of the operation
-    */
-    template<typename T>
-    __forceinline fixed_point128 operator/(T x) const {
-        fixed_point128 temp(*this);
-        return temp /= x;
-    }
-    /**
-     * @brief Calculates modulo.
-     * @param other Right hand side operand (denominator)
-     * @return Temporary object with the result of the operation
-    */
-    template<typename T>
-    __forceinline fixed_point128 operator%(T x) const {
-        fixed_point128 temp(*this);
-        return temp %= x;
-    }
-    /**
      * @brief Performs right shift operation.
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
@@ -623,33 +564,6 @@ public:
     __forceinline fixed_point128 operator<<(T shift) const {
         fixed_point128 temp(*this);
         return temp <<= static_cast<int32_t>(shift);
-    }
-    /**
-     * @brief Performs bitwise AND (&)
-     * @param other Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    __forceinline fixed_point128 operator&(const fixed_point128& other) const {
-        fixed_point128 temp(*this);
-        return temp &= other;
-    }
-    /**
-     * @brief Performs bitwise OR (|)
-     * @param other Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    __forceinline fixed_point128 operator|(const fixed_point128& other) const {
-        fixed_point128 temp(*this);
-        return temp |= other;
-    }
-    /**
-     * @brief Performs bitwise XOR (^)
-     * @param other Right hand side operand
-     * @return Temporary object with the result of the operation
-    */
-    __forceinline fixed_point128 operator^(const fixed_point128& other) const {
-        fixed_point128 temp(*this);
-        return temp ^= other;
     }
     /**
      * @brief Add a value to this object
@@ -1032,16 +946,25 @@ public:
     }
     /**
      * @brief Bitwise AND=
-     * @param other AND mask.
+     * @param rhs AND mask.
      * @return This object.
     */
-    __forceinline fixed_point128& operator&=(const fixed_point128& other) noexcept {
-        low &= other.low;
-        high &= other.high;
-        sign &= other.sign;
+    __forceinline fixed_point128& operator&=(const fixed_point128& rhs) noexcept {
+        low &= rhs.low;
+        high &= rhs.high;
+        sign &= rhs.sign;
         // set sign to 0 when both low and high are zero (avoid having negative zero value)
         sign &= (0 != low || 0 != high);
         return *this;
+    }
+    /**
+     * @brief Bitwise AND=
+     * @param rhs Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE fixed_point128& operator&=(const T& rhs) {
+        return operator&=(fixed_point128(rhs));
     }
     /**
      * @brief Bitwise OR=
@@ -1055,6 +978,15 @@ public:
         return *this;
     }
     /**
+     * @brief Bitwise OR=
+     * @param rhs Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE fixed_point128& operator|= (const T & rhs){
+        return operator|=(fixed_point128(rhs));
+    }
+    /**
      * @brief Bitwise XOR=
      * @param other XOR mask.
      * @return This object.
@@ -1064,6 +996,15 @@ public:
         high ^= other.high;
         sign ^= other.sign;
         return *this;
+    }
+    /**
+     * @brief Bitwise XOR=
+     * @param rhs Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE fixed_point128& operator^= (const T & rhs){
+        return operator^=(fixed_point128(rhs));
     }
     /**
      * @brief Prefix ++ operation (++a)
@@ -1139,8 +1080,8 @@ public:
     __forceinline fixed_point128 operator-() const noexcept {
         fixed_point128 temp(*this);
 
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
         temp.sign ^= 1;
+        // set sign to 0 when both low and high are zero (avoid having negative zero value)
         temp.sign &= (0 != low || 0 != high);
         return temp;
     }
@@ -1372,8 +1313,94 @@ public:
         static const fixed_point128 epsilon(1, 0, 0);
         return epsilon;
     }
+    //
     // End of class method implementation
-    
+    //
+
+    //
+    // Binary math operators
+    //
+    /**
+     * @brief Adds the right hand side operand to this object to and returns the result.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return Temporary object with the result of the operation
+    */
+    template<typename T>
+    friend __forceinline fixed_point128 operator+(fixed_point128 lhs, const T& rhs) {
+        return lhs += rhs;
+    }
+    /**
+     * @brief subtracts the right hand side operand to this object to and returns the result.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The fixed_point128 result
+    */
+    template<typename T>
+    friend __forceinline fixed_point128 operator-(fixed_point128 lhs, const T& rhs) {
+        return lhs -= rhs;
+    }
+    /**
+     * @brief Multiplies the right hand side operand with this object to and returns the result.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The fixed_point128 result
+    */
+    template<typename T>
+    friend __forceinline fixed_point128 operator*(fixed_point128 lhs, const T& rhs) {
+        return lhs *= rhs;
+    }
+    /**
+     * @brief Divides this object by the right hand side operand and returns the result.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The fixed_point128 result
+    */
+    template<typename T>
+    friend __forceinline fixed_point128 operator/(fixed_point128 lhs, const T& rhs) {
+        return lhs /= rhs;
+    }
+    /**
+     * @brief Calculates modulo.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The fixed_point128 result
+    */
+    template<typename T>
+    friend __forceinline fixed_point128 operator%(fixed_point128 lhs, const T& rhs) {
+        return lhs %= rhs;
+    }
+    /**
+     * @brief Performs bitwise AND (&)
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The fixed_point128 result
+    */
+    template<typename T>
+    friend __forceinline fixed_point128 operator&(fixed_point128 lhs, const T& rhs) {
+        return lhs &= rhs;
+    }
+    /**
+     * @brief Performs bitwise OR (|)
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The fixed_point128 result
+    */
+    template<typename T>
+    friend __forceinline fixed_point128 operator|(fixed_point128 lhs, const T& rhs) {
+        return lhs |= rhs;
+    }
+    /**
+     * @brief Performs bitwise XOR (^)
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The fixed_point128 result
+    */
+    template<typename T>
+    friend __forceinline fixed_point128 operator^(fixed_point128 lhs, const T& rhs) {
+        return lhs ^= rhs;
+    }
+
     //
     // Floating point style functions, implemented as friend functions
     //

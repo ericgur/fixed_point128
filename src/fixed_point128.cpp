@@ -110,6 +110,8 @@ void test_addition()
         assert((uint64_t)i128b == val2);
         assert((uint64_t)(i128a + i128b) == (val1 + val2));
         assert((uint64_t)(i128a - i128b) == (val1 - val2));
+        assert((uint64_t)(i128a + val2) == (val1 + val2));
+        assert((uint64_t)(i128a - val2) == (val1 - val2));
     }
 
     printf("uint128_t addition and subtraction passed!\n");
