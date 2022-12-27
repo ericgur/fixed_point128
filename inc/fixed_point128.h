@@ -1346,6 +1346,15 @@ public:
         return one;
     }
     /**
+     * @brief Return an instance of fixed_point128 with the value of 0.5
+     * @return 1
+    */
+    __forceinline static const fixed_point128& half() noexcept
+    {
+        static const fixed_point128 half = 0.5;
+        return half;
+    }
+    /**
      * @brief Return an instance of fixed_point128 with the smallest positive value possible
      * @return 1
     */
@@ -1359,7 +1368,7 @@ public:
     // Floating point style functions, implemented as friend functions
     //
     /**
-     * @brief Returns the absolute value (sets sign to 0)
+     * @brief Returns the absolute value
      * @param x Fixed_point128 object
      * @return A copy of x with sign removed
     */
@@ -1402,7 +1411,31 @@ public:
         res.sign = x.sign;
         return res;
     }
+    /**
+     * @brief Rounds towards zero
+     * @param x Value to truncate
+     * @return Integer value, rounded towards zero.
+    */
+    friend FP128_INLINE fixed_point128 trunc(const fixed_point128& x) noexcept
+    {
+        return fixed_point128(0, x.high & x.int_mask, x.sign);
+    }
+    /**
+     * @brief Rounds towards the nearest integer.
+     * The halfway value (0.5) is rounded away from zero.
+     * @param x Value to round
+     * @return Integer value, rounded towards the nearest integer.
+    */
+    friend FP128_INLINE fixed_point128 round(const fixed_point128& x) noexcept
+    {
+        // save the sign
+        auto sign = x.sign;
+        fixed_point128 res = floor(fabs(x) + fixed_point128::half());
 
+        // restore the sign
+        res.sign = sign;
+        return res;
+    }
     /**
      * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/root.
      * @param x Numerator
@@ -1597,6 +1630,41 @@ public:
         }
     }
     /**
+     * @brief Calculates the reciprocal of a value. y = 1 / x
+     * Using newton iterations: Yn+1 = Yn(2 - x * Yn)
+     * @param x Input value
+     * @return 1 / x. Returns zero on overflow or division by zero
+    */
+    friend FP128_INLINE fixed_point128 reciprocal(const fixed_point128& x) noexcept
+    {
+        fixed_point128 one = 1, two = 2;
+        constexpr int max_iterations = 6;
+        auto expo = x.get_exponent();
+        fixed_point128 y, absx = fabs(x);
+        if (expo >= 0) {
+            expo += (absx >> expo) > 0.5;
+            y = one >> expo;
+        }
+        else {
+            expo += (absx << -expo) > 1.5;
+            y = one << -expo;
+        }
+        
+        y.sign = x.sign;
+        // infinity, overflow or underflow
+        if (!y)
+            return y; 
+
+        // Newton iterations:
+        for (int i = 0; i < max_iterations; ++i) {
+            fixed_point128 xy = x * y;
+            y = y * (two - xy);
+        }
+
+        fixed_point128 res = y;
+        return res;
+    }
+    /**
      * @brief Calculate the sine function
      * Using the Maclaurin series expansion, the formula is:
      * sin(x) = x - (x^3 / 3!) + (x^5 / 5!) - (x^7 / 7!) + ...
@@ -1643,6 +1711,15 @@ public:
         }
 
         return res;
+    }
+    /**
+     * @brief Calculate the inverse sine function
+     * @param x value in the range [-1,1]
+     * @return Inverse sine of x
+    */
+    friend FP128_INLINE fixed_point128 asin(const fixed_point128& x) noexcept
+    {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
     /**
      * @brief Calculate the cosine function
@@ -1692,6 +1769,35 @@ public:
         }
 
         return res;
+    }
+    /**
+     * @brief Calculate the inverse cosine function
+     * @param x value in the range [-1,1]
+     * @return Inverse cosine of x
+    */
+    friend FP128_INLINE fixed_point128 acos(const fixed_point128& x) noexcept
+    {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
+    /**
+     * @brief Calculate the tangent function
+     * tan(x) = sin(x)/cos(x)
+     * @param x value
+     * @return Tangent of x
+    */
+    friend FP128_INLINE fixed_point128 tan(const fixed_point128& x) noexcept
+    {
+        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use tan()!");
+        return sin(x) / cos(x);
+    }
+    /**
+     * @brief Calculate the inverse tangent function
+     * @param x value in the range [-0.5pi,0.5pi]
+     * @return Tangent of x
+    */
+    friend FP128_INLINE fixed_point128 atan(const fixed_point128& x) noexcept
+    {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
     /**
      * @brief Calculates the exponent of x: e^x

@@ -25,7 +25,7 @@
 // fixed_point128.cpp : test executable for the fixed_point128 class template
 //
 
-//#define FP128_DISABLE_INLINE
+//#define FP128_DISABLE_INLINE TRUE
 
 #include <windows.h>
 #include <profileapi.h>
@@ -53,6 +53,8 @@ void test_conversion()
     uint128_t i6 = d1;
     // assert(fabs((d1 / (double)i6) - 1.0) < 0.00001);
     assert(d1 == (double)i6);
+    uint128_t i7 = -2;
+    int32_t temp = i7;
     //uint64_t i64 = (uint64_t)d1;
     printf("uint128_t: 1=%llu, UINT64_MAX=0x%llX, 0xDEADBEAFDEADBEAF=0x%llX\n", (uint64_t)i1, (uint64_t)i2, (uint64_t)i3);
     printf("uint128_t: 0xF123456789ABCDEFFEDCBA9876543210=%s\n", (char*)i4);
@@ -342,6 +344,9 @@ void test_functions()
         printf("floor(f1): %0.15lf\n", (double)floor(f1));
         printf("ceil(f1): %0.15lf\n", (double)ceil(f1));
         printf("fabs(f1): %0.15lf\n", (double)fabs(f1));
+        printf("reciprocal(double): %0.15lf\n", 1.0 / values[i]);
+        auto y = reciprocal(f1);
+        printf("reciprocal(f1): %0.15lf\n", (double)y);
         fixed_point128<10> int_part;
         fixed_point128<10> f2 = modf(f1, &int_part);
         printf("modf(f1): int: %lf fraction %0.15lf\n", (double)int_part, (double)f2);
@@ -455,19 +460,19 @@ void test_comparison()
 void print_ips(const char* name, int64_t ips)
 {
     if (ips < 1000) {
-        printf("%s: %lld per second\n", name, ips);
+        printf("%s: %lld/s\n", name, ips);
     }
     else if (ips < 1000000) {
         double dips = ips / 1000.0;
-        printf("%s: %0.3lfK per second\n", name, dips);
+        printf("%s: %0.3lfK/s\n", name, dips);
     }
     else if (ips < 1000000000) {
         double dips = ips / 1000000.0;
-        printf("%s: %0.3lfM per second\n", name, dips);
+        printf("%s: %0.3lfM/s\n", name, dips);
     }
     else {
         double dips = ips / 1000000000.0;
-        printf("%s: %0.3lfG per second\n", name, dips);
+        printf("%s: %0.3lfG/s\n", name, dips);
     }
 }
 

@@ -260,7 +260,7 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
     * @param n Count of elements in v
     * @return 0 for success
 */
-static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
+inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
 {
     constexpr uint64_t WORD_WIDTH = 32ull;        // bit width of a word
     constexpr uint64_t BASE = 1ull << WORD_WIDTH; // Number base (32 bits).
