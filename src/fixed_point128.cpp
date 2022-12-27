@@ -25,7 +25,7 @@
 // fixed_point128.cpp : test executable for the fixed_point128 class template
 //
 
-//#define FP128_DISABLE_INLINE TRUE
+#define FP128_DISABLE_INLINE TRUE
 
 #include <windows.h>
 #include <profileapi.h>
