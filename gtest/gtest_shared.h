@@ -8,7 +8,7 @@
 **************************************************/
 using namespace fp128;
 
-static constexpr int RANDOM_TEST_COUNT = 32768;
+static constexpr int RANDOM_TEST_COUNT = 1 << 16;
 static constexpr int RANDOM_SEED = 0x12345678; // must have a repeatable seed for debugging
 static constexpr double DOUBLE_REL_EPS = 1.0e-10;
 
@@ -40,10 +40,11 @@ __forceinline int32_t get_random_sign()
 }
 
 // returns a random number
-double static get_double_random()
+double static get_double_random(int32_t min_exponent = -10, int32_t max_exponent = 63)
 {
     Double res;
-    res.e = ((uint64_t)get_uint32_random() % 73) - 10 + 1023; // exponents [-10,63]
+    int expo = (get_uint32_random() % (max_exponent - min_exponent)) + min_exponent;
+    res.e = (uint64_t)expo + 1023; 
     res.f = get_uint64_random();
     res.s = get_random_sign();
     return res.val;
@@ -52,25 +53,25 @@ double static get_double_random()
 // returns a positive random number
 uint64_t static get_uint64_random()
 {
-    return ((uint64_t)rand() + 1) * (uint64_t)rand();
+    return (((uint64_t)rand()) << 60) + (((uint64_t)rand()) << 45) + (((uint64_t)rand()) << 30) + (((uint64_t)rand()) << 15) + (uint64_t)rand();
 }
 
 // returns a positive random number
 int64_t static get_int64_random()
 {
-    return (int64_t)(rand() + 1) * (int64_t)rand() * (int64_t)get_random_sign();
+    return (int64_t)get_uint64_random() * (int64_t)get_random_sign();
 }
 
 // returns a positive random number
 uint32_t static get_uint32_random()
 {
-    return (uint32_t)rand();
+    return (((uint32_t)rand()) << 30) + (((uint32_t)rand()) << 15) + (uint32_t)rand();
 }
 
 // returns a random number
 int32_t static get_int32_random()
 {
-    return rand() * get_random_sign();
+    return (int32_t)get_uint32_random() * get_random_sign();
 }
 
 // return true on overflow

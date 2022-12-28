@@ -396,7 +396,7 @@ TEST(uint128_t, log10) {
 TEST(uint128_t, log) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = 1.0 + floor(fabs(get_double_random())) * get_uint64_random();
+        double value1 = 1.0 + floor(fabs(get_double_random(0, 127)));
         uint64_t res = (uint64_t)floor(log(value1)); // double doesn't lose any bits with this operation!
         if (check_overflow_uint128(value1)) {
             continue;

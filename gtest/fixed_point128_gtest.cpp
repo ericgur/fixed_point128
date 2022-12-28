@@ -19,28 +19,20 @@ TEST(fixed_point128, DefaultConstructor) {
 TEST(fixed_point128, ConstructorFromDouble) {
     srand(RANDOM_SEED); 
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random();
-        //double value = -0.00048828129930906378;
-        
-        fixed_point128<20> f = value;
-        if (check_overflow(value, f)) {
-            continue;
-        }
+        double value = get_double_random(-43, 31);
+        fixed_point128<32> f = value;
         double f_value = static_cast<double>(f);
         if (fabs(value/ f_value) - 1.0 > 0.0001) {
             f_value = value;
         }
-        EXPECT_DOUBLE_EQ(f_value, value);
+        EXPECT_DOUBLE_EQ(f_value, value) << "value=" << value;
     }
 }
 TEST(fixed_point128, ConstructorFromFloat) {
     srand(RANDOM_SEED); 
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        float value = (float)get_double_random();
-        fixed_point128<20> f = value;
-        if (check_overflow(value, f)) {
-            continue;
-        }
+        float value = (float)get_double_random(-43, 31);
+        fixed_point128<32> f = value;
         EXPECT_FLOAT_EQ(static_cast<float>(f), value);
     }
 }
@@ -231,9 +223,11 @@ TEST(fixed_point128, AddFloat) {
 TEST(fixed_point128, AddInt32) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        auto value1 = get_int32_random();
-        auto value2 = get_int32_random();
+        auto value1 = abs(get_int32_random());
+        auto value2 = abs(get_int32_random());
         auto res = value1 + value2;
+        if (res < 0) continue; //wrap around won't happen in uint128_t
+
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
@@ -248,6 +242,8 @@ TEST(fixed_point128, AddUnsignedInt32) {
         auto value1 = get_uint32_random();
         auto value2 = get_uint32_random();
         auto res = value1 + value2;
+        if (res < value1 || res < value2) continue; //wrap around won't happen in uint128_t
+
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
@@ -327,9 +323,12 @@ TEST(fixed_point128, SubtractDifferentSign) {
 TEST(fixed_point128, SubtractInt32) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        auto value1 = get_int32_random();
-        auto value2 = get_int32_random();
+        auto value1 = abs(get_int32_random());
+        auto value2 = abs(get_int32_random());
+        if (value2 > value1) value2 = value1 / 3;
+
         auto res = value1 - value2;
+
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 - value2;
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
@@ -563,7 +562,7 @@ TEST(fixed_point128, DivideByFloat) {
 TEST(fixed_point128, DivideByInt32) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-1, 39);
         int32_t value2 = get_int32_random();
         double res = value1 / value2;
         if (value2 == 0)
@@ -579,7 +578,7 @@ TEST(fixed_point128, DivideByInt32) {
 TEST(fixed_point128, DivideByUnsignedInt32) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-1, 39);
         uint32_t value2 = get_uint32_random();
         double res = value1 / value2;
         if (value2 == 0)
@@ -596,7 +595,7 @@ TEST(fixed_point128, DivideByUnsignedInt32) {
 TEST(fixed_point128, DivideByInt64) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-1, 39);
         int64_t value2 = get_int32_random(); // on purpose
         double res = value1 / value2;
         if (value2 == 0)
@@ -612,7 +611,7 @@ TEST(fixed_point128, DivideByInt64) {
 TEST(fixed_point128, DivideByUnsignedInt64) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-1, 39);
         uint64_t value2 = get_uint32_random(); // on purpose
         double res = value1 / value2;
         if (value2 == 0)
@@ -708,7 +707,7 @@ TEST(fixed_point128, ModuloByInt32) {
 TEST(fixed_point128, ModuloByUnsignedInt32) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-1, 39);
         uint32_t value2 = get_uint32_random();
         double res = fmod(value1, value2);
         if (value2 == 0)
@@ -725,7 +724,7 @@ TEST(fixed_point128, ModuloByUnsignedInt32) {
 TEST(fixed_point128, ModuloByInt64) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-1, 39);
         int64_t value2 = get_int32_random(); // on purpose
         double res = fmod(value1, value2);
         if (value2 == 0)
@@ -741,7 +740,7 @@ TEST(fixed_point128, ModuloByInt64) {
 TEST(fixed_point128, ModuloByUnsignedInt64) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-1, 39);
         uint64_t value2 = get_uint32_random(); // on purpose
         double res = fmod(value1, value2);
         if (value2 == 0)
@@ -757,8 +756,8 @@ TEST(fixed_point128, ModuloByUnsignedInt64) {
 TEST(fixed_point128, CompareFP128) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
-        double value2 = get_double_random();
+        double value1 = get_double_random(-1, 39);
+        double value2 = get_double_random(-1, 39);
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
@@ -1113,7 +1112,7 @@ TEST(fixed_point128, ShiftLeft) {
 TEST(fixed_point128, reciprocal) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-15, 15);
         double res = 1.0 / value1;
         fixed_point128<16> f1 = value1;
         fixed_point128<16> fp128_res = reciprocal(f1);
