@@ -25,7 +25,7 @@
 // fixed_point128.cpp : test executable for the fixed_point128 class template
 //
 
-#define FP128_DISABLE_INLINE TRUE
+//#define FP128_DISABLE_INLINE TRUE
 
 #include <windows.h>
 #include <profileapi.h>
@@ -33,6 +33,14 @@
 #include <cassert>
 #include "../inc/fixed_point128.h" 
 #include "../inc/uint128_t.h" 
+
+#pragma warning(disable: 26493) // Don't use C-style casts.
+#pragma warning(disable: 26467) 
+#pragma warning(disable: 26485) 
+#pragma warning(disable: 26440) 
+#pragma warning(disable: 26482) 
+#pragma warning(disable: 26446) 
+#pragma warning(disable: 26496) 
 
 using namespace fp128;
 
@@ -55,6 +63,7 @@ void test_conversion()
     assert(d1 == (double)i6);
     uint128_t i7 = -2;
     int32_t temp = i7;
+    assert(temp == -2);
     //uint64_t i64 = (uint64_t)d1;
     printf("uint128_t: 1=%llu, UINT64_MAX=0x%llX, 0xDEADBEAFDEADBEAF=0x%llX\n", (uint64_t)i1, (uint64_t)i2, (uint64_t)i3);
     printf("uint128_t: 0xF123456789ABCDEFFEDCBA9876543210=%s\n", (char*)i4);
@@ -289,7 +298,7 @@ void test_string()
             str[0] = '1';
         str[j] = '\0';
         uint128_t i128 = str;
-        char* i128_str = (char*)i128;
+        char* const i128_str  = (char*)i128;
         assert(0 == strcmp(i128_str, str));
     }
 
@@ -465,26 +474,26 @@ void print_ips(const char* name, int64_t ips)
         printf("%s: %lld/s\n", name, ips);
     }
     else if (ips < 1000000) {
-        double dips = ips / 1000.0;
+        const double dips = ips / 1000.0;
         printf("%s: %0.3lfK/s\n", name, dips);
     }
     else if (ips < 1000000000) {
-        double dips = ips / 1000000.0;
+        const double dips = ips / 1000000.0;
         printf("%s: %0.3lfM/s\n", name, dips);
     }
     else {
-        double dips = ips / 1000000000.0;
+        const double dips = ips / 1000000000.0;
         printf("%s: %0.3lfG/s\n", name, dips);
     }
 }
 
 void bench()
 {
-    LARGE_INTEGER li, time_start, time_end;
+    LARGE_INTEGER li, time_start{}, time_end{};
     QueryPerformanceFrequency(&li);
     double totalTime = 0;
     const double frequency = double(li.QuadPart);
-    int iterations = 1000000000;
+    int iterations = 2000000000;
     uint64_t ips = 0;
     fixed_point128<10> f1 = fixed_point128<10>::pi();
     fixed_point128<10> f2 = fixed_point128<10>::e();
@@ -579,6 +588,8 @@ void bench()
     ips = (uint64_t)(iterations / totalTime);
     print_ips("sqrt", ips);
     
+    // even slower
+    iterations /= 2;
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
         f3 = sqrt_slow(f1);

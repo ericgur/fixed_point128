@@ -83,7 +83,7 @@ static constexpr int32_t dbl_exp_bits = 11;   // exponent bit count of a double 
 #pragma warning(push)
 #pragma warning(disable: 4201) // nameless union/structs
 struct Double {
-    Double(double v = 0) : val(v) {}
+    Double(double v = 0) noexcept: val(v) {}
     union {
         struct {
             uint64_t f : dbl_frac_bits; // mantisa/fraction
@@ -94,7 +94,7 @@ struct Double {
     };
 };
 struct Float {
-    Float(float v = 0) : val(v) {}
+    Float(float v = 0) noexcept : val(v) {}
     union {
         struct {
             uint32_t f : flt_frac_bits; // mantisa/fraction
@@ -133,7 +133,7 @@ constexpr uint32_t array_length(const T& a) {
     * @param shift how many bits to shift
     * @return result of 'x' the combined 64 bit element right shifted by 'shift' bits.
 */
-__forceinline uint32_t shift_right64(uint32_t l, uint32_t h, int shift) 
+__forceinline uint32_t shift_right64(uint32_t l, uint32_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 32);
     return (shift > 0) ? (l >> shift) | (h << (32 - shift)) : l;
@@ -145,7 +145,7 @@ __forceinline uint32_t shift_right64(uint32_t l, uint32_t h, int shift)
     * @param shift how many bits to shift
     * @return result of the combined 64 bit element left shifted by 'shift' bits.
 */
-__forceinline uint32_t shift_left64(uint32_t l, uint32_t h, int shift) 
+__forceinline uint32_t shift_left64(uint32_t l, uint32_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 32);
     return (shift > 0) ?  (h << shift) | (l >> (32 - shift)) : h;
@@ -157,7 +157,7 @@ __forceinline uint32_t shift_left64(uint32_t l, uint32_t h, int shift)
     * @param shift how many bits to shift
     * @return result of 'x' right shifted by 'shift' bits.
 */
-__forceinline uint64_t shift_right64_round(uint64_t x, int shift) 
+__forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 64);
     x += 1ull << (shift - 1);
@@ -170,7 +170,7 @@ __forceinline uint64_t shift_right64_round(uint64_t x, int shift)
     * @param shift Bits to shift, between 0-127
     * @return Lower 64 bit of the result
 */
-__forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift)
+__forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
     if (shift == 0) return l;
     if (shift < 64) return (l >> shift) | (h << (64 - shift));
@@ -184,7 +184,7 @@ __forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift)
     * @param shift Bits to shift, between 0-127
     * @return Lower 64 bit of the result
 */
-__forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift)
+__forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
     if (shift == 0) return l;
     if (shift < 64) {
@@ -205,7 +205,7 @@ __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift)
     * @param shift Bits to shift, between 0-127
     * @return Upper 64 bit of the result
 */
-__forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift)
+__forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
     if (shift == 0) return h;
     if (shift < 64) return (h << shift) | (l >> (64 - shift));
@@ -242,12 +242,12 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
     uint64_t k = 0;
     for (auto j = m - 1; j >= 0; --j) {
         k = (k << 32) + u[j];
-        q[j] = (uint32_t)(k / v);
-        k -= (uint64_t)q[j] * v;
+        q[j] = static_cast<uint32_t>(k / v);
+        k -= static_cast<uint64_t>(q[j]) * v;
     }
 
     if (r != nullptr)
-        *r = (uint32_t)k;
+        *r = static_cast<uint32_t>(k);
     return 0;
 }
 /**
@@ -280,8 +280,10 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
 #pragma warning(disable: 6385)
 #pragma warning(disable: 6386)
 #pragma warning(disable: 26451)
+#pragma warning(disable: 26493)
+#pragma warning(disable: 26438)
 
-// shrink the arrays to avoid extra work on small numbers
+    // shrink the arrays to avoid extra work on small numbers
     while (m > 0 && u[m - 1] == 0) --m;
     while (n > 0 && v[n - 1] == 0) --n;
 
@@ -411,7 +413,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * @param x The number to perform log2 on.
  * @return log2(x). Returns zero when x is zero.
 */
-__forceinline uint64_t log2(uint64_t x)
+__forceinline uint64_t log2(uint64_t x) noexcept
 {
     return (x) ? 63ull - __lzcnt64(x) : 0;
 }
@@ -421,7 +423,7 @@ __forceinline uint64_t log2(uint64_t x)
  * @param x The number to perform log2 on.
  * @return log2(x). Returns zero when x is zero.
 */
-__forceinline uint32_t log2(uint32_t x)
+__forceinline uint32_t log2(uint32_t x) noexcept
 {
     return (x) ? 31ull - __lzcnt(x) : 0;
 }

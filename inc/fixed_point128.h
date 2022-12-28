@@ -38,11 +38,23 @@
 #ifndef FIXED_POINT128_H
 #define FIXED_POINT128_H
 
+// override some static analysis checks
+#pragma warning(push)
+#pragma warning(disable: 26472) // Don't use a static_cast for arithmetic conversions. Use brace initialization
+#pragma warning(disable: 26485) // No array to pointer decay
+#pragma warning(disable: 26481) // Don't use pointer arithmetic. Use span instead
+#pragma warning(disable: 26446) // Prefer to use gsl::at() instead of unchecked subscript operator
+#pragma warning(disable: 26482) // Only index into arrays using constant expressions
+#pragma warning(disable: 26408) // Avoid malloc() and free(), prefer the nothrow version of new with delete
+
+
 #include "fixed_point128_shared.h"
 //#include "uint128_t.h"
 
 namespace fp128 {
 
+
+    
 /***********************************************************************************
 *                                  Forward declarations
 ************************************************************************************/
@@ -167,7 +179,7 @@ public:
         }
 
         // hack the double bit fields
-        Double d(x);
+        const Double d(x);
 
         sign = d.s;
         const int32_t e = static_cast<int32_t>(d.e) - 1023;
@@ -250,7 +262,7 @@ public:
     __forceinline fixed_point128(int32_t x) noexcept {
         low = 0;
         sign = FP128_GET_BIT(x, 31);
-        high = (uint64_t)((sign != 0) ? -x : x) << upper_frac_bits;
+        high = static_cast<uint64_t>((sign != 0) ? -x : x) << upper_frac_bits;
     }
     /**
      * @brief Constructor from const char* (C string).
@@ -291,7 +303,7 @@ public:
 
         // number is a float, get the integer part using strtoull()
         *dec = '\0';
-        uint64_t int_val = std::strtoull(p, nullptr, 10) << upper_frac_bits;
+        const uint64_t int_val = std::strtoull(p, nullptr, 10) << upper_frac_bits;
 
         p = dec + 1;
         int32_t digits = 0;
@@ -301,7 +313,7 @@ public:
         // multiply each digits by 0.1**n
         while (digits++ < max_frac_digits && *p != '\0' && base) {
             fixed_point128<1> temp = base * (p[0] - '0');
-            unsigned char carry = _addcarry_u64(0, frac.low, temp.low, &frac.low);
+            const uint8_t carry = _addcarry_u64(0, frac.low, temp.low, &frac.low);
             frac.high += temp.high + carry;
             base *= step;
             ++p;
@@ -364,7 +376,7 @@ public:
      * @return This object.
     */
     template<int32_t I2>
-    FP128_INLINE fixed_point128<I>& operator=(const fixed_point128<I2>& other)
+    FP128_INLINE fixed_point128<I>& operator=(const fixed_point128<I2>& other) noexcept
     {
         sign = other.sign;
         if constexpr (I == I2) {
@@ -374,15 +386,15 @@ public:
         // other has less integer bits and more fraction bits
         else if constexpr (I < I2) {
             // shift left by I2 - I bits
-            const int shift = I2 - I;
+            constexpr int shift = I2 - I;
             low = other.low << shift;
-            high = shift_left128(other.low, other.high, (uint8_t)(64 - shift));
+            high = shift_left128(other.low, other.high, static_cast<uint8_t>(64 - shift));
         }
         // other has more integer bits and less fraction bits
         else { // I > I2
             // shift right by I - I2 bits
-            const int shift = I - I2;
-            low = shift_right128_round(other.low, other.high, (uint8_t)shift);
+            constexpr int shift = I - I2;
+            low = shift_right128_round(other.low, other.high, static_cast<uint8_t>(shift));
             high = other.high >> shift;
         }
 
@@ -404,7 +416,7 @@ public:
      * @return Object value.
     */
     FP128_INLINE operator int64_t() const noexcept {
-        int64_t res = (sign) ? -1ll : 1ll;
+        const int64_t res = (sign) ? -1ll : 1ll;
         return res * ((high >> upper_frac_bits) & UINT64_MAX);
     }
     /**
@@ -464,14 +476,14 @@ public:
         constexpr uint64_t f_mask = FP128_MAX_VALUE_64(dbl_frac_bits);
         Double res;
         res.s = sign;
-        int32_t s = (int32_t)lzcnt128(*this);
-        int32_t msb = 127 - s;
-        auto expo = I - 1 - s;
+        const int32_t s = static_cast<int32_t>(lzcnt128(*this));
+        const int32_t msb = 127 - s;
+        const auto expo = I - 1 - s;
 
         res.e = 1023ull + expo;
         // get the 52 bits right of the msb.
         fixed_point128 temp(*this);
-        int shift = msb - dbl_frac_bits;
+        const int shift = msb - dbl_frac_bits;
         if (shift > 0) {
             res.f = f_mask & shift_right128(temp.low, temp.high, shift);
         }
@@ -497,17 +509,17 @@ public:
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
     */
-    FP128_INLINE operator std::string() const {
+    FP128_INLINE operator std::string() const noexcept {
         return operator char*();
     }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
      * @return object string representation
     */
-    explicit FP128_INLINE operator char*() const {
+    explicit FP128_INLINE operator char*() const noexcept {
         static thread_local char str[128]; // need roughly a (meaningful) decimal digit per 3.2 bits
 
-        char* p = str;
+        char* p = &str[0];
         fixed_point128 temp = *this;
 
         //number is negative
@@ -551,7 +563,7 @@ public:
      * @return Temporary object with the result of the operation
     */
     template<typename T>
-    __forceinline fixed_point128 operator>>(T shift) const {
+    __forceinline fixed_point128 operator>>(T shift) const noexcept {
         fixed_point128 temp(*this);
         return temp >>= static_cast<int32_t>(shift);
     }
@@ -561,7 +573,7 @@ public:
      * @return Temporary object with the result of the operation
     */
     template<typename T>
-    __forceinline fixed_point128 operator<<(T shift) const {
+    __forceinline fixed_point128 operator<<(T shift) const noexcept {
         fixed_point128 temp(*this);
         return temp <<= static_cast<int32_t>(shift);
     }
@@ -570,7 +582,7 @@ public:
      * @param other Right hand side operand
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator+=(const fixed_point128& other) {
+    FP128_INLINE fixed_point128& operator+=(const fixed_point128& other) noexcept {
         bool result_has_different_sign = false;
         fixed_point128 temp = other;
 
@@ -581,7 +593,7 @@ public:
             twos_complement128(temp.low, temp.high);
         }
         //add the other value
-        unsigned char carry = _addcarry_u64(0, low, temp.low, &low);
+        const uint8_t carry = _addcarry_u64(0, low, temp.low, &low);
         high += temp.high + carry;
 
         // if result is with a different sign, invert it along with the sign.
@@ -608,7 +620,7 @@ public:
      * @param other Right hand side operand
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator-=(const fixed_point128& other) {
+    FP128_INLINE fixed_point128& operator-=(const fixed_point128& other) noexcept {
         bool result_has_different_sign = false;
         fixed_point128 temp = other;
 
@@ -618,7 +630,7 @@ public:
             twos_complement128(temp.low, temp.high);
         }
         //add the other value
-        unsigned char carry = _addcarry_u64(0, low, temp.low, &low);
+        const uint8_t carry = _addcarry_u64(0, low, temp.low, &low);
         high += temp.high + carry;
 
         // if result is with a different sign, invert it along with the sign.
@@ -637,7 +649,7 @@ public:
      * @return This object.
     */
     template<typename T>
-    __forceinline fixed_point128& operator-=(const T& other) {
+    __forceinline fixed_point128& operator-=(const T& other) noexcept {
         return operator-=(fixed_point128(other));
     }
     /**
@@ -652,7 +664,6 @@ public:
 
         uint64_t res[4]; // 256 bit of result
         uint64_t temp1[2], temp2[2];
-        unsigned char carry;
 
         // multiply low QWORDs
         res[0] = _umul128(low, other.low, &res[1]);
@@ -662,7 +673,7 @@ public:
 
         // multiply low this and high other
         temp1[0] = _umul128(low, other.high, &temp1[1]);
-        carry = _addcarry_u64(0, res[1], temp1[0], &res[1]);
+        uint8_t carry = _addcarry_u64(0, res[1], temp1[0], &res[1]);
         res[3] += _addcarry_u64(carry, res[2], temp1[1], &res[2]);
 
         // multiply high this and low other
@@ -678,8 +689,8 @@ public:
         const bool need_rounding = (res[index] & half) != 0;
 
         // copy block #1 (lowest)
-        low = shift_right128(res[index], res[index + 1], lsb);
-        high = shift_right128(res[index+1], res[index + 2], lsb);
+        low = __shiftright128(res[index], res[index + 1], lsb); // intrinsic is faster when shift is < 64
+        high = __shiftright128(res[index+1], res[index + 2], lsb);
 
         if (need_rounding) {
             ++low; // low will wrap around to zero if overflowed
@@ -704,7 +715,7 @@ public:
      * @param x Right hand side operand
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator*=(uint64_t x) {
+    FP128_INLINE fixed_point128& operator*=(uint64_t x) noexcept{
         uint64_t temp;
 
         // multiply low QWORDs
@@ -720,7 +731,7 @@ public:
      * @return This object.
     */
     template<typename T>
-    __forceinline fixed_point128& operator*=(T x) {
+    __forceinline fixed_point128& operator*=(T x) noexcept {
         if constexpr (std::is_floating_point<T>::value) {
             return operator*=(fixed_point128(x));
         }
@@ -747,7 +758,7 @@ public:
 
         // exponent of 2, convert to a much faster shift operation
         if (1 == popcnt128(other.low, other.high)) {
-            auto expo = other.get_exponent();
+            const auto expo = other.get_exponent();
             if (expo > 0)
                 *this >>= (int32_t)expo;
             else if (expo < 0)
@@ -757,8 +768,8 @@ public:
         else if (other.is_int() && (uint64_t)other <= UINT64_MAX) {
             //*this *= fabs(reciprocal(other));
             uint64_t q[2]{};
-            uint64_t nom[2] = { low, high };
-            uint64_t denom = (uint64_t)other;
+            const uint64_t nom[2] = { low, high };
+            const uint64_t denom = (uint64_t)other;
             uint64_t r;
             if (0 == div_64bit((uint64_t*)q, &r, (uint64_t*)nom, denom, 2)) {
                 need_rounding = r > (denom >> 1);
@@ -771,16 +782,22 @@ public:
         }
         else {
             uint64_t q[4]{};
-            uint64_t nom[4] = {0, 0, low, high};
-            uint64_t denom[2] = {other.low, other.high};
+            const uint64_t nom[4] = {0, 0, low, high};
+            const uint64_t denom[2] = {other.low, other.high};
 
             if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
                 static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
                 need_rounding = (q[0] & half) != 0;
                 // result in q needs to shifted left by F (F bits were added to the right)
                 // shifting right by 128-F is simpler.
-                high = shift_right128(q[1], q[2], I);
-                low = shift_right128(q[0], q[1], I);
+                if constexpr (I == 64) {
+                    high = q[1];
+                    low = q[0];
+                }
+                else if constexpr (I < 64) {
+                    high = __shiftright128(q[1], q[2], I);
+                    low = __shiftright128(q[0], q[1], I);
+                }
             }
             else { // error
                 FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
@@ -816,10 +833,10 @@ public:
 
         // Simple and common case, the value is an exponent of 2
         // Convert to a much faster shift operation
-        Double d(x);
+        const Double d(x);
         if (0 == d.f) {
             sign ^= d.s;
-            int32_t e = (int32_t)d.e - 1023;
+            const int32_t e = static_cast<int32_t>(d.e) - 1023;
             return (e >= 0) ? *this >>= e : *this <<= -e;
         }
 
@@ -845,8 +862,8 @@ public:
         // num or denom are fractions
         // x mod y =  x - y * floor(x/y)
         // do the division in with positive numbers
-        uint64_t nom[4] = { 0, 0, low, high };
-        uint64_t denom[2] = { other.low, other.high };
+        const uint64_t nom[4] = { 0, 0, low, high };
+        const uint64_t denom[2] = { other.low, other.high };
         uint64_t q[4]{};
         uint64_t r[2]{}; // same size as the denominator
         if (0 == div_32bit((uint32_t*)q, (uint32_t*)r, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
@@ -861,7 +878,7 @@ public:
             // Fraction result - remainder is non zero.
             else {
                 if constexpr (FP128_CPP_STYLE_MODULO) {
-                    bool this_was_positive = is_positive();
+                    const bool this_was_positive = is_positive();
                     *this -= other * floor(x_div_y);
                     // this was positive, return positive modulo
                     if (this_was_positive) {
@@ -907,7 +924,7 @@ public:
             return *this;
         // 0-64 bit shift - most common
         if (shift <= 64) {
-            low = shift_right128_round(low, high, (uint8_t)shift);
+            low = shift_right128_round(low, high, shift);
             high >>= shift;
         }
         else if (shift >= 128) {
@@ -1259,9 +1276,9 @@ public:
      * A value of 2.1 would return 1, [0.5,1.0) would return -1.
      * @return Exponent of the number
     */
-    __forceinline int32_t get_exponent() const
+    __forceinline int32_t get_exponent() const noexcept
     {
-        int32_t s = (int32_t)lzcnt128(*this);
+        const int32_t s = static_cast<int32_t>(lzcnt128(*this));
         return I - 1 - s;
     }
     /**
@@ -1321,13 +1338,13 @@ public:
     // Binary math operators
     //
     /**
-     * @brief Adds the right hand side operand to this object to and returns the result.
+     * @brief Adds 2 values and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
-     * @return Temporary object with the result of the operation
+     * @return Result of the operation
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator+(fixed_point128 lhs, const T& rhs) {
+    friend __forceinline fixed_point128 operator+(fixed_point128 lhs, const T& rhs) noexcept {
         return lhs += rhs;
     }
     /**
@@ -1337,7 +1354,7 @@ public:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator-(fixed_point128 lhs, const T& rhs) {
+    friend __forceinline fixed_point128 operator-(fixed_point128 lhs, const T& rhs) noexcept {
         return lhs -= rhs;
     }
     /**
@@ -1347,7 +1364,7 @@ public:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator*(fixed_point128 lhs, const T& rhs) {
+    friend __forceinline fixed_point128 operator*(fixed_point128 lhs, const T& rhs) noexcept {
         return lhs *= rhs;
     }
     /**
@@ -1370,6 +1387,11 @@ public:
     friend __forceinline fixed_point128 operator%(fixed_point128 lhs, const T& rhs) {
         return lhs %= rhs;
     }
+    
+    //
+    // Binary math operators
+    //
+
     /**
      * @brief Performs bitwise AND (&)
      * @param lhs left hand side operand
@@ -1404,6 +1426,7 @@ public:
     //
     // Floating point style functions, implemented as friend functions
     //
+
     /**
      * @brief Returns the absolute value
      * @param x Fixed_point128 object
@@ -1479,7 +1502,7 @@ public:
      * @param y Denominator
      * @return A fixed_point128 holding the modulo value.
     */
-    friend FP128_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y) noexcept
+    friend FP128_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y)
     {
         return x % y;
     }
@@ -2037,5 +2060,7 @@ public:
 
 
 } //namespace fp128
+
+#pragma warning(pop)
 
 #endif // #ifndef FIXED_POINT128_H
