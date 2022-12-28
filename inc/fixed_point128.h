@@ -820,7 +820,11 @@ public:
     */
     template<typename T>
     __forceinline fixed_point128& operator/=(T x) {
-        return operator/=(static_cast<double>(x));
+        if constexpr (std::is_floating_point<T>::value) {
+            return operator/=(static_cast<double>(x));
+        }
+
+        return operator/=(fixed_point128(x));
     }
     /**
      * @brief Divide this object by x.
@@ -1697,12 +1701,14 @@ public:
     */
     friend FP128_INLINE fixed_point128 reciprocal(const fixed_point128& x) noexcept
     {
-        fixed_point128 one = 1, two = 2;
+        static const fixed_point128 one = 1, two = 2;
+        static const fixed_point128 xy_max = one + (fixed_point128::epsilon() << 1);
+        static const fixed_point128 xy_min = one - (fixed_point128::epsilon() << 1);
         constexpr int max_iterations = 6;
         auto expo = x.get_exponent();
         fixed_point128 y, absx = fabs(x);
         if (expo >= 0) {
-            expo += (absx >> expo) > 0.5;
+            expo += (absx >> expo) > 1.5; // (absx >> expo) is in the range [1.0, 2.0). Choose the closest exponent
             y = one >> expo;
         }
         else {
@@ -1714,12 +1720,16 @@ public:
         // infinity, overflow or underflow
         if (!y)
             return y; 
-
+        
+        fixed_point128 xy;
         // Newton iterations:
-        for (int i = 0; i < max_iterations; ++i) {
-            fixed_point128 xy = x * y;
+        int i = 0;
+        for (; i < max_iterations && (xy < xy_min || xy > xy_max); ++i) {
+            xy = x * y;
             y = y * (two - xy);
         }
+
+        printf("reciprocal took %i iterations for %.10lf\n", i, static_cast<double>(x));
 
         fixed_point128 res = y;
         return res;
