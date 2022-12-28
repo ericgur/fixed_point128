@@ -1253,10 +1253,12 @@ public:
             "3025077322201142338266566396443428743",  // e^84
             "8223012714622913510304328016407774696",  // e^85
             "22352466037347150474430657323327147400", // e^86
-            "60760302250568721495223289381302760756"  // e^87
+            "60760302250568721495223289381302760756", // e^87
+            "165163625499399482076757134095306194944" // e^88
         };
         static constexpr uint64_t lan_table_len = array_length(lan_table);
         if (x < 3) return 0;
+        if (x >= lan_table[lan_table_len - 1]) return lan_table_len - 1;
 
         // binary search the result
         uint64_t l = 0, h = lan_table_len - 1, res = (h + l) >> 1;
@@ -1284,7 +1286,7 @@ public:
         static constexpr uint64_t log10_max = 38;
         static uint128_t log10_table[log10_max + 1]; // holds all log10 values for multiples of 10
         // initialize the table
-        if (!log10_table[38]) {
+        if (!log10_table[log10_max]) {
             log10_table[0] = 1ull;
             for (uint32_t i = 1u; i <= log10_max; ++i) {
                 log10_table[i] = log10_table[i - 1] * 10ull;
