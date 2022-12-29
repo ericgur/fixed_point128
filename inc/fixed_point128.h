@@ -1705,31 +1705,21 @@ public:
         static const fixed_point128 xy_max = one + (fixed_point128::epsilon() << 1);
         static const fixed_point128 xy_min = one - (fixed_point128::epsilon() << 1);
         constexpr int max_iterations = 6;
-        auto expo = x.get_exponent();
-        fixed_point128 y, absx = fabs(x);
-        if (expo >= 0) {
-            expo += (absx >> expo) > 1.5; // (absx >> expo) is in the range [1.0, 2.0). Choose the closest exponent
-            y = one >> expo;
-        }
-        else {
-            expo += (absx << -expo) > 1.5;
-            y = one << -expo;
-        }
-        
-        y.sign = x.sign;
-        // infinity, overflow or underflow
+        fixed_point128 y = 1.0 / static_cast<double>(x);
+
         if (!y)
             return y; 
         
-        fixed_point128 xy;
+        fixed_point128 xy, y_prev;
         // Newton iterations:
         int i = 0;
-        for (; i < max_iterations && (xy < xy_min || xy > xy_max); ++i) {
+        for (; i < max_iterations && (y_prev != y) && (xy < xy_min || xy > xy_max); ++i) {
+            y_prev = y;
             xy = x * y;
             y = y * (two - xy);
         }
 
-        printf("reciprocal took %i iterations for %.10lf\n", i, static_cast<double>(x));
+        //printf("reciprocal took %i iterations for %.10lf\n", i, static_cast<double>(x));
 
         fixed_point128 res = y;
         return res;
