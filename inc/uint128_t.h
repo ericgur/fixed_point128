@@ -688,7 +688,7 @@ public:
             return *this;
         // 1-64 bit shift - most common
         if (shift < 64) {
-            low = __shiftright128(low, high, shift);
+            low = __shiftright128(low, high, static_cast<uint8_t>(shift));
             high >>= shift;
         }
         else {
@@ -706,7 +706,7 @@ public:
         if (shift < 1)
             return *this;
         if (shift < 64) {
-            high = __shiftleft128(low, high, shift);
+            high = __shiftleft128(low, high, static_cast<uint8_t>(shift));
             low <<= shift;
         }
         else {
