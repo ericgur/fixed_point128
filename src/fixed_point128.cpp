@@ -569,6 +569,9 @@ void bench()
     ips = (uint64_t)(iterations / totalTime);
     print_ips("Division by int", ips);
 
+    // even slower
+    iterations /= 10;
+
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
         f3 = f1 / f2;
@@ -578,7 +581,7 @@ void bench()
     print_ips("Division by fixed_point128", ips);
 
     // even slower
-    iterations /= 10;
+    iterations /= 5;
 
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)
