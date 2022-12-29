@@ -1549,26 +1549,17 @@ public:
     */
     friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x, uint32_t iterations = 3) noexcept
     {
+        static const fixed_point128 factor = "0.70710678118654752440084436210484903928483593768847403658833981"; // sqrt(2) / 2
+
         if (x.sign || !x)
             return 0;
-        fixed_point128 root;
-        static const fixed_point128 A = "0.41730759963886499890887997563983148154050544649511960252715318";
-        static const fixed_point128 B = "0.59016206709064458299663118037100097432703047929336615665205464";
-        static const fixed_point128 factor = "0.70710678118654752440084436210484903928483593768847403658833981"; // sqrt(2) / 2
-        int32_t expo;
-        /*
-        * The A and B constants represent a polynom that approximates value of sqrt(x) when 0.5 <= x < 1.0
-        * sqrt(x) ~= A + Bx
-        * This allows a very good first guess for Newton's method to converge quickly.
-        */
 
         // normalize the input to the range [0.5, 1)
-        expo = x.get_exponent() + 1;
+        int32_t expo = x.get_exponent() + 1;
         fixed_point128 norm_x = (expo > 0) ? x >> expo : x << -expo;
         
-        // get square root of the normalized number
-        // generate a first guess
-        root = A + B * norm_x;
+        // use existing HW to provide an excellent first estimate.
+        fixed_point128 root = sqrt(static_cast<double>(norm_x));
 
         // iterate several times via Newton's method
         //
@@ -1576,7 +1567,7 @@ public:
         // Xn+1 = 0.5 * (---- + Xn )
         //                Xn
         for (auto i = iterations; i != 0; --i) {
-            root = (norm_x / root + root) >> 1;
+            root = (norm_x * reciprocal(root) + root) >> 1;
         }
 
         if (expo & 1) {
@@ -1585,13 +1576,10 @@ public:
         }
 
         // Denormalize the result
-        if (expo > 0) {
+        if (expo > 0)
             root <<= (expo + 1) / 2;
-        }
         else if (expo < 0)
-        {
             root >>= -expo / 2;
-        }
 
         return root;
     }
@@ -1605,7 +1593,7 @@ public:
         if (x.sign || !x)
             return 0;
 
-        fixed_point128 ul = 0, ll = 0, t = 0, e(1, 0, 0);
+        fixed_point128 ul = 0, ll = 0, t = 0, e = fixed_point128::epsilon();
         int32_t s = 0;
         ul.low = 1ull;
         s = (x.high != 0) ? 128 - (int32_t)__lzcnt64(x.high) : 64 - (int32_t)__lzcnt64(x.low);
