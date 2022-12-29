@@ -107,7 +107,7 @@ private:
     static inline const double upper_unity = ::pow(2, 64 - F);     // convert upper QWORD to floating point
     static inline const double lower_unity = ::pow(2, -F);         // convert lower QWORD to floating point
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits; // mask of the integer bits in the upper QWORD
-    static constexpr int32_t max_frac_digits = (int)(1 + F / 3.1);      // meaningful base 10 digits for the fraction
+    static constexpr int32_t max_frac_digits = (int)(F / 3.3);          // meaningful base 10 digits for the fraction
 public:
     static constexpr uint64_t max_int_value = int_mask >> upper_frac_bits;
     typedef fixed_point128<I> type;
@@ -271,6 +271,51 @@ public:
      * @param x Input string
     */
     fixed_point128(const char* x) noexcept {
+        static fixed_point128<1> base10_table[] = {
+        //  {low QWORD,             high QWORD,         sign}
+            {0x0000000000000000ull, 0x8000000000000000ull, 0},  // 10^0, not used, makes the code simpler
+            {0xCCCCCCCCCCCCCCCCull, 0x0CCCCCCCCCCCCCCCull, 0},  // 10^-1
+            {0x147AE147AE147AE1ull, 0x0147AE147AE147AEull, 0},  // 10^-2
+            {0xCED916872B020C49ull, 0x0020C49BA5E353F7ull, 0},  // 10^-3
+            {0x94AF4F0D844D013Aull, 0x000346DC5D638865ull, 0},  // 10^-4
+            {0xC21187E7C06E19B9ull, 0x000053E2D6238DA3ull, 0},  // 10^-5
+            {0xC69B5A63F9A49C2Cull, 0x000008637BD05AF6ull, 0},  // 10^-6
+            {0x7A42BC3D32907604ull, 0x000000D6BF94D5E5ull, 0},  // 10^-7
+            {0x8C39DF9FB841A566ull, 0x00000015798EE230ull, 0},  // 10^-8
+            {0xDAD2965CC5A02A23ull, 0x0000000225C17D04ull, 0},  // 10^-9
+            {0xAF7B756FAD5CD103ull, 0x0000000036F9BFB3ull, 0},  // 10^-10
+            {0x5E592557F7BC7B4Dull, 0x00000000057F5FF8ull, 0},  // 10^-11
+            {0x096F5088CBF93F87ull, 0x00000000008CBCCCull, 0},  // 10^-12
+            {0x3424BB40E132865Aull, 0x00000000000E12E1ull, 0},  // 10^-13
+            {0xB86A12B9B01EA709ull, 0x0000000000016849ull, 0},  // 10^-14
+            {0x5F3DCEAC2B3643E7ull, 0x0000000000002407ull, 0},  // 10^-15
+            {0x5652FB1137856D30ull, 0x000000000000039Aull, 0},  // 10^-16
+            {0x3BD5191B525A2484ull, 0x000000000000005Cull, 0},  // 10^-17
+            {0x392EE8E921D5D073ull, 0x0000000000000009ull, 0},  // 10^-18
+            {0xEC1E4A7DB69561A5ull, 0x0000000000000000ull, 0},  // 10^-19
+            {0x179CA10C9242235Dull, 0x0000000000000000ull, 0},  // 10^-20
+            {0x025C768141D369EFull, 0x0000000000000000ull, 0},  // 10^-21
+            {0x003C7240202EBDCBull, 0x0000000000000000ull, 0},  // 10^-22
+            {0x00060B6CD004AC94ull, 0x0000000000000000ull, 0},  // 10^-23
+            {0x00009ABE14CD4475ull, 0x0000000000000000ull, 0},  // 10^-24
+            {0x00000F79687AED3Eull, 0x0000000000000000ull, 0},  // 10^-25
+            {0x0000018C240C4AECull, 0x0000000000000000ull, 0},  // 10^-26
+            {0x000000279D346DE4ull, 0x0000000000000000ull, 0},  // 10^-27
+            {0x00000003F61ED7CAull, 0x0000000000000000ull, 0},  // 10^-28
+            {0x0000000065697BFAull, 0x0000000000000000ull, 0},  // 10^-29
+            {0x000000000A2425FFull, 0x0000000000000000ull, 0},  // 10^-30
+            {0x0000000001039D66ull, 0x0000000000000000ull, 0},  // 10^-31
+            {0x000000000019F623ull, 0x0000000000000000ull, 0},  // 10^-32
+            {0x000000000002989Dull, 0x0000000000000000ull, 0},  // 10^-33
+            {0x0000000000004276ull, 0x0000000000000000ull, 0},  // 10^-34
+            {0x00000000000006A5ull, 0x0000000000000000ull, 0},  // 10^-35
+            {0x00000000000000AAull, 0x0000000000000000ull, 0},  // 10^-36
+            {0x0000000000000011ull, 0x0000000000000000ull, 0},  // 10^-37
+            {0x0000000000000001ull, 0x0000000000000000ull, 0}   // 10^-38    
+        };
+        constexpr uint64_t base10_table_size = array_length(base10_table);
+        static_assert(max_frac_digits < base10_table_size);
+
         low = high = 0;
         sign = 0;
         if (x == nullptr) return;
@@ -307,17 +352,14 @@ public:
 
         p = dec + 1;
         int32_t digits = 0;
-        fixed_point128<1> base(0xCCCCCCCCCCCCCCCD, 0x0CCCCCCCCCCCCCCC, 0); // maximum precision to represent 0.1
-        fixed_point128<1> step = base;
         fixed_point128<1> frac;
-        // multiply each digits by 0.1**n
-        while (digits++ < max_frac_digits && *p != '\0' && base) {
-            fixed_point128<1> temp = base * (p[0] - '0');
-            const uint8_t carry = _addcarry_u64(0, frac.low, temp.low, &frac.low);
-            frac.high += temp.high + carry;
-            base *= step;
+        // multiply each digits by 10^-n
+        while (++digits < base10_table_size && isdigit(*p)) {
+            uint32_t d = static_cast<uint64_t>(p[0] - '0');
+            frac += base10_table[digits] * d;
             ++p;
-        }        
+        }
+
         frac >>= (I - 1);
         low = frac.low;
         high = frac.high + int_val;
@@ -388,13 +430,13 @@ public:
             // shift left by I2 - I bits
             constexpr int shift = I2 - I;
             low = other.low << shift;
-            high = shift_left128(other.low, other.high, static_cast<uint8_t>(64 - shift));
+            high = shift_left128(other.low, other.high, shift);
         }
         // other has more integer bits and less fraction bits
         else { // I > I2
             // shift right by I - I2 bits
             constexpr int shift = I - I2;
-            low = shift_right128_round(other.low, other.high, static_cast<uint8_t>(shift));
+            low = shift_right128_round(other.low, other.high, shift);
             high = other.high >> shift;
         }
 
