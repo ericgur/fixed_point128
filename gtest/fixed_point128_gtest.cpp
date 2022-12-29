@@ -86,7 +86,7 @@ TEST(fixed_point128, ConstructorFromString) {
         fixed_point128<20> f = values[i];
         double d1 = strtod(values[i], nullptr);
         double d2 = strtod(static_cast<char*>(f), nullptr);
-        EXPECT_DOUBLE_EQ(d1, d2);
+        EXPECT_DOUBLE_EQ(d1, d2) << "value=" << values[i];
     }
 }
 TEST(fixed_point128, CopyConstructor) {
@@ -95,7 +95,7 @@ TEST(fixed_point128, CopyConstructor) {
         double value = get_double_random();
         fixed_point128<20> f1 = value;
         fixed_point128<20> f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
     }
 }
 TEST(fixed_point128, MoveConstructor) {
@@ -104,7 +104,7 @@ TEST(fixed_point128, MoveConstructor) {
         double value = get_double_random();
         fixed_point128<20> f1 = value;
         fixed_point128<20> f2(std::move(f1));
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
     }
 }
 TEST(fixed_point128, AssignmentOperator) {
@@ -114,27 +114,29 @@ TEST(fixed_point128, AssignmentOperator) {
         fixed_point128<20> f1 = value;
         fixed_point128<20> f2;
         f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
     }
 }
 TEST(fixed_point128, AssignmentOperatorOtherType) {
     srand(RANDOM_SEED); 
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random();
+        double value = get_double_random(-50, 18);
         fixed_point128<20> f1 = value;
         fixed_point128<22> f2;
         f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
+        f1 = f2;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
     }
 }
 TEST(fixed_point128, MoveAssignmentOperator) {
     srand(RANDOM_SEED); 
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random();
+        double value = get_double_random(-50, 18);
         fixed_point128<20> f1 = value;
         fixed_point128<20> f2;
         f2 = std::move(f1);
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
     }
 }
 TEST(fixed_point128, CopyConstructorOtherType) {
@@ -143,7 +145,9 @@ TEST(fixed_point128, CopyConstructorOtherType) {
         double value = get_double_random();
         fixed_point128<20> f1 = value;
         fixed_point128<22> f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
+        fixed_point128<20> f3 = f2;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f2), static_cast<double>(f3)) << "value=" << value;
     }
 }
 TEST(fixed_point128, AddSameSign) {

@@ -147,7 +147,7 @@ public:
             // shift left by I2 - I bits
             constexpr int shift = I2 - I;
             low = other.low << shift;
-            high = shift_left128(other.low, other.high, 64 - shift);
+            high = shift_left128(other.low, other.high, shift);
         }
         // other has more integer bits and less fraction bits
         else { // I > I2
