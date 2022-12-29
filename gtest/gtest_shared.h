@@ -36,7 +36,7 @@ namespace fp128 {
 
 __forceinline int32_t get_random_sign()
 {
-    return (rand() > (RAND_MAX >> 1)) ? -1 : 1;
+    return (rand() & 1) ? 1 : -1;
 }
 
 // returns a random number
@@ -46,7 +46,7 @@ double static get_double_random(int32_t min_exponent = -10, int32_t max_exponent
     int expo = (get_uint32_random() % (max_exponent - min_exponent)) + min_exponent;
     res.e = (uint64_t)expo + 1023; 
     res.f = get_uint64_random();
-    res.s = get_random_sign();
+    res.s = get_random_sign() == 1;
     return res.val;
 }
 

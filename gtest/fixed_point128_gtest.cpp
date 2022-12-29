@@ -627,8 +627,8 @@ TEST(fixed_point128, DivideByUnsignedInt64) {
 TEST(fixed_point128, ModuloByFP128) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
-        double value2 = get_double_random();
+        double value1 = get_double_random(-1, 39);
+        double value2 = get_double_random(-1, 39);
         //printf("%u\n", i);
         double res = value1 / value2;
         if (value2 == 0)
@@ -650,8 +650,8 @@ TEST(fixed_point128, ModuloByFP128) {
 TEST(fixed_point128, ModuloByDouble) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
-        double value2 = get_double_random();
+        double value1 = get_double_random(-1, 39);
+        double value2 = get_double_random(-1, 39);
         double res = fmod(value1, value2);
         if (value2 == 0)
             continue;
@@ -671,8 +671,8 @@ TEST(fixed_point128, ModuloByDouble) {
 TEST(fixed_point128, ModuloByFloat) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        float value1 = (float)get_double_random();
-        float value2 = (float)get_double_random();
+        float value1 = (float)get_double_random(-1, 39);
+        float value2 = (float)get_double_random(-1, 39);
         if (value2 == 0)
             continue;
         float res = fmodf(value1, value2);
@@ -691,7 +691,7 @@ TEST(fixed_point128, ModuloByFloat) {
 TEST(fixed_point128, ModuloByInt32) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
+        double value1 = get_double_random(-1, 39);
         int32_t value2 = get_int32_random();
         double res = fmod(value1, value2); 
         if (value2 == 0)
@@ -1112,14 +1112,12 @@ TEST(fixed_point128, ShiftLeft) {
 TEST(fixed_point128, reciprocal) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random(-15, 15);
-        double res = 1.0 / value1;
-        fixed_point128<16> f1 = value1;
+        double value = get_double_random(-15, 15);
+        double res = 1.0 / value;
+        fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = reciprocal(f1);
-        if (check_overflow(value1, f1) || check_overflow(res, f1))
-            continue;
 
-        EXPECT_DOUBLE_EQ(fp128_res, res) << "reciprocal: " << "value1=" << value1;
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "reciprocal: " << "value=" << value;
     }
 }
 
