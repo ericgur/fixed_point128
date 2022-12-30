@@ -1376,6 +1376,7 @@ public:
         static const fixed_point128 epsilon(1, 0, 0);
         return epsilon;
     }
+
     //
     // End of class method implementation
     //
@@ -1712,39 +1713,23 @@ public:
         return res;
     }
     /**
-     * @brief Calculate the sine function
-     * Using the Maclaurin series expansion, the formula is:
-     * sin(x) = x - (x^3 / 3!) + (x^5 / 5!) - (x^7 / 7!) + ...
-     * 
-     * @param x value in Radians
-     * @return Sine of x
-    */
-    friend FP128_INLINE fixed_point128 sin(const fixed_point128& x) noexcept
+         * @brief Calculate the sine function over a limited range [0, 0.5pi]
+         * Using the Maclaurin series expansion, the formula is:
+         *              x^3   x^5   x^7
+         * sin(x) = x - --- + --- - --- + ...
+         *               3!    5!    7!
+         * @param x value in Radians in the range [0, 0.5pi]
+         * @return Sine of x
+        */
+    friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
-        static const fixed_point128 pi = fixed_point128::pi();
-        static const fixed_point128 pi2 = pi << 1; // 2 * pi
-        static const fixed_point128 half_pi = pi >> 1; // pi / 2
+        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
+        assert(x >= 0 && x <= (fixed_point128::pi() >> 1));
 
-        // first part of the series
-        fixed_point128 res = x;
-        // move to the range  [-pi, pi]
-        if (res > pi || res < -pi) {
-            res = fmod(x, pi2);
-            if (res > pi)
-                res -= pi2;
-        }
+        // first part of the series is just 'x'
+        const fixed_point128 xx = x * x;
+        fixed_point128 elem_denom, elem_nom = x;
 
-        // bring closest to zero as possible to minimize the error
-        // move to the range [-1/2pi, 1/2pi]
-        if (res > half_pi)
-            res = pi - res;
-        else if (res < -half_pi)
-            res = -(pi + res);
-        
-        const fixed_point128 xx = res * res;
-        fixed_point128 elem_denom, elem_nom = res;
-        
         // compute the rest of the series, starting with: -(x^3 / 3!)
         for (int i = 3, sign = 1; ; i += 2, sign = 1 - sign) {
             elem_nom *= xx;
@@ -1753,10 +1738,52 @@ public:
             // precision limit has been hit
             if (!elem)
                 break;
-            res += (sign) ? -elem : elem;
+            x += (sign) ? -elem : elem;
         }
 
-        return res;
+        return x;
+    }
+
+    /**
+     * @brief Calculate the sine function
+     * Using the Maclaurin series expansion, the formula is:
+     * sin(x) = x - (x^3 / 3!) + (x^5 / 5!) - (x^7 / 7!) + ...
+     * 
+     * @param x value in Radians
+     * @return Sine of x
+    */
+    friend FP128_INLINE fixed_point128 sin(fixed_point128 x) noexcept
+    {
+        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
+        static const fixed_point128 pi = fixed_point128::pi();
+        static const fixed_point128 pi2 = pi << 1; // 2 * pi
+        static const fixed_point128 half_pi = pi >> 1; // pi / 2
+
+        //save the sign and work with positive value
+        uint32_t result_sign = 0;
+
+        // move to the range  [0, 2pi)
+        if (x >= pi2 || x.is_negative()) {
+            x = fmod(x, pi2);
+            if (x.is_negative()) x += pi2;
+        }
+
+        // move to the range  [0, pi)
+        // sin(x + pi) = -sin(x) == sin(-x)
+        if (x >= pi) {
+            x -= pi;
+            result_sign = 1;
+        }
+
+        // move to the range [0, 0.5pi]
+        // sin(x) = sin(pi - x)
+        if (x > half_pi)
+            x = pi - x;
+        
+        // call the limited range function
+        x = sin1(x);
+        x.sign = result_sign;
+        return x;
     }
     /**
      * @brief Calculate the inverse sine function
@@ -1793,32 +1820,30 @@ public:
      * @param x value in Radians
      * @return Cosine of x
     */
-    friend FP128_INLINE fixed_point128 cos(const fixed_point128& x) noexcept
+    friend FP128_INLINE fixed_point128 cos(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cos()!");
         static const fixed_point128 pi = fixed_point128::pi();
         static const fixed_point128 pi2 = pi << 1; // 2 * pi
         static const fixed_point128 half_pi = pi >> 1; // pi / 2
 
-        // first part of the series
-        fixed_point128 res = x;
         // move to the range  [-pi, pi]
-        if (res > pi || res < -pi) {
-            res = fmod(x, pi2);
-            if (res > pi)
-                res -= pi2;
+        if (x > pi || x < -pi) {
+            x = fmod(x, pi2);
+            if (x > pi)
+                x -= pi2;
         }
 
         // bring closest to zero as possible to minimize the error
         // move to the range [-1/2pi, 1/2pi]
-        if (res > half_pi)
-            res = pi - res;
-        else if (res < -half_pi)
-            res = -(pi + res);
+        if (x > half_pi)
+            x = pi - x;
+        else if (x < -half_pi)
+            x = -(pi + x);
 
-        const fixed_point128 xx = res * res;
-        res = fixed_point128::one(); // first element in the series
-        fixed_point128 elem_denom, elem_nom = res;
+        const fixed_point128 xx = x * x;
+        x = fixed_point128::one(); // first element in the series
+        fixed_point128 elem_denom, elem_nom = x;
 
         // compute the rest of the series starting with: -(x^2 / 2!)
         for (int i = 2, sign = 1; ; i += 2, sign = 1 - sign) {
@@ -1828,10 +1853,10 @@ public:
             // precision limit has been hit
             if (!elem)
                 break;
-            res += (sign) ? -elem : elem;
+            x += (sign) ? -elem : elem;
         }
 
-        return res;
+        return x;
     }
     /**
      * @brief Calculate the inverse cosine function
