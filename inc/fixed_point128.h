@@ -1857,14 +1857,8 @@ public:
         // can be implemented using arctan:
         // ArcCos(x) = ArcTan(sqrt(1 - sqr(X)) / x)
         constexpr int max_iterations = 6;
-
-        // can be implemented using arctan:
-        // ArcSin(x) = ArcTan (x / sqrt(1 - sqr (X)))
         if (x < -1 || x > 1) return 0;
 
-        // work with postive numbers
-        auto sign = x.sign;
-        x.sign = 0;
         // Xn+1 = Xn + (cos(Xn) - a) / sin(Xn)
         // where 'a' is the argument, each iteration will converge on the result if the initial
         //  estimate is close enough.
@@ -1874,7 +1868,6 @@ public:
             res += e;
         }
 
-        res.sign = sign;
         return res;
     }
     /**
