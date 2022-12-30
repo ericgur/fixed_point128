@@ -1763,27 +1763,26 @@ public:
      * @param x value in the range [-1,1]
      * @return Inverse sine of x
     */
-    friend FP128_INLINE fixed_point128 asin(const fixed_point128& x) noexcept
+    friend FP128_INLINE fixed_point128 asin(fixed_point128 x) noexcept
     {
-        if (x < -1 || x > 1) return 0;
-
         constexpr int max_iterations = 6;
+
+        // can be implemented using arctan:
+        // ArcSin(x) = ArcTan (x / sqrt(1 - sqr (X)))
+        if (x < -1 || x > 1) return 0;
 
         // Xn+1 = Xn - ( (sin (Xn) - a) / cos(Xn) )
         // where 'a' is the argument, each iteration will converge on the result if the initial
         //  estimate is close enough.
-        fixed_point128 absx = fabs(x);
-        fixed_point128 res = ::asin(static_cast<double>(absx));
+        auto sign = x.sign;
+        x.sign = 0;
+        fixed_point128 res = ::asin(static_cast<double>(x));
         for (int i = 0; i < max_iterations; ++i) {
-            fixed_point128 e = sin(res);
-            e -= absx; 
-            e /= cos(res); //((sin(res) - absx) / cos(res));
-            res = res - e;
+            fixed_point128 e = (sin(res) - x) / cos(res);
+            res -= e;
         }
 
-
-
-        res.sign = x.sign;
+        res.sign = sign;
         return res;
     }
     /**
@@ -1825,11 +1824,10 @@ public:
         for (int i = 2, sign = 1; ; i += 2, sign = 1 - sign) {
             elem_nom *= xx;
             fact_reciprocal(i, elem_denom);
-            
-            // precision limit has been hit
-            if (!elem_denom)
-                break;
             fixed_point128 elem = elem_nom * elem_denom; // next element in the series
+            // precision limit has been hit
+            if (!elem)
+                break;
             res += (sign) ? -elem : elem;
         }
 
@@ -1840,9 +1838,30 @@ public:
      * @param x value in the range [-1,1]
      * @return Inverse cosine of x
     */
-    friend FP128_INLINE fixed_point128 acos(const fixed_point128& x) noexcept
+    friend FP128_INLINE fixed_point128 acos(fixed_point128 x) noexcept
     {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // can be implemented using arctan:
+        // ArcCos(x) = ArcTan(sqrt(1 - sqr(X)) / x)
+        constexpr int max_iterations = 6;
+
+        // can be implemented using arctan:
+        // ArcSin(x) = ArcTan (x / sqrt(1 - sqr (X)))
+        if (x < -1 || x > 1) return 0;
+
+        // work with postive numbers
+        auto sign = x.sign;
+        x.sign = 0;
+        // Xn+1 = Xn + (cos(Xn) - a) / sin(Xn)
+        // where 'a' is the argument, each iteration will converge on the result if the initial
+        //  estimate is close enough.
+        fixed_point128 res = ::acos(static_cast<double>(x));
+        for (int i = 0; i < max_iterations; ++i) {
+            fixed_point128 e = (cos(res) - x) / sin(res);
+            res += e;
+        }
+
+        res.sign = sign;
+        return res;
     }
     /**
      * @brief Calculate the tangent function
@@ -1860,9 +1879,53 @@ public:
      * @param x value in the range [-0.5pi,0.5pi]
      * @return Tangent of x
     */
-    friend FP128_INLINE fixed_point128 atan(const fixed_point128& x) noexcept
+    friend FP128_INLINE fixed_point128 atan(fixed_point128 x) noexcept
     {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // constants for segmentation
+        static const fixed_point128 halfpi = fixed_point128::pi() / 2;
+        static const fixed_point128 b = fixed_point128::pi() / 6;
+        static const fixed_point128 k = tan(b);
+        static const fixed_point128 b0 = b >> 1; // pi / 12
+        static const fixed_point128 k0 = tan(b0);
+        
+        // constants for rational polynomial
+        static const fixed_point128 A = 0.999999020228907;
+        static const fixed_point128 B = 0.257977658811405;
+        static const fixed_point128 C = 0.59120450521312;
+        fixed_point128 ang;
+        fixed_point128 x2;
+        bool comp = false;
+        bool hi_seg = false;
+        // make argument positive, save the sign
+        auto sign = x.sign;
+        x.sign = 0;
+
+        // limit argument to 0..1
+        if (x > 1) {
+            comp = true;
+            x = reciprocal(x);
+        }
+        // determine segmentation
+        if (x > k0) {
+            hi_seg = true;
+            x = (x - k) / (1 + k * x);
+        }
+        /* argument is now < tan(15 degrees)
+        * approximate the function
+        */
+        x2 = x * x;
+        ang = x * (A + B * x2) / (1 + C * x2);
+        // now restore offset if needed
+        if (hi_seg)
+            ang += b;
+        // restore complement if needed
+        if (comp)
+            ang = halfpi - ang;
+        // restore sign if needed
+        if (sign)
+            return -ang;
+        else
+            return ang;
     }
     /**
      * @brief Calculates the exponent of x: e^x

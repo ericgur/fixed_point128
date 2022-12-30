@@ -370,8 +370,9 @@ void test_functions()
     }
 
     fixed_point128<4> fvalues[] = {
-        fixed_point128<4>::pi(),
+        0,
         fixed_point128<4>::pi() >> 1,
+        -fixed_point128<4>::pi() >> 1,
         fixed_point128<4>::pi() >> 2,
         (-fixed_point128<4>::pi()) >> 2
     };
@@ -381,14 +382,16 @@ void test_functions()
     for (int i = 0; i < len; ++i) {
         f4 = fvalues[i];
         s = f4;
-        printf("f4: %s\n", s.c_str());
+        printf("f4 (value): %s\n", s.c_str());
         fixed_point128<16> res = sin(f4);
         printf("sin(f4): %s\n", (char*)res);
         s = asin(res);
         printf("asin(%s): %s\n", (char*)res, s.c_str());
 
-        s = cos(f4);
-        printf("cos(f4): %s\n", s.c_str());
+        res = cos(f4);
+        printf("cos(f4): %s\n", (char*)res);
+        s = acos(res);
+        printf("acos(%s): %s\n", (char*)res, s.c_str());
     }
     
     fixed_point128<16> fvalues2[] = {
