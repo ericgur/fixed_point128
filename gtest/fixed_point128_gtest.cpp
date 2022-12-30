@@ -1120,7 +1120,6 @@ TEST(fixed_point128, reciprocal) {
         double res = 1.0 / value;
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = reciprocal(f1);
-
         EXPECT_DOUBLE_EQ(fp128_res, res) << "reciprocal: " << "value=" << value;
     }
 }
@@ -1128,15 +1127,12 @@ TEST(fixed_point128, sin) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-1, 2);
-        //value = -2.3505350060521568; //TODO remove
         double res = ::sin(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = sin(f1);
-
         EXPECT_DOUBLE_EQ(fp128_res, res) << "sin: " << "value=" << value;
     }
 }
-
 TEST(fixed_point128, cos) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -1144,8 +1140,26 @@ TEST(fixed_point128, cos) {
         double res = cos(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = cos(f1);
-
         EXPECT_DOUBLE_EQ(fp128_res, res) << "cos: " << "value=" << value;
     }
 }
-
+TEST(fixed_point128, asin) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-20, -1);
+        double res = ::asin(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = asin(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "asin: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, acos) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-20, -1);
+        double res = acos(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = acos(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "cos: " << "value=" << value;
+    }
+}
