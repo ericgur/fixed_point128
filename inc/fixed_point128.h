@@ -1713,18 +1713,18 @@ public:
         return res;
     }
     /**
-         * @brief Calculate the sine function over a limited range [0, 0.5pi]
+         * @brief Calculate the sine function over a limited range [-0.5pi, 0.5pi]
          * Using the Maclaurin series expansion, the formula is:
          *              x^3   x^5   x^7
          * sin(x) = x - --- + --- - --- + ...
          *               3!    5!    7!
-         * @param x value in Radians in the range [0, 0.5pi]
+         * @param x value in Radians in the range [-0.5pi, 0.5pi]
          * @return Sine of x
         */
     friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
-        assert(x >= 0 && x <= (fixed_point128::pi() >> 1));
+        assert(fabs(x) <= (fixed_point128::pi() >> 1));
 
         // first part of the series is just 'x'
         const fixed_point128 xx = x * x;
@@ -1743,7 +1743,21 @@ public:
 
         return x;
     }
-
+    /**
+         * @brief Calculate the cosine function over a limited range [-0.5pi, 0.5pi]
+         * Since the sin1 function converges faster, call it with the modifed angle.
+         * @param x value in Radians in the range [-0.5pi, 0.5pi]
+         * @return Cosine of x
+        */
+    friend __forceinline fixed_point128 cos1(const fixed_point128& x) noexcept
+    {
+        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
+        static const fixed_point128 half_pi = fixed_point128::pi() >> 1; // pi / 2 
+        assert(fabs(x) <= half_pi);
+        return (x.is_positive()) ?
+            sin1(half_pi - x) :
+            -sin1(-half_pi - x);
+    }
     /**
      * @brief Calculate the sine function
      * Using the Maclaurin series expansion, the formula is:
@@ -1758,32 +1772,22 @@ public:
         static const fixed_point128 pi = fixed_point128::pi();
         static const fixed_point128 pi2 = pi << 1; // 2 * pi
         static const fixed_point128 half_pi = pi >> 1; // pi / 2
+        double round = (x.is_positive()) ? 0.5 : -0.5;
 
-        //save the sign and work with positive value
-        uint32_t result_sign = 0;
-
-        // move to the range  [0, 2pi)
-        if (x >= pi2 || x.is_negative()) {
-            x = fmod(x, pi2);
-            if (x.is_negative()) x += pi2;
+        int64_t n = static_cast<int64_t>((x / half_pi) + round);
+        x -= half_pi * n;
+        n = n & 3ull; // n mod 4
+        switch (n) {
+        case 0:  // [-45-45) degrees
+            return sin1(x);
+        case 1:  // [45-135) degrees
+            return cos1(x);
+        case 2:  // [135-225) degrees
+            return -sin1(x);
+        case 3:  // [225-315) degrees
+        default:
+            return -cos1(x);
         }
-
-        // move to the range  [0, pi)
-        // sin(x + pi) = -sin(x) == sin(-x)
-        if (x >= pi) {
-            x -= pi;
-            result_sign = 1;
-        }
-
-        // move to the range [0, 0.5pi]
-        // sin(x) = sin(pi - x)
-        if (x > half_pi)
-            x = pi - x;
-        
-        // call the limited range function
-        x = sin1(x);
-        x.sign = result_sign;
-        return x;
     }
     /**
      * @brief Calculate the inverse sine function
@@ -1826,37 +1830,22 @@ public:
         static const fixed_point128 pi = fixed_point128::pi();
         static const fixed_point128 pi2 = pi << 1; // 2 * pi
         static const fixed_point128 half_pi = pi >> 1; // pi / 2
+        double round = (x.is_positive()) ? 0.5 : -0.5;
 
-        // move to the range  [-pi, pi]
-        if (x > pi || x < -pi) {
-            x = fmod(x, pi2);
-            if (x > pi)
-                x -= pi2;
+        int64_t n = static_cast<int64_t>((x / half_pi) + round);
+        x -= half_pi * n;
+        n = n & 3ull; // n mod 4
+        switch (n) {
+        case 0:  // [-45-45) degrees
+            return cos1(x);
+        case 1:  // [45-135) degrees
+            return -sin1(x);
+        case 2:  // [135-225) degrees
+            return -cos1(x);
+        case 3:  // [225-315) degrees
+        default:
+            return sin1(x);
         }
-
-        // bring closest to zero as possible to minimize the error
-        // move to the range [-1/2pi, 1/2pi]
-        if (x > half_pi)
-            x = pi - x;
-        else if (x < -half_pi)
-            x = -(pi + x);
-
-        const fixed_point128 xx = x * x;
-        x = fixed_point128::one(); // first element in the series
-        fixed_point128 elem_denom, elem_nom = x;
-
-        // compute the rest of the series starting with: -(x^2 / 2!)
-        for (int i = 2, sign = 1; ; i += 2, sign = 1 - sign) {
-            elem_nom *= xx;
-            fact_reciprocal(i, elem_denom);
-            fixed_point128 elem = elem_nom * elem_denom; // next element in the series
-            // precision limit has been hit
-            if (!elem)
-                break;
-            x += (sign) ? -elem : elem;
-        }
-
-        return x;
     }
     /**
      * @brief Calculate the inverse cosine function
