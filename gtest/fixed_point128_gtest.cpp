@@ -1124,4 +1124,28 @@ TEST(fixed_point128, reciprocal) {
         EXPECT_DOUBLE_EQ(fp128_res, res) << "reciprocal: " << "value=" << value;
     }
 }
+TEST(fixed_point128, sin) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-1, 2);
+        //value = -2.3505350060521568; //TODO remove
+        double res = ::sin(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = sin(f1);
+
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "sin: " << "value=" << value;
+    }
+}
+
+TEST(fixed_point128, cos) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-1, 2);
+        double res = cos(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = cos(f1);
+
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "cos: " << "value=" << value;
+    }
+}
 

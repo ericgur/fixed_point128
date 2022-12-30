@@ -374,7 +374,9 @@ void test_functions()
         fixed_point128<4>::pi() >> 1,
         -fixed_point128<4>::pi() >> 1,
         fixed_point128<4>::pi() >> 2,
-        (-fixed_point128<4>::pi()) >> 2
+        (-fixed_point128<4>::pi()) >> 2,
+        fixed_point128<4>::pi() * 1.5,
+        (fixed_point128<4>::pi()) * -1.5
     };
 
     fixed_point128<16> f4;
