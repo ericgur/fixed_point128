@@ -366,7 +366,6 @@ void test_functions()
         printf("f2: %s\n", (char*)f2);
         printf("fmod(f1, f2): %s\n", (char*)fmod(f1, f2));
         printf("sqrt(f1): %s\n", (char*)sqrt(f1));
-        printf("sqrt_slow(f1): %s\n", (char*)sqrt_slow(f1));
         printf("\n");
     }
 
@@ -377,14 +376,17 @@ void test_functions()
         (-fixed_point128<4>::pi()) >> 2
     };
 
-    fixed_point128<4> f4;
+    fixed_point128<16> f4;
     len = sizeof(fvalues) / sizeof(fvalues[0]);
     for (int i = 0; i < len; ++i) {
         f4 = fvalues[i];
         s = f4;
         printf("f4: %s\n", s.c_str());
-        s = sin(f4);
-        printf("sin(f4): %s\n", s.c_str());
+        fixed_point128<16> res = sin(f4);
+        printf("sin(f4): %s\n", (char*)res);
+        s = asin(res);
+        printf("asin(%s): %s\n", (char*)res, s.c_str());
+
         s = cos(f4);
         printf("cos(f4): %s\n", s.c_str());
     }
@@ -590,16 +592,6 @@ void bench()
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64_t)(iterations / totalTime);
     print_ips("sqrt", ips);
-    
-    // even slower
-    iterations /= 2;
-    QueryPerformanceCounter(&time_start);
-    for (int i = 0; i < iterations; ++i)
-        f3 = sqrt_slow(f1);
-    QueryPerformanceCounter(&time_end);
-    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
-    ips = (uint64_t)(iterations / totalTime);
-    print_ips("sqrt_slow", ips);
 }
 
 int main()

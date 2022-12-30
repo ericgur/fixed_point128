@@ -1626,49 +1626,6 @@ public:
         return root;
     }
     /**
-     * @brief Calculates the square root using binary search.
-     * @param x Value to calculate the root of
-     * @return Square root of (x), zero when X <= 0.
-    */
-    friend FP128_INLINE fixed_point128 sqrt_slow(const fixed_point128& x) noexcept
-    {
-        if (x.sign || !x)
-            return 0;
-
-        fixed_point128 ul = 0, ll = 0, t = 0, e = fixed_point128::epsilon();
-        int32_t s = 0;
-        ul.low = 1ull;
-        s = (x.high != 0) ? 128 - (int32_t)__lzcnt64(x.high) : 64 - (int32_t)__lzcnt64(x.low);
-
-        // x >= 1
-        if (s >= x.F) {
-            ul = x;     // upper limit
-            ll.low = 1; // lower limit
-            ll <<= x.F + ((s - x.F - 1) >> 1);
-        }
-        // x < 1
-        else {
-            ul.low = 1; // upper limit
-            ul <<= x.F;
-            ll = x;     // lower limit
-        }
-
-        // yeh old binary search
-        t = (ul + ll) >> 1;
-        while (ul > ll + e) {
-            // check if the guess (t) is too big
-            if (t * t > x) {
-                ul = t; // decrease upper limit
-            }
-            else {
-                ll = t; // increase lower limit
-            }
-            t = (ul + ll) >> 1;
-        }
-
-        return t;
-    }
-    /**
      * @brief Factorial reciprocal (inverse). Calculates 1 / x!
      * Maximum value of x that may produce non zero values is 34. 
      * This value depends on the amount of fraction bits.
@@ -1792,11 +1749,10 @@ public:
         for (int i = 3, sign = 1; ; i += 2, sign = 1 - sign) {
             elem_nom *= xx;
             fact_reciprocal(i, elem_denom);
-
-            // precision limit has been hit
-            if (!elem_denom)
-                break;
             fixed_point128 elem = elem_nom * elem_denom; // next element in the series
+            // precision limit has been hit
+            if (!elem)
+                break;
             res += (sign) ? -elem : elem;
         }
 
@@ -1809,7 +1765,26 @@ public:
     */
     friend FP128_INLINE fixed_point128 asin(const fixed_point128& x) noexcept
     {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        if (x < -1 || x > 1) return 0;
+
+        constexpr int max_iterations = 6;
+
+        // Xn+1 = Xn - ( (sin (Xn) - a) / cos(Xn) )
+        // where 'a' is the argument, each iteration will converge on the result if the initial
+        //  estimate is close enough.
+        fixed_point128 absx = fabs(x);
+        fixed_point128 res = ::asin(static_cast<double>(absx));
+        for (int i = 0; i < max_iterations; ++i) {
+            fixed_point128 e = sin(res);
+            e -= absx; 
+            e /= cos(res); //((sin(res) - absx) / cos(res));
+            res = res - e;
+        }
+
+
+
+        res.sign = x.sign;
+        return res;
     }
     /**
      * @brief Calculate the cosine function
@@ -1969,7 +1944,6 @@ public:
     {
         static const fixed_point128 inv_log2_e = fixed_point128("0.693147180559945309417232121458176575");
         fixed_point128 y = log2(x);
-
         return y * inv_log2_e;
     }
     /**
@@ -1981,7 +1955,6 @@ public:
     {
         static const fixed_point128 inv_log2_10 = fixed_point128("0.301029995663981195213738894724493068");
         fixed_point128 y = log2(x);
-
         return y * inv_log2_10;
     }
     /*
