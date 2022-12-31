@@ -1117,6 +1117,7 @@ TEST(fixed_point128, reciprocal) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-15, 15); // can exceed this range to avoid overflow
+        //value = -5.7280424569; //TODO: remove
         double res = 1.0 / value;
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = reciprocal(f1);

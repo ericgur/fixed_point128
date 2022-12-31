@@ -67,6 +67,7 @@ template<int32_t I> fixed_point128<I> cos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> acos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> reciprocal(const fixed_point128<I>& x) noexcept;
 
 /***********************************************************************************
 *                                  Main Code
@@ -106,7 +107,7 @@ private:
     //
     uint64_t low;  // lower QWORD
     uint64_t high; // upper QWORD
-    unsigned sign; // 0 = positive, 1 negative
+    uint32_t sign; // 0 = positive, 1 negative
 
     // useful const calculations
     static constexpr int32_t F = 128 - I;                               // fraction bit count
@@ -831,28 +832,31 @@ public:
             }
         }
         else {
-            uint64_t q[4]{};
-            const uint64_t nom[4] = {0, 0, low, high};
-            const uint64_t denom[2] = {other.low, other.high};
-
-            if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
-                static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
-                need_rounding = (q[0] & half) != 0;
-                // result in q needs to shifted left by F (F bits were added to the right)
-                // shifting right by 128-F is simpler.
-                if constexpr (I == 64) {
-                    high = q[1];
-                    low = q[0];
-                }
-                else if constexpr (I < 64) {
-                    high = __shiftright128(q[1], q[2], I);
-                    low = __shiftright128(q[0], q[1], I);
-                }
-            }
-            else { // error
-                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
-            }
+            *this *= fabs(reciprocal(other));
         }
+        //else {
+        //    uint64_t q[4]{};
+        //    const uint64_t nom[4] = {0, 0, low, high};
+        //    const uint64_t denom[2] = {other.low, other.high};
+
+        //    if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+        //        static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
+        //        need_rounding = (q[0] & half) != 0;
+        //        // result in q needs to shifted left by F (F bits were added to the right)
+        //        // shifting right by 128-F is simpler.
+        //        if constexpr (I == 64) {
+        //            high = q[1];
+        //            low = q[0];
+        //        }
+        //        else if constexpr (I < 64) {
+        //            high = __shiftright128(q[1], q[2], I);
+        //            low = __shiftright128(q[0], q[1], I);
+        //        }
+        //    }
+        //    else { // error
+        //        FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+        //    }
+        //}
 
         if (need_rounding) {
             ++low;
@@ -1001,7 +1005,7 @@ public:
         if (shift < 1)
             return *this;
         if (shift <= 64) {
-            high = shift_left128(low, high, (unsigned char)shift);
+            high = shift_left128(low, high, shift);
             low <<= shift;
         }
         else if (shift < 128) {
@@ -1318,7 +1322,7 @@ public:
      * @param bit bit to get [0,127]
      * @return 0 or 1. Undefined when bit > 127
     */
-    __forceinline int32_t get_bit(unsigned bit) const noexcept
+    __forceinline int32_t get_bit(uint32_t bit) const noexcept
     {
         if (bit < 64) {
             return FP128_GET_BIT(low, bit);
@@ -1698,9 +1702,10 @@ public:
     friend FP128_INLINE fixed_point128 reciprocal(const fixed_point128& x) noexcept
     {
         static const fixed_point128 one = 1, two = 2;
-        static const fixed_point128 xy_max = one + (fixed_point128::epsilon() << 1);
-        static const fixed_point128 xy_min = one - (fixed_point128::epsilon() << 1);
-        constexpr int max_iterations = 6;
+        static const fixed_point128 xy_max = one + (fixed_point128::epsilon() << 2);
+        static const fixed_point128 xy_min = one - (fixed_point128::epsilon() << 2);
+        constexpr int max_iterations = 3;
+        constexpr int debug = false;
         fixed_point128 y = 1.0 / static_cast<double>(x);
 
         if (!y)
@@ -1715,7 +1720,13 @@ public:
             y = y * (two - xy);
         }
 
-        //printf("reciprocal took %i iterations for %.10lf\n", i, static_cast<double>(x));
+        if constexpr (debug) {
+            static int debug_max_iter = 0;
+            if (i > debug_max_iter || i == max_iterations) {
+                debug_max_iter = i;
+                printf("reciprocal took %i iterations for %.10lf\n", i, static_cast<double>(x));
+            }
+        }
 
         fixed_point128 res = y;
         return res;

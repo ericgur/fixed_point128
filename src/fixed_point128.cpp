@@ -577,7 +577,7 @@ void bench()
     print_ips("Division by int", ips);
 
     // even slower
-    iterations /= 10;
+    iterations /= 5;
 
     QueryPerformanceCounter(&time_start);
     for (int i = 0; i < iterations; ++i)

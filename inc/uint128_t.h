@@ -990,7 +990,7 @@ public:
      * @param bit bit to get [0,127]
      * @return 0 or 1. Undefined when bit > 127
     */
-    UINT128_T_INLINE int32_t get_bit(unsigned bit) const noexcept {
+    UINT128_T_INLINE int32_t get_bit(uint32_t bit) const noexcept {
         if (bit < 64) {
             return FP128_GET_BIT(low, bit);
         }
