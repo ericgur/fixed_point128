@@ -1116,7 +1116,7 @@ TEST(fixed_point128, ShiftLeft) {
 TEST(fixed_point128, reciprocal) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-15, 15);
+        double value = get_double_random(-15, 15); // can exceed this range to avoid overflow
         double res = 1.0 / value;
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = reciprocal(f1);
@@ -1126,7 +1126,7 @@ TEST(fixed_point128, reciprocal) {
 TEST(fixed_point128, sin) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-1, 2);
+        double value = get_double_random(-60, 2);
         double res = ::sin(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = sin(f1);
@@ -1136,17 +1136,27 @@ TEST(fixed_point128, sin) {
 TEST(fixed_point128, cos) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-1, 2);
-        double res = cos(value);
+        double value = get_double_random(-60, 2);
+        double res = ::cos(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = cos(f1);
         EXPECT_DOUBLE_EQ(fp128_res, res) << "cos: " << "value=" << value;
     }
 }
+TEST(fixed_point128, tan) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::tan(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = tan(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "tan: " << "value=" << value;
+    }
+}
 TEST(fixed_point128, asin) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-20, -1);
+        double value = get_double_random(-60, -1);
         double res = ::asin(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = asin(f1);
@@ -1156,10 +1166,20 @@ TEST(fixed_point128, asin) {
 TEST(fixed_point128, acos) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-20, -1);
+        double value = get_double_random(-60, -1);
         double res = acos(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = acos(f1);
-        EXPECT_DOUBLE_EQ(fp128_res, res) << "cos: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "acos: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, atan) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 14); //lower exponent results in lost bits
+        double res = atan(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = atan(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "atan: " << "value=" << value;
     }
 }

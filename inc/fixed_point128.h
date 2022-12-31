@@ -1889,20 +1889,12 @@ public:
     friend FP128_INLINE fixed_point128 atan(fixed_point128 x) noexcept
     {
         // constants for segmentation
-        static const fixed_point128 halfpi = fixed_point128::pi() / 2;
-        static const fixed_point128 b = fixed_point128::pi() / 6;
-        static const fixed_point128 k = tan(b);
-        static const fixed_point128 b0 = b >> 1; // pi / 12
-        static const fixed_point128 k0 = tan(b0);
+        static const fixed_point128 half_pi = fixed_point128::pi() / 2;
+        static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         
-        // constants for rational polynomial
-        static const fixed_point128 A = 0.999999020228907;
-        static const fixed_point128 B = 0.257977658811405;
-        static const fixed_point128 C = 0.59120450521312;
-        fixed_point128 ang;
-        fixed_point128 x2;
         bool comp = false;
-        bool hi_seg = false;
+        constexpr int max_iterations = 6;
+
         // make argument positive, save the sign
         auto sign = x.sign;
         x.sign = 0;
@@ -1912,27 +1904,28 @@ public:
             comp = true;
             x = reciprocal(x);
         }
-        // determine segmentation
-        if (x > k0) {
-            hi_seg = true;
-            x = (x - k) / (1 + k * x);
+
+        // initial step uses the CRT function.
+        fixed_point128 res = ::atan(static_cast<double>(x));
+        //
+        // Xn+1 =  Xn - cos(Xn) * ( sin(Xn) - a * cos(Xn))
+        // 
+        // where 'a' is the argument, each iteration will converge on the result if the initial
+        //  estimate is close enough.
+        for (int i = 0; i < max_iterations; ++i) {
+            fixed_point128 cos_xn = cos(res);
+            fixed_point128 sin_xn = sin(res);
+            fixed_point128 e = cos_xn * (sin_xn - x * cos_xn); // this is the iteraton estimated error
+            res -= e;
+            if (fabs(e) <= eps)
+                break;
         }
-        /* argument is now < tan(15 degrees)
-        * approximate the function
-        */
-        x2 = x * x;
-        ang = x * (A + B * x2) / (1 + C * x2);
-        // now restore offset if needed
-        if (hi_seg)
-            ang += b;
+
         // restore complement if needed
         if (comp)
-            ang = halfpi - ang;
+            res = half_pi - res;
         // restore sign if needed
-        if (sign)
-            return -ang;
-        else
-            return ang;
+        return (sign) ? -res : res;
     }
     /**
      * @brief Calculates the exponent of x: e^x
