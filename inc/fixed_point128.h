@@ -31,7 +31,7 @@
     https://github.com/dmoulding/log2fix
     
     The function sqrt is based on the book "Math toolkit for real time programming" 
-    by Jack W. Crenshaw
+    by Jack W. Crenshaw. The sin/cos/atan functions use some ideas from the book.
 
 ************************************************************************************/
 
@@ -59,6 +59,14 @@ namespace fp128 {
 *                                  Forward declarations
 ************************************************************************************/
 class fp128_gtest; // Google test class
+template<int32_t I> class fixed_point128;
+template<int32_t I> fixed_point128<I> fabs(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> sin(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> asin(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> cos(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> acos(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
 
 /***********************************************************************************
 *                                  Main Code
@@ -1796,8 +1804,8 @@ public:
     */
     friend FP128_INLINE fixed_point128 asin(fixed_point128 x) noexcept
     {
+        static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         constexpr int max_iterations = 6;
-
         // can be implemented using arctan:
         // ArcSin(x) = ArcTan (x / sqrt(1 - sqr (X)))
         if (x < -1 || x > 1) return 0;
@@ -1811,6 +1819,8 @@ public:
         for (int i = 0; i < max_iterations; ++i) {
             fixed_point128 e = (sin(res) - x) / cos(res);
             res -= e;
+            if (fabs(e) <= eps)
+                break;
         }
 
         res.sign = sign;
@@ -1854,6 +1864,7 @@ public:
     */
     friend FP128_INLINE fixed_point128 acos(fixed_point128 x) noexcept
     {
+        static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         // can be implemented using arctan:
         // ArcCos(x) = ArcTan(sqrt(1 - sqr(X)) / x)
         constexpr int max_iterations = 6;
@@ -1864,8 +1875,12 @@ public:
         //  estimate is close enough.
         fixed_point128 res = ::acos(static_cast<double>(x));
         for (int i = 0; i < max_iterations; ++i) {
-            fixed_point128 e = (cos(res) - x) / sin(res);
-            res += e;
+            fixed_point128 cos_xn = cos(res);
+            fixed_point128 sin_xn = sin(res);
+            fixed_point128 e = (x - cos_xn) / sin_xn;
+            res -= e;
+            if (fabs(e) <= eps)
+                break;
         }
 
         return res;
@@ -1876,7 +1891,7 @@ public:
      * @param x value
      * @return Tangent of x
     */
-    friend FP128_INLINE fixed_point128 tan(const fixed_point128& x) noexcept
+    friend FP128_INLINE fixed_point128 tan(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use tan()!");
         return sin(x) / cos(x);

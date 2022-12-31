@@ -587,6 +587,14 @@ void bench()
     ips = (uint64_t)(iterations / totalTime);
     print_ips("Division by fixed_point128", ips);
 
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f3 = reciprocal(f2);
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64_t)(iterations / totalTime);
+    print_ips("reciprocal", ips);
+
     // even slower
     iterations /= 5;
 
