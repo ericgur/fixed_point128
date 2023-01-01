@@ -1364,6 +1364,22 @@ public:
         return pi;
     }
     /**
+     * @brief Returns an instance of fixed_point128 with the value of pi * 2
+     * @return pi * 2
+    */
+    __forceinline static const fixed_point128& pi2() noexcept {
+        static const fixed_point128 pi2 = "6.28318530717958647692528676655900576839433879875021"; // 50 first digits of pi * 2
+        return pi2;
+    }
+    /**
+     * @brief Returns an instance of fixed_point128 with the value of pi / 2
+     * @return pi / 2
+    */
+    __forceinline static const fixed_point128& half_pi() noexcept {
+        static const fixed_point128 half_pi = "1.57079632679489661923132169163975144209858469968755"; // 50 first digits of pi / 2
+        return half_pi;
+    }    
+    /**
      * @brief Returns an instance of fixed_point128 with the value of the golden ratio
      * @return golden ratio constant
     */
@@ -1378,6 +1394,14 @@ public:
     __forceinline static const fixed_point128& e() noexcept {
         static const fixed_point128 e = "2.71828182845904523536028747135266249775724709369"; // 50 first digits of e
         return e;
+    }
+    /**
+     * @brief Returns an instance of fixed_point128 with the value of sqrt(2)
+     * @return e
+    */
+    __forceinline static const fixed_point128& sqrt_2() noexcept {
+        static const fixed_point128 sqrt_2 = "1.41421356237309504880168872420969807856967187537"; // 50 first digits of e
+        return sqrt_2;
     }
     /**
      * @brief Return an instance of fixed_point128 with the value of 1
@@ -1621,7 +1645,6 @@ public:
     friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x, uint32_t iterations = 3) noexcept
     {
         static const fixed_point128 factor = "0.70710678118654752440084436210484903928483593768847403658833981"; // sqrt(2) / 2
-
         if (x.sign || !x)
             return 0;
 
@@ -1633,10 +1656,9 @@ public:
         fixed_point128 root = ::sqrt(static_cast<double>(norm_x));
 
         // iterate several times via Newton's method
-        //
-        //                X
-        // Xn+1 = 0.5 * (---- + Xn )
-        //                Xn
+        //                  X
+        //   Xn+1 = 0.5 * (---- + Xn )
+        //                  Xn
         for (auto i = iterations; i != 0; --i) {
             root = (norm_x * reciprocal(root) + root) >> 1;
         }
@@ -1659,7 +1681,7 @@ public:
      * Maximum value of x that may produce non zero values is 34. 
      * This value depends on the amount of fraction bits.
      * @param x Input value
-     * @param root Result of the function
+     * @param res Result of the function
     */
     friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
     {
@@ -1758,7 +1780,7 @@ public:
     friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
-        assert(fabs(x) <= (fixed_point128::pi() >> 1));
+        assert(fabs(x) <= fixed_point128::half_pi());
 
         // first part of the series is just 'x'
         const fixed_point128 xx = x * x;
@@ -1786,26 +1808,24 @@ public:
     friend __forceinline fixed_point128 cos1(const fixed_point128& x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
-        static const fixed_point128 half_pi = fixed_point128::pi() >> 1; // pi / 2 
+        static const fixed_point128& half_pi = fixed_point128::half_pi();
         assert(fabs(x) <= half_pi);
         return (x.is_positive()) ?
             sin1(half_pi - x) :
             -sin1(-half_pi - x);
     }
     /**
-     * @brief Calculate the sine function
-     * Using the Maclaurin series expansion, the formula is:
-     * sin(x) = x - (x^3 / 3!) + (x^5 / 5!) - (x^7 / 7!) + ...
-     * 
+     * @brief Calculate the Sine function
+     * Ultimately uses sin() with a reduced range of [-pi/4, pi/4]
      * @param x value in Radians
      * @return Sine of x
     */
     friend FP128_INLINE fixed_point128 sin(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
-        static const fixed_point128 pi = fixed_point128::pi();
-        static const fixed_point128 pi2 = pi << 1; // 2 * pi
-        static const fixed_point128 half_pi = pi >> 1; // pi / 2
+        static const fixed_point128& pi = fixed_point128::pi();
+        static const fixed_point128& pi2 = fixed_point128::pi2(); // 2 * pi
+        static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
         int64_t n = static_cast<int64_t>((x / half_pi) + round);
@@ -1855,7 +1875,7 @@ public:
     }
     /**
      * @brief Calculate the cosine function
-     * Ultimately uses sin() with a reduced range of [-pi/4, pi/4]
+     * Ultimately uses sin1() with a reduced range of [-pi/4, pi/4]
      * Sine's Maclaurin series converges faster than Cosine's.
      * @param x value in Radians
      * @return Cosine of x
@@ -1863,9 +1883,9 @@ public:
     friend FP128_INLINE fixed_point128 cos(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cos()!");
-        static const fixed_point128 pi = fixed_point128::pi();
-        static const fixed_point128 pi2 = pi << 1; // 2 * pi
-        static const fixed_point128 half_pi = pi >> 1; // pi / 2
+        static const fixed_point128& pi = fixed_point128::pi();
+        static const fixed_point128& pi2 = fixed_point128::pi2(); // 2 * pi
+        static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
         int64_t n = static_cast<int64_t>((x / half_pi) + round);
@@ -1930,7 +1950,7 @@ public:
     friend FP128_INLINE fixed_point128 atan(fixed_point128 x) noexcept
     {
         // constants for segmentation
-        static const fixed_point128 half_pi = fixed_point128::pi() / 2;
+        static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         
         bool comp = false;
