@@ -60,7 +60,18 @@ namespace fp128 {
 ************************************************************************************/
 class fp128_gtest; // Google test class
 template<int32_t I> class fixed_point128;
+// Note: Release builds will fail without these forward declarations. Hints towards compiler a bug (VS2022 v17.4)
+// The compiler and Inteliisense don't match these functions in some cases and try to use the CRT versions which 
+// a causes a compilations error.
+template<int32_t I> uint64_t lzcnt128(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> fabs(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> floor(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> ceil(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> trunc(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> round(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> fmod(const fixed_point128<I>& x, const fixed_point128<I>& y);
+template<int32_t I> fixed_point128<I> modf(const fixed_point128<I>& x, fixed_point128<I>* iptr) noexcept;
+template<int32_t I> fixed_point128<I> sqrt(const fixed_point128<I>& x, uint32_t iterations = 3) noexcept;
 template<int32_t I> fixed_point128<I> sin(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> asin(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> cos(fixed_point128<I> x) noexcept;
@@ -68,6 +79,11 @@ template<int32_t I> fixed_point128<I> acos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> reciprocal(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> exp(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> log(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> log2(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> log10(fixed_point128<I> x) noexcept;
+
 
 /***********************************************************************************
 *                                  Main Code
@@ -1614,7 +1630,7 @@ public:
         fixed_point128 norm_x = (expo > 0) ? x >> expo : x << -expo;
         
         // use existing HW to provide an excellent first estimate.
-        fixed_point128 root = sqrt(static_cast<double>(norm_x));
+        fixed_point128 root = ::sqrt(static_cast<double>(norm_x));
 
         // iterate several times via Newton's method
         //

@@ -92,6 +92,7 @@
     <ClInclude Include="inc\uint128_t.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Bench.cpp" />
     <ClCompile Include="src\fixed_point128.cpp" />
   </ItemGroup>
   <ItemGroup>
