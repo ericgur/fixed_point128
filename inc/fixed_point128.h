@@ -299,44 +299,44 @@ public:
         static fixed_point128<1> base10_table[] = {
         //  {low QWORD,             high QWORD,         sign}
             {0x0000000000000000ull, 0x8000000000000000ull, 0},  // 10^0, not used, makes the code simpler
-            {0xCCCCCCCCCCCCCCCCull, 0x0CCCCCCCCCCCCCCCull, 0},  // 10^-1
+            {0xCCCCCCCCCCCCCCCDull, 0x0CCCCCCCCCCCCCCCull, 0},  // 10^-1
             {0x147AE147AE147AE1ull, 0x0147AE147AE147AEull, 0},  // 10^-2
-            {0xCED916872B020C49ull, 0x0020C49BA5E353F7ull, 0},  // 10^-3
-            {0x94AF4F0D844D013Aull, 0x000346DC5D638865ull, 0},  // 10^-4
+            {0xCED916872B020C4Aull, 0x0020C49BA5E353F7ull, 0},  // 10^-3
+            {0x94AF4F0D844D013Bull, 0x000346DC5D638865ull, 0},  // 10^-4
             {0xC21187E7C06E19B9ull, 0x000053E2D6238DA3ull, 0},  // 10^-5
             {0xC69B5A63F9A49C2Cull, 0x000008637BD05AF6ull, 0},  // 10^-6
             {0x7A42BC3D32907604ull, 0x000000D6BF94D5E5ull, 0},  // 10^-7
-            {0x8C39DF9FB841A566ull, 0x00000015798EE230ull, 0},  // 10^-8
-            {0xDAD2965CC5A02A23ull, 0x0000000225C17D04ull, 0},  // 10^-9
+            {0x8C39DF9FB841A567ull, 0x00000015798EE230ull, 0},  // 10^-8
+            {0xDAD2965CC5A02A24ull, 0x0000000225C17D04ull, 0},  // 10^-9
             {0xAF7B756FAD5CD103ull, 0x0000000036F9BFB3ull, 0},  // 10^-10
             {0x5E592557F7BC7B4Dull, 0x00000000057F5FF8ull, 0},  // 10^-11
-            {0x096F5088CBF93F87ull, 0x00000000008CBCCCull, 0},  // 10^-12
+            {0x096F5088CBF93F88ull, 0x00000000008CBCCCull, 0},  // 10^-12
             {0x3424BB40E132865Aull, 0x00000000000E12E1ull, 0},  // 10^-13
             {0xB86A12B9B01EA709ull, 0x0000000000016849ull, 0},  // 10^-14
             {0x5F3DCEAC2B3643E7ull, 0x0000000000002407ull, 0},  // 10^-15
-            {0x5652FB1137856D30ull, 0x000000000000039Aull, 0},  // 10^-16
-            {0x3BD5191B525A2484ull, 0x000000000000005Cull, 0},  // 10^-17
-            {0x392EE8E921D5D073ull, 0x0000000000000009ull, 0},  // 10^-18
+            {0x5652FB1137856D31ull, 0x000000000000039Aull, 0},  // 10^-16
+            {0x3BD5191B525A2485ull, 0x000000000000005Cull, 0},  // 10^-17
+            {0x392EE8E921D5D074ull, 0x0000000000000009ull, 0},  // 10^-18
             {0xEC1E4A7DB69561A5ull, 0x0000000000000000ull, 0},  // 10^-19
             {0x179CA10C9242235Dull, 0x0000000000000000ull, 0},  // 10^-20
-            {0x025C768141D369EFull, 0x0000000000000000ull, 0},  // 10^-21
+            {0x025C768141D369F0ull, 0x0000000000000000ull, 0},  // 10^-21
             {0x003C7240202EBDCBull, 0x0000000000000000ull, 0},  // 10^-22
             {0x00060B6CD004AC94ull, 0x0000000000000000ull, 0},  // 10^-23
             {0x00009ABE14CD4475ull, 0x0000000000000000ull, 0},  // 10^-24
-            {0x00000F79687AED3Eull, 0x0000000000000000ull, 0},  // 10^-25
-            {0x0000018C240C4AECull, 0x0000000000000000ull, 0},  // 10^-26
+            {0x00000F79687AED3Full, 0x0000000000000000ull, 0},  // 10^-25
+            {0x0000018C240C4AEDull, 0x0000000000000000ull, 0},  // 10^-26
             {0x000000279D346DE4ull, 0x0000000000000000ull, 0},  // 10^-27
             {0x00000003F61ED7CAull, 0x0000000000000000ull, 0},  // 10^-28
-            {0x0000000065697BFAull, 0x0000000000000000ull, 0},  // 10^-29
+            {0x0000000065697BFBull, 0x0000000000000000ull, 0},  // 10^-29
             {0x000000000A2425FFull, 0x0000000000000000ull, 0},  // 10^-30
             {0x0000000001039D66ull, 0x0000000000000000ull, 0},  // 10^-31
-            {0x000000000019F623ull, 0x0000000000000000ull, 0},  // 10^-32
+            {0x000000000019F624ull, 0x0000000000000000ull, 0},  // 10^-32
             {0x000000000002989Dull, 0x0000000000000000ull, 0},  // 10^-33
             {0x0000000000004276ull, 0x0000000000000000ull, 0},  // 10^-34
             {0x00000000000006A5ull, 0x0000000000000000ull, 0},  // 10^-35
             {0x00000000000000AAull, 0x0000000000000000ull, 0},  // 10^-36
             {0x0000000000000011ull, 0x0000000000000000ull, 0},  // 10^-37
-            {0x0000000000000001ull, 0x0000000000000000ull, 0}   // 10^-38    
+            {0x0000000000000002ull, 0x0000000000000000ull, 0}   // 10^-38    
         };
         constexpr uint64_t base10_table_size = array_length(base10_table);
         static_assert(max_frac_digits < base10_table_size);
@@ -1820,7 +1820,7 @@ public:
      * @param x value in Radians
      * @return Sine of x
     */
-    friend FP128_INLINE fixed_point128 sin(fixed_point128 x) noexcept
+    friend fixed_point128 sin(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
         static const fixed_point128& pi = fixed_point128::pi();
@@ -1849,7 +1849,7 @@ public:
      * @param x value in the range [-1,1]
      * @return Inverse sine of x
     */
-    friend FP128_INLINE fixed_point128 asin(fixed_point128 x) noexcept
+    friend fixed_point128 asin(fixed_point128 x) noexcept
     {
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         constexpr int max_iterations = 6;
@@ -1880,7 +1880,7 @@ public:
      * @param x value in Radians
      * @return Cosine of x
     */
-    friend FP128_INLINE fixed_point128 cos(fixed_point128 x) noexcept
+    friend fixed_point128 cos(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cos()!");
         static const fixed_point128& pi = fixed_point128::pi();
@@ -1909,7 +1909,7 @@ public:
      * @param x value in the range [-1,1]
      * @return Inverse cosine of x
     */
-    friend FP128_INLINE fixed_point128 acos(fixed_point128 x) noexcept
+    friend fixed_point128 acos(fixed_point128 x) noexcept
     {
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         constexpr int max_iterations = 6;
@@ -1944,15 +1944,14 @@ public:
     }
     /**
      * @brief Calculate the inverse tangent function
-     * @param x value in the range [-0.5pi,0.5pi]
-     * @return Tangent of x
+     * @param x value
+     * @return Arctangent of x
     */
-    friend FP128_INLINE fixed_point128 atan(fixed_point128 x) noexcept
+    friend fixed_point128 atan(fixed_point128 x) noexcept
     {
         // constants for segmentation
         static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
-        
         bool comp = false;
         constexpr int max_iterations = 6;
 
@@ -1976,7 +1975,7 @@ public:
         for (int i = 0; i < max_iterations; ++i) {
             fixed_point128 cos_xn = cos(res);
             fixed_point128 sin_xn = sin(res);
-            fixed_point128 e = cos_xn * (sin_xn - x * cos_xn); // this is the iteraton estimated error
+            fixed_point128 e = cos_xn * (sin_xn - x * cos_xn); // this is the iteration estimated error
             res -= e;
             if (fabs(e) <= eps)
                 break;
@@ -1986,19 +1985,20 @@ public:
         if (comp)
             res = half_pi - res;
         // restore sign if needed
-        return (sign) ? -res : res;
+        res.sign = sign;
+        return res;
     }
     /**
      * @brief Calculates the exponent of x: e^x
      * Using the Maclaurin series expansion, the formula is:
-     * exp(x) = x^0 + (x^1 / 1!) + (x^2 / 2!) + (x^3 / 3!) + ...
-     *
+     *                x^1     x^2     x^3
+     * exp(x) = 1  +  ---  +  ---  +  --- + ...
+     *                 1!      2!      3!
      * @param x A number specifying a power. 
      * @return Exponent of x
     */
     friend FP128_INLINE fixed_point128 exp(const fixed_point128& x) noexcept
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cos()!");
         static const fixed_point128 e = fixed_point128::e();
         static const fixed_point128 two(2);
         
@@ -2009,10 +2009,10 @@ public:
         for (int i = 2; ; ++i) {
             elem_nom *= x;
             fact_reciprocal(i, elem_denom);
-            if (!elem_denom)
+            fixed_point128 elem = elem_nom * elem_denom;
+            if (!elem)
                 break;
-
-            res += elem_nom * elem_denom; // next element in the series
+            res += elem; // next element in the series
         }
 
         return res;
