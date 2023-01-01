@@ -262,6 +262,8 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
 */
 inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
 {
+    if (q == nullptr || u == nullptr || v == nullptr) return 1;
+
     constexpr uint64_t WORD_WIDTH = 32ull;        // bit width of a word
     constexpr uint64_t BASE = 1ull << WORD_WIDTH; // Number base (32 bits).
     constexpr uint64_t MASK = BASE - 1;           // 32 bit mask
@@ -351,7 +353,7 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
         } // End j.
         // If the caller wants the remainder, unnormalize
         // it and pass it back.
-    if (r != NULL) {
+    if (r != nullptr) {
         for (i = 0; i < n - 1; ++i)
             r[i] = (un[i] >> s) | ((uint64_t)un[i + 1] << s_comp);
         

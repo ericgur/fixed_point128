@@ -359,7 +359,7 @@ public:
         }
 
         // set negative sign if needed
-        if (p[0] == '-') {
+        if (*p == '-') {
             sign = 1;
             ++p;
         }
@@ -1744,8 +1744,7 @@ public:
             }
         }
 
-        fixed_point128 res = y;
-        return res;
+        return y;
     }
     /**
          * @brief Calculate the sine function over a limited range [-0.5pi, 0.5pi]
@@ -1826,6 +1825,7 @@ public:
     }
     /**
      * @brief Calculate the inverse sine function
+     * Uses Newton's method to converge quickly.
      * @param x value in the range [-1,1]
      * @return Inverse sine of x
     */
@@ -1833,11 +1833,11 @@ public:
     {
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         constexpr int max_iterations = 6;
-        // can be implemented using arctan:
-        // ArcSin(x) = ArcTan (x / sqrt(1 - sqr (X)))
         if (x < -1 || x > 1) return 0;
 
-        // Xn+1 = Xn - ( (sin (Xn) - a) / cos(Xn) )
+        //              sin(Xn) - a
+        // Xn+1 = Xn - -------------
+        //                cos(Xn)
         // where 'a' is the argument, each iteration will converge on the result if the initial
         //  estimate is close enough.
         auto sign = x.sign;
@@ -1855,9 +1855,8 @@ public:
     }
     /**
      * @brief Calculate the cosine function
-     * Using the Maclaurin series expansion, the formula is:
-     * cos(x) = 1 - (x^2 / 2!) + (x^4 / 4!) - (x^6 / 6!) + ...
-     *
+     * Ultimately uses sin() with a reduced range of [-pi/4, pi/4]
+     * Sine's Maclaurin series converges faster than Cosine's.
      * @param x value in Radians
      * @return Cosine of x
     */
@@ -1886,18 +1885,18 @@ public:
     }
     /**
      * @brief Calculate the inverse cosine function
+     * Uses Newton's method to converge quickly.
      * @param x value in the range [-1,1]
      * @return Inverse cosine of x
     */
     friend FP128_INLINE fixed_point128 acos(fixed_point128 x) noexcept
     {
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
-        // can be implemented using arctan:
-        // ArcCos(x) = ArcTan(sqrt(1 - sqr(X)) / x)
         constexpr int max_iterations = 6;
         if (x < -1 || x > 1) return 0;
-
-        // Xn+1 = Xn + (cos(Xn) - a) / sin(Xn)
+        //              cos(Xn) - a           a - cos(Xn)
+        // Xn+1 = Xn - ------------- = Xn -  ------------
+        //                -sin(Xn)              sin(Xn)
         // where 'a' is the argument, each iteration will converge on the result if the initial
         //  estimate is close enough.
         fixed_point128 res = ::acos(static_cast<double>(x));
