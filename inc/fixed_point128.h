@@ -788,11 +788,11 @@ public:
     template<typename T>
     __forceinline fixed_point128& operator*=(T x) noexcept {
         // floating point
-        if constexpr (std::is_floating_point<T>::value) {
+        if constexpr (std::is_floating_point_v<T>) {
             return operator*=(fixed_point128(x));
         }
         // integers: convert to uint64 for a simpler operation.
-        if constexpr (std::is_signed<T>::value) {
+        if constexpr (std::is_signed_v<T>) {
             // alway do positive multiplication
             if (x < 0) {
                 x = -x;
@@ -1983,28 +1983,60 @@ private:
      *                x^1     x^2     x^3
      * exp(x) = 1  +  ---  +  ---  +  --- + ...
      *                 1!      2!      3!
+     *
+     * The Maclaurin will quickly overflow as x's power increases rapidly.
+     * Using the equality e^x = e^ix * e^fx
+     * Where ix is the integer part of x and fx is the fraction avoids the overflow
      * @param x A number specifying a power. 
      * @return Exponent of x
     */
     friend FP128_INLINE fixed_point128 exp(const fixed_point128& x) noexcept
     {
         static const fixed_point128 e = fixed_point128::e();
-        static const fixed_point128 two(2);
+        fixed_point128 _ix, exp_ix; // integer part of x
+        fixed_point128 fx = modf(fabs(x), &_ix);
+        uint64_t ix = static_cast<uint64_t>(_ix);
         
+        // compute e^ix (integer part of x)
+        if (ix > 0) {
+            exp_ix = 1;      // result
+            fixed_point128 b = e; // value of e^1
+            while (ix > 0) {
+                if (ix & 1)
+                    exp_ix *= b;
+                ix >>= 1;
+                b *= b;
+            }
+        }
+        else {
+            exp_ix = 1;
+        }
+
+        // compute e^fx (fraction part of x)
         // first and second elements of the series
-        fixed_point128 res = fixed_point128::one() + x;
-        fixed_point128 elem_denom, elem_nom = x;
+        fixed_point128 exp_fx = fixed_point128::one() + fx;
+        fixed_point128 elem_denom, elem_nom = fx;
 
         for (int i = 2; ; ++i) {
-            elem_nom *= x;
+            elem_nom *= fx;
             fact_reciprocal(i, elem_denom);
             fixed_point128 elem = elem_nom * elem_denom;
             if (!elem)
                 break;
-            res += elem; // next element in the series
+            exp_fx += elem; // next element in the series
         }
 
-        return res;
+        fixed_point128 res = exp_ix * exp_fx;
+        return (x.is_positive()) ? res : reciprocal(res);
+    }
+    /**
+     * @brief Computes 2 to the power of x
+     * @param x Exponent value
+     * @return 2^x
+    */
+    friend FP128_INLINE fixed_point128 exp2(const fixed_point128& x) noexcept
+    {
+        return x << 1;
     }
     /**
      * @brief Calculates the Log base 2 of x: log2(x)
