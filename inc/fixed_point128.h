@@ -668,9 +668,8 @@ public:
             sign ^= 1;
             twos_complement128(low, high);
         }
-
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        
+        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -706,8 +705,7 @@ public:
             twos_complement128(low, high);
         }
 
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -765,20 +763,11 @@ public:
         }
         // set the sign
         sign ^= other.sign;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        reset_sign_for_zero();
         return *this;
     }
     /**
-     * @brief Multiplies a value to this object
-     * @param x Right hand side operand
-     * @return This object.
-    */
-    FP128_INLINE fixed_point128& operator*=(double x) {
-        return operator*=(fixed_point128(x));
-    }
-    /**
-     * @brief Multiplies a value to this object
+     * @brief Multiplies a 64 bit value to this object
      * @param x Right hand side operand
      * @return This object.
     */
@@ -788,8 +777,7 @@ public:
         // multiply low QWORDs
         low = _umul128(low, x, &temp);
         high = high * x + temp;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -799,9 +787,11 @@ public:
     */
     template<typename T>
     __forceinline fixed_point128& operator*=(T x) noexcept {
+        // floating point
         if constexpr (std::is_floating_point<T>::value) {
             return operator*=(fixed_point128(x));
         }
+        // integers: convert to uint64 for a simpler operation.
         if constexpr (std::is_signed<T>::value) {
             // alway do positive multiplication
             if (x < 0) {
@@ -809,7 +799,7 @@ public:
                 sign ^= 1;
             }
         }
-
+        
         return operator*=(static_cast<uint64_t>(x));
     }
     /**
@@ -879,8 +869,7 @@ public:
             high += low == 0;
         }
         sign ^= other.sign;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -976,8 +965,7 @@ public:
             }
 
             // Note if signs are the same, for nom/denom, the result keeps the sign.
-            // set sign to 0 when both low and high are zero (avoid having negative zero value)
-            sign &= (0 != low || 0 != high);
+            reset_sign_for_zero();
         }
         else { // error
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
@@ -1008,8 +996,7 @@ public:
             low = shift_right64_round(high, shift - 64);
             high = 0;
         }
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -1031,8 +1018,7 @@ public:
         else {
             low = high = 0;
         }
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -1044,8 +1030,7 @@ public:
         low &= rhs.low;
         high &= rhs.high;
         sign &= rhs.sign;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        sign &= (0 != low || 0 != high);
+        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -1154,8 +1139,7 @@ public:
         fixed_point128 temp(*this);
         temp.high = ~high;
         temp.low = ~low;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        temp.sign &= (0 != low || 0 != high);
+        temp.reset_sign_for_zero();
         return temp;
     }
     /**
@@ -1170,10 +1154,8 @@ public:
     */
     __forceinline fixed_point128 operator-() const noexcept {
         fixed_point128 temp(*this);
-
         temp.sign ^= 1;
-        // set sign to 0 when both low and high are zero (avoid having negative zero value)
-        temp.sign &= (0 != low || 0 != high);
+        temp.reset_sign_for_zero();
         return temp;
     }
 
@@ -1427,6 +1409,13 @@ public:
     __forceinline static const fixed_point128& epsilon() noexcept {
         static const fixed_point128 epsilon(1, 0, 0);
         return epsilon;
+    }
+private:
+    /**
+     * @brief Set the sign to 0 when both low and high are zero, i.e. avoid having negative zero value
+    */
+    __forceinline void reset_sign_for_zero() {
+        sign &= (0 != low || 0 != high);
     }
 
     //

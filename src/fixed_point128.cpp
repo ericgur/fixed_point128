@@ -373,10 +373,10 @@ void test_functions()
 
     fixed_point128<4> fvalues[] = {
         0,
-        fixed_point128<4>::pi() >> 1,
-        -fixed_point128<4>::pi() >> 1,
-        fixed_point128<4>::pi() >> 2,
-        (-fixed_point128<4>::pi()) >> 2,
+        fixed_point128<4>::half_pi(),
+        -fixed_point128<4>::half_pi(),
+        fixed_point128<4>::half_pi() >> 1,
+        (-fixed_point128<4>::half_pi()) >> 1,
         fixed_point128<4>::pi() * 1.5,
         (fixed_point128<4>::pi()) * -1.5
     };
@@ -425,6 +425,12 @@ void test_functions()
         s = log10(f5);
         printf("log10(f5): %s\n", s.c_str());
     }
+
+    fixed_point128<16> f6;
+    f6 = asin(fixed_point128<16>::one());
+    f6 = asin(-fixed_point128<16>::one());
+    f6 = asin(fixed_point128<16>(0));
+
 
     printf("\n");
 }
