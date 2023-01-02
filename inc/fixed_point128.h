@@ -1520,7 +1520,7 @@ private:
      * @param x Fixed_point128 object
      * @return A copy of x with sign removed
     */
-    friend FP128_INLINE fixed_point128 fabs(const fixed_point128& x) noexcept
+    friend __forceinline fixed_point128 fabs(const fixed_point128& x) noexcept
     {
         fixed_point128 temp = x;
         temp.sign = 0;
@@ -1564,7 +1564,7 @@ private:
      * @param x Value to truncate
      * @return Integer value, rounded towards zero.
     */
-    friend FP128_INLINE fixed_point128 trunc(const fixed_point128& x) noexcept
+    friend __forceinline fixed_point128 trunc(const fixed_point128& x) noexcept
     {
         return fixed_point128(0, x.high & x.int_mask, x.sign);
     }
@@ -1590,7 +1590,7 @@ private:
      * @param y Denominator
      * @return A fixed_point128 holding the modulo value.
     */
-    friend FP128_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y)
+    friend __forceinline fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y)
     {
         return x % y;
     }
@@ -1620,7 +1620,7 @@ private:
      * @param x input value.
      * @return lzc (uint32_t) of th result.
     */
-    friend FP128_INLINE uint64_t lzcnt128(const fixed_point128& x) noexcept
+    friend __forceinline uint64_t lzcnt128(const fixed_point128& x) noexcept
     {
         return (x.high != 0) ? __lzcnt64(x.high) : 64 + __lzcnt64(x.low);
     }
