@@ -63,7 +63,7 @@ template<int32_t I> class fixed_point128;
 // Note: Release builds will fail without these forward declarations. Hints towards compiler a bug (VS2022 v17.4)
 // The compiler and Inteliisense don't match these functions in some cases and try to use the CRT versions which 
 // a causes a compilations error.
-template<int32_t I> uint64_t lzcnt128(const fixed_point128<I>& x) noexcept;
+// CRT style function
 template<int32_t I> fixed_point128<I> fabs(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> floor(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> ceil(const fixed_point128<I>& x) noexcept;
@@ -78,11 +78,17 @@ template<int32_t I> fixed_point128<I> cos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> acos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> reciprocal(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> exp(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> exp2(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> pow(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> log(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> log2(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> log10(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> logb(fixed_point128<I> x) noexcept;
+// non CRT function
+template<int32_t I> uint64_t lzcnt128(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> reciprocal(const fixed_point128<I>& x) noexcept;
+template<int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcept;
 
 
 /***********************************************************************************
@@ -1329,7 +1335,7 @@ public:
     }
     /**
      * @brief Returns the exponent of the object - like the base 2 exponent of a floating point
-     * A value of 2.1 would return 1, [0.5,1.0) would return -1.
+     * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
      * @return Exponent of the number
     */
     __forceinline int32_t get_exponent() const noexcept
@@ -2132,6 +2138,16 @@ private:
         static const fixed_point128 inv_log2_10 = "0.301029995663981195213738894724493068";
         fixed_point128 y = log2(x);
         return y * inv_log2_10;
+    }
+    /**
+     * @brief Calculates Log base 2 of x as an integer ignoring the sign of x.
+     * Similar to: floor(log2(fabs(x)))
+     * @param x The number to perform log on.
+     * @return logb(x)
+    */
+    friend FP128_INLINE fixed_point128 logb(fixed_point128 x) noexcept
+    {
+        return x.get_exponent();
     }
     /*
     static int div_64bit_test(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v, int m, int n) noexcept
