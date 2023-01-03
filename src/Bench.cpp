@@ -183,4 +183,31 @@ void bench()
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64_t)(iterations / totalTime);
     print_ips("sqrt", ips);
+
+
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f3 = exp(f1);
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64_t)(iterations / totalTime);
+    print_ips("exp", ips);
+
+
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f3 = log(f1);
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64_t)(iterations / totalTime);
+    print_ips("log", ips);
+
+    
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f3 = pow(f1, f2);
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64_t)(iterations / totalTime);
+    print_ips("pow", ips);
 }

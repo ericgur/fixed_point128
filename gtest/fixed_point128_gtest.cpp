@@ -1203,3 +1203,16 @@ TEST(fixed_point128, exp2) {
         EXPECT_DOUBLE_EQ(fp128_res, res) << "exp2: " << "value=" << value;
     }
 }
+TEST(fixed_point128, pow) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = fabs(get_double_random(-4, 4)); // lower exponent results in lost bits
+        double value2 = get_double_random(-4, 4); // lower exponent results in lost bits
+        value1 = 2.3505350060521568, value2 = 0.20224790564651351; //TODO: remove
+        double res = pow(value1, value2);
+        fixed_point128<16> f1 = value1;
+        fixed_point128<16> f2 = value2;
+        fixed_point128<16> fp128_res = pow(f1, f2);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "pow: " << " value1=" << value1 << ", value2=" << value2;
+    }
+}

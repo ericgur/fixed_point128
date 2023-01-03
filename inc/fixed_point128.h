@@ -1984,9 +1984,11 @@ private:
      * exp(x) = 1  +  ---  +  ---  +  --- + ...
      *                 1!      2!      3!
      *
-     * The Maclaurin will quickly overflow as x's power increases rapidly.
+     * The Maclaurin series will quickly overflow as x's power increases rapidly.
      * Using the equality e^x = e^ix * e^fx
-     * Where ix is the integer part of x and fx is the fraction avoids the overflow
+     * Where ix is the integer part of x and fx is the fraction part.
+     * ix is computed via multiplications which won't overflow if the result value can be held.
+     * fx is computed via Maclaurin series expansion, but since fx < 1, it won't overflow.
      * @param x A number specifying a power. 
      * @return Exponent of x
     */
@@ -1995,7 +1997,7 @@ private:
         static const fixed_point128 e = fixed_point128::e();
         fixed_point128 _ix, exp_ix; // integer part of x
         fixed_point128 fx = modf(fabs(x), &_ix);
-        uint64_t ix = static_cast<uint64_t>(_ix);
+        uint64_t ix = static_cast<uint64_t>(_ix); // 64 bit is an overkill to hold the exponent
         
         // compute e^ix (integer part of x)
         if (ix > 0) {
@@ -2039,11 +2041,33 @@ private:
         //
         // Based on exponent law: (x^n)^m = x^(m*n)
         // Convert the exponent x (function parameter) to produce an exponent that will work with exp()
-        // y = 1 / log(2) 
+        // y = log(2) 
         // 2^x = e^(y*x) = exp(y*x)
         //
-        static const fixed_point128 inv_log2_e = fixed_point128("0.693147180559945309417232121458176575");
-        return exp(x * inv_log2_e);
+        static const fixed_point128 lan2 = "0.693147180559945309417232121458176575";
+        return exp(x * lan2);
+    }
+    /**
+     * @brief Computes x to the power of y
+     * @param x Base value, must be positive
+     * @param y Exponent value
+     * @return x^y
+    */
+    friend FP128_INLINE fixed_point128 pow(const fixed_point128& x, const fixed_point128& y) noexcept
+    {
+        //
+        // Based on exponent law: (x^n)^m = x^(m * n)
+        // Convert the exponent y (function parameter) to produce an exponent that will work with exp()
+        // z = log(x) 
+        // pow(x, y) = x^y = e^(y * z) = exp(y * z)
+        //
+        if (x.is_negative()) return 0;
+
+        fixed_point128 lan_x = log(x);
+        if (!lan_x) 
+            return lan_x;
+
+        return exp(y * lan_x);
     }
     /**
      * @brief Calculates the Log base 2 of x: log2(x)
@@ -2094,7 +2118,7 @@ private:
     */
     friend FP128_INLINE fixed_point128 log(fixed_point128 x) noexcept
     {
-        static const fixed_point128 inv_log2_e = fixed_point128("0.693147180559945309417232121458176575");
+        static const fixed_point128 inv_log2_e = "0.693147180559945309417232121458176575";
         fixed_point128 y = log2(x);
         return y * inv_log2_e;
     }
@@ -2105,7 +2129,7 @@ private:
     */
     friend FP128_INLINE fixed_point128 log10(fixed_point128 x) noexcept
     {
-        static const fixed_point128 inv_log2_10 = fixed_point128("0.301029995663981195213738894724493068");
+        static const fixed_point128 inv_log2_10 = "0.301029995663981195213738894724493068";
         fixed_point128 y = log2(x);
         return y * inv_log2_10;
     }
