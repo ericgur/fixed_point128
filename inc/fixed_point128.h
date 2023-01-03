@@ -2036,7 +2036,14 @@ private:
     */
     friend FP128_INLINE fixed_point128 exp2(const fixed_point128& x) noexcept
     {
-        return x << 1;
+        //
+        // Based on exponent law: (x^n)^m = x^(m*n)
+        // Convert the exponent x (function parameter) to produce an exponent that will work with exp()
+        // y = 1 / log(2) 
+        // 2^x = e^(y*x) = exp(y*x)
+        //
+        static const fixed_point128 inv_log2_e = fixed_point128("0.693147180559945309417232121458176575");
+        return exp(x * inv_log2_e);
     }
     /**
      * @brief Calculates the Log base 2 of x: log2(x)
