@@ -80,6 +80,7 @@ template<int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> exp(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> exp2(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> expm1(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> pow(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> log(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> log2(fixed_point128<I> x) noexcept;
@@ -2037,6 +2038,15 @@ private:
 
         fixed_point128 res = exp_ix * exp_fx;
         return (x.is_positive()) ? res : reciprocal(res);
+    }
+    /**
+     * @brief Calculates the exponent of x and reduces 1 from the result: (e^x) - 1
+     * @param x A number specifying a power.
+     * @return Exponent of x
+    */
+    friend FP128_INLINE fixed_point128 expm1(const fixed_point128& x) noexcept
+    {
+        return exp(x) - fixed_point128::one();
     }
     /**
      * @brief Computes 2 to the power of x
