@@ -114,7 +114,17 @@ void bench()
     QueryPerformanceCounter(&time_end);
     totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
     ips = (uint64_t)(iterations / totalTime);
-    print_ips("Multiplication", ips);
+    print_ips("Multiplication by fixed_point128", ips);
+
+    fixed_point128<32> f10;
+    uint32_t int_val = 123456789;
+    QueryPerformanceCounter(&time_start);
+    for (int i = 0; i < iterations; ++i)
+        f10 = f10 * int_val;
+    QueryPerformanceCounter(&time_end);
+    totalTime = (time_end.QuadPart - time_start.QuadPart) / frequency;
+    ips = (uint64_t)(iterations / totalTime);
+    print_ips("Multiplication by int", ips);
 
 
     iterations /= 2;
