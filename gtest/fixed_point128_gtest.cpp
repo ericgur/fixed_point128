@@ -1130,7 +1130,7 @@ TEST(fixed_point128, log) {
         double res = log(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = log(f1);
-        EXPECT_DOUBLE_EQ(fp128_res, res) << "exp: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "log: " << "value=" << value;
     }
 }
 TEST(fixed_point128, log2) {
@@ -1140,7 +1140,7 @@ TEST(fixed_point128, log2) {
         double res = log2(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = log2(f1);
-        EXPECT_DOUBLE_EQ(fp128_res, res) << "exp: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "log2: " << "value=" << value;
     }
 }
 TEST(fixed_point128, log10) {
@@ -1150,7 +1150,17 @@ TEST(fixed_point128, log10) {
         double res = log10(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = log10(f1);
-        EXPECT_DOUBLE_EQ(fp128_res, res) << "exp: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "log10: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, log1p) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
+        double res = log1p(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = log1p(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "log1p: " << "value=" << value;
     }
 }
 TEST(fixed_point128, logb) {
@@ -1160,7 +1170,7 @@ TEST(fixed_point128, logb) {
         double res = logb(value);
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = logb(f1);
-        EXPECT_DOUBLE_EQ(fp128_res, res) << "exp: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "logb: " << "value=" << value;
     }
 }
 TEST(fixed_point128, sin) {

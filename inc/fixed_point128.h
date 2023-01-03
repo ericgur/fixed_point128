@@ -85,6 +85,7 @@ template<int32_t I> fixed_point128<I> log(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> log2(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> log10(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> logb(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> log1p(fixed_point128<I> x) noexcept;
 // non CRT function
 template<int32_t I> uint64_t lzcnt128(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> reciprocal(const fixed_point128<I>& x) noexcept;
@@ -2127,6 +2128,15 @@ private:
         static const fixed_point128 inv_log2_e = "0.693147180559945309417232121458176575";
         fixed_point128 y = log2(x);
         return y * inv_log2_e;
+    }
+    /**
+     * @brief Calculates the natural Log (base e) of 1 + x: log(1 + x)
+     * @param x The number to perform log on.
+     * @return log1p(x)
+    */
+    friend FP128_INLINE fixed_point128 log1p(fixed_point128 x) noexcept
+    {
+        return log(fixed_point128::one() + x);
     }
     /**
      * @brief Calculates Log base 10 of x: log10(x)
