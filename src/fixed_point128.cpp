@@ -483,8 +483,7 @@ void test_comparison()
     }
 }
 
-
-int main()
+void test()
 {
     test_precision();
     test_conversion();
@@ -495,5 +494,10 @@ int main()
     test_functions();
     test_string();
     test_comparison();
+}
+
+int main()
+{
+    //test();
     bench();
 }
