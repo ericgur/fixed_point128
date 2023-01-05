@@ -95,6 +95,10 @@ void print_ips(const char* name, int64_t ips)
     }
 }
 
+/**
+ * @brief Benches all comparison functions
+ * @param time_per_function Time spent in each sub-test
+*/
 void bench_comparison_operators(double time_per_function = 1.0)
 {
     Duration dur;
@@ -576,6 +580,51 @@ void bench_atan(double time_per_function = 1.0)
     print_ips("atan", (uint64_t)(total_iterations / dur.duration()));
 }
 
+void bench_sinh(double time_per_function = 1.0)
+{
+    Duration dur;
+    uint64_t total_iterations = 0;
+    // setup
+    fixed_point128<10> f1 = fixed_point128<10>::e() / 2;
+    fixed_point128<10> f2;
+    // start the clock
+    dur.start();
+    while (dur.cur_duration() < time_per_function) {
+        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+            f2 = sinh(f1);
+        }
+        total_iterations += BENCH_ITERATIONS;
+    }
+    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+
+    print_ips("sinh", (uint64_t)(total_iterations / dur.duration()));
+}
+
+void bench_cosh(double time_per_function = 1.0)
+{
+    Duration dur;
+    uint64_t total_iterations = 0;
+    // setup
+    fixed_point128<10> f1 = fixed_point128<10>::e() / 2;
+    fixed_point128<10> f2;
+    // start the clock
+    dur.start();
+    while (dur.cur_duration() < time_per_function) {
+        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+            f2 = cosh(f1);
+        }
+        total_iterations += BENCH_ITERATIONS;
+    }
+    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+
+    print_ips("cosh", (uint64_t)(total_iterations / dur.duration()));
+}
+
+/**
+ * @brief Benches all simple arithmatic functions
+ * @param time_per_function Time spent in each sub-test
+*/
+
 void bench_arithmatic(double time_per_function = 1.0)
 {
     bench_addition(time_per_function);
@@ -584,6 +633,11 @@ void bench_arithmatic(double time_per_function = 1.0)
     bench_division(time_per_function);
     bench_reciprocal(time_per_function);
 }
+
+/**
+ * @brief Benches all exponent functions
+ * @param time_per_function Time spent in each sub-test
+*/
 
 void bench_exponents(double time_per_function = 1.0)
 {
@@ -594,6 +648,10 @@ void bench_exponents(double time_per_function = 1.0)
     bench_expm1(time_per_function);
 }
 
+/**
+ * @brief Benches all log functions
+ * @param time_per_function Time spent in each sub-test
+*/
 void bench_log_functions(double time_per_function = 1.0)
 {
     bench_log(time_per_function);
@@ -602,6 +660,10 @@ void bench_log_functions(double time_per_function = 1.0)
     bench_log1p(time_per_function);
 }
 
+/**
+ * @brief Benches all trig functions
+ * @param time_per_function Time spent in each sub-test
+*/
 void bench_trig_functions(double time_per_function = 1.0)
 {
     bench_sin(time_per_function);
@@ -610,8 +672,13 @@ void bench_trig_functions(double time_per_function = 1.0)
     bench_acos(time_per_function);
     bench_tan(time_per_function);
     bench_atan(time_per_function);
+    bench_sinh(time_per_function);
+    bench_cosh(time_per_function);
 }
 
+/**
+ * @brief Main benchmark function
+*/
 void bench() 
 {
     bench_comparison_operators(1);

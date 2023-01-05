@@ -1316,3 +1316,23 @@ TEST(fixed_point128, pow) {
         EXPECT_DOUBLE_EQ(fp128_res, res) << "pow: " << " value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(fixed_point128, sinh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::sinh(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = sinh(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "sinh: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, cosh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::cosh(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = cosh(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "cosh: " << "value=" << value;
+    }
+}

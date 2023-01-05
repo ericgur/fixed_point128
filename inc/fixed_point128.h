@@ -78,6 +78,12 @@ template<int32_t I> fixed_point128<I> cos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> acos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> sinh(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> asinh(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> cosh(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> acosh(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> tanh(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> atanh(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> exp(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> exp2(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> expm1(const fixed_point128<I>& x) noexcept;
@@ -1843,7 +1849,7 @@ private:
     /**
      * @brief Calculate the inverse sine function
      * Uses Newton's method to converge quickly.
-     * @param x value in the range [-1,1]
+     * @param x value in radians in the range [-1,1]
      * @return Inverse sine of x
     */
     friend fixed_point128 asin(fixed_point128 x) noexcept
@@ -1903,7 +1909,7 @@ private:
     /**
      * @brief Calculate the inverse cosine function
      * Uses Newton's method to converge quickly.
-     * @param x value in the range [-1,1]
+     * @param x value in radians in the range [-1,1]
      * @return Inverse cosine of x
     */
     friend fixed_point128 acos(fixed_point128 x) noexcept
@@ -1941,7 +1947,7 @@ private:
     }
     /**
      * @brief Calculate the inverse tangent function
-     * @param x value
+     * @param x value in radians
      * @return Arctangent of x
     */
     friend fixed_point128 atan(fixed_point128 x) noexcept
@@ -1986,6 +1992,115 @@ private:
         return res;
     }
     /**
+    * @brief Calculate the hyperbolic sine function
+    * Using the Maclaurin series expansion, the formula is:
+    *               x^3   x^5   x^7
+    * sinh(x) = x + --- + --- + --- + ...
+    *                2!    4!    6!
+    * or if x > 1, use the exponent function:
+    * 
+    *           e^x - e^(-x)
+    * sinh(x) = ------------
+    *                2
+    * @param x value
+    * @return Sine of x
+    */
+    friend FP128_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept
+    {
+        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sinh()!");
+        return (exp(x) - exp(-x)) >> 1;
+    // the below code while faster, produces lower precision results
+    //    if (fabs(x) > 1) {
+    //        return (exp(x) - exp(-x)) >> 1;
+    //    }
+    //    else {
+    //        // first part of the series is just 'x'
+    //        const fixed_point128 xx = x * x;
+    //        fixed_point128 elem_denom, elem_nom = x;
+    //        fixed_point128 res = x;
+
+    //        // compute the rest of the series, starting with: -(x^3 / 2!)
+    //        for (int i = 3; ; i += 2) {
+    //            elem_nom *= xx;
+    //            fact_reciprocal(i - 1, elem_denom);
+    //            fixed_point128 elem = elem_nom * elem_denom; // next element in the series
+    //            // precision limit has been hit
+    //            if (!elem)
+    //                break;
+    //            res += elem;
+    //        }
+    //        return res;
+    //    }
+    }
+    /**
+     * @brief Calculates the inverse hyperbolic sine
+     * @param x value in radians
+     * @return hyperbolic sine of x
+    */
+    friend FP128_INLINE fixed_point128 asinh(const fixed_point128& x) noexcept
+    {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
+    /**
+    * @brief Calculate the hyperbolic cosine function over a limited range [-0.5pi, 0.5pi]
+    * Using the Maclaurin series expansion, the formula is:
+    *               x^2   x^4   x^6
+    * sinh(x) = 1 + --- + --- + --- + ...
+    *                2!    4!    6!
+    * @param x value in Radians in the range [-0.5pi, 0.5pi]
+    * @return Sine of x
+    */
+    friend FP128_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept
+    {
+        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cosh()!");
+        return (exp(x) + exp(-x)) >> 1;
+
+        //const fixed_point128 xx = x * x;
+        //fixed_point128 elem_denom, elem_nom = fixed_point128::one();
+        //// first part of the series is 1
+        //fixed_point128 res = fixed_point128::one();
+
+        //// compute the rest of the series, starting with: -(x^2 / 2!)
+        //for (int i = 2; ; i += 2) {
+        //    elem_nom *= xx;
+        //    fact_reciprocal(i, elem_denom);
+        //    fixed_point128 elem = elem_nom * elem_denom; // next element in the series
+        //    // precision limit has been hit
+        //    if (!elem)
+        //        break;
+        //    res += elem;
+        //}
+
+        //return res;
+    }
+    /**
+     * @brief Calculates the inverse hyperbolic cosine
+     * @param x value in radians
+     * @return hyperbolic sine of x
+    */
+    friend FP128_INLINE fixed_point128 acosh(const fixed_point128& x) noexcept
+    {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
+    /**
+     * @brief Calculates the hyperbolic cosine
+     * @param x value in radians
+     * @return hyperbolic sine of x
+    */
+    friend FP128_INLINE fixed_point128 tanh(const fixed_point128& x) noexcept
+    {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
+    /**
+     * @brief Calculates the inverse hyperbolic cosine
+     * @param x value in radians
+     * @return hyperbolic sine of x
+    */
+    friend FP128_INLINE fixed_point128 atanh(const fixed_point128& x) noexcept
+    {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
+    /**
      * @brief Calculates the exponent of x: e^x
      * Using the Maclaurin series expansion, the formula is:
      *                x^1     x^2     x^3
@@ -2006,7 +2121,8 @@ private:
         fixed_point128 _ix, exp_ix; // integer part of x
         fixed_point128 fx = modf(fabs(x), &_ix);
         uint64_t ix = static_cast<uint64_t>(_ix); // 64 bit is an overkill to hold the exponent
-        
+        fixed_point128 res;
+
         // compute e^ix (integer part of x)
         if (ix > 0) {
             exp_ix = 1;      // result
@@ -2024,19 +2140,25 @@ private:
 
         // compute e^fx (fraction part of x)
         // first and second elements of the series
-        fixed_point128 exp_fx = fixed_point128::one() + fx;
-        fixed_point128 elem_denom, elem_nom = fx;
+        if (fx) {
+            fixed_point128 exp_fx = fixed_point128::one() + fx;
+            fixed_point128 elem_denom, elem_nom = fx;
 
-        for (int i = 2; ; ++i) {
-            elem_nom *= fx;
-            fact_reciprocal(i, elem_denom);
-            fixed_point128 elem = elem_nom * elem_denom;
-            if (!elem)
-                break;
-            exp_fx += elem; // next element in the series
+            for (int i = 2; ; ++i) {
+                elem_nom *= fx;
+                fact_reciprocal(i, elem_denom);
+                fixed_point128 elem = elem_nom * elem_denom;
+                if (!elem)
+                    break;
+                exp_fx += elem; // next element in the series
+            }
+
+            res = exp_ix * exp_fx;
+        }
+        else {
+            res = exp_ix;
         }
 
-        fixed_point128 res = exp_ix * exp_fx;
         return (x.is_positive()) ? res : reciprocal(res);
     }
     /**
