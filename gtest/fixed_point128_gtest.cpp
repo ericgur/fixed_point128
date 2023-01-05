@@ -1113,6 +1113,46 @@ TEST(fixed_point128, ShiftLeft) {
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "double value1=" << value1 << "; uint32_t shift=" << shift << ";";
     }
 }
+TEST(fixed_point128, floor) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
+        double res = floor(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = floor(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "floor: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, ceil) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
+        double res = ceil(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = ceil(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "ceil: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, trunc) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
+        double res = trunc(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = trunc(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "trunc: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, round) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
+        double res = round(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = round(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "round: " << "value=" << value;
+    }
+}
 TEST(fixed_point128, reciprocal) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
