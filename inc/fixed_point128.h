@@ -852,9 +852,9 @@ public:
                 FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
             }
         }
-        //else {
-        //    *this *= fabs(reciprocal(other));
-        //}
+        else if constexpr (FP128_USE_RECIPROCAL_FOR_DIVISION) {
+            *this *= fabs(reciprocal(other));
+        }
         else {
             uint64_t q[4]{};
             const uint64_t nom[4] = {0, 0, low, high};

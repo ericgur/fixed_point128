@@ -47,6 +47,7 @@
 #endif
 
 static constexpr bool FP128_CPP_STYLE_MODULO = true; // set to false to test python style modulo
+static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 
 /***********************************************************************************
 *                                  Macros
