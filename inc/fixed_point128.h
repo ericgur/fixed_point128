@@ -78,6 +78,7 @@ template<int32_t I> fixed_point128<I> cos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> acos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> atan2(fixed_point128<I> y, fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> sinh(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> asinh(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> cosh(fixed_point128<I> x) noexcept;
@@ -851,32 +852,32 @@ public:
                 FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
             }
         }
-        else {
-            *this *= fabs(reciprocal(other));
-        }
         //else {
-        //    uint64_t q[4]{};
-        //    const uint64_t nom[4] = {0, 0, low, high};
-        //    const uint64_t denom[2] = {other.low, other.high};
-
-        //    if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
-        //        static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
-        //        need_rounding = (q[0] & half) != 0;
-        //        // result in q needs to shifted left by F (F bits were added to the right)
-        //        // shifting right by 128-F is simpler.
-        //        if constexpr (I == 64) {
-        //            high = q[1];
-        //            low = q[0];
-        //        }
-        //        else if constexpr (I < 64) {
-        //            high = __shiftright128(q[1], q[2], I);
-        //            low = __shiftright128(q[0], q[1], I);
-        //        }
-        //    }
-        //    else { // error
-        //        FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
-        //    }
+        //    *this *= fabs(reciprocal(other));
         //}
+        else {
+            uint64_t q[4]{};
+            const uint64_t nom[4] = {0, 0, low, high};
+            const uint64_t denom[2] = {other.low, other.high};
+
+            if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+                static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
+                need_rounding = (q[0] & half) != 0;
+                // result in q needs to shifted left by F (F bits were added to the right)
+                // shifting right by 128-F is simpler.
+                if constexpr (I == 64) {
+                    high = q[1];
+                    low = q[0];
+                }
+                else if constexpr (I < 64) {
+                    high = __shiftright128(q[1], q[2], I);
+                    low = __shiftright128(q[0], q[1], I);
+                }
+            }
+            else { // error
+                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+            }
+        }
 
         if (need_rounding) {
             ++low;
@@ -1947,7 +1948,7 @@ private:
     }
     /**
      * @brief Calculate the inverse tangent function
-     * @param x value in radians
+     * @param x value
      * @return Arctangent of x
     */
     friend fixed_point128 atan(fixed_point128 x) noexcept
@@ -1990,6 +1991,53 @@ private:
         // restore sign if needed
         res.sign = sign;
         return res;
+    }
+    /**
+     * @brief Calculate the inverse tangent function of the ratio y / x
+     * @param y value
+     * @param x value
+     * @return Arctangent of y / x in the range [-pi, pi]
+    */
+    friend fixed_point128 atan2(fixed_point128 y, fixed_point128 x) noexcept
+    {
+        // constants for segmentation
+        static const fixed_point128& pi = fixed_point128::pi();
+        static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
+        static const fixed_point128& quarter_pi = fixed_point128::half_pi() >> 1; // pi / 4
+        static const fixed_point128 eps = fixed_point128::epsilon() << 1;
+
+        if (!x) {
+            if (!y) return 0;
+
+            return (y.is_negative()) ? -half_pi : half_pi;
+        }
+        if (!y)
+            return (x.is_negative()) ? -pi : pi;
+        
+        fixed_point128 res;
+        // save the signs of x, y
+        int32_t x_sign = x.is_negative();
+        int32_t y_sign = y.is_negative();
+        bool comp = fabs(y) > fabs(x);
+        fixed_point128 ratio;
+        // work with positive x, y
+        //x.sign = 0;
+        //y.sign = 0;
+
+        // calculate the complementary to pi/2
+        ratio = (comp) ? x / y : y / x;
+        res = atan(ratio);
+
+        if (comp)
+            res = (res.is_negative()) ? -half_pi - res : half_pi - res;
+        //if (y_sign) 
+        //    res += half_pi;
+        //return (x_sign) ? -res : res;
+        if (x > 0)
+            return res;
+
+        // x < 0
+        return (y < 0) ? res - pi : res + pi;
     }
     /**
     * @brief Calculate the hyperbolic sine function

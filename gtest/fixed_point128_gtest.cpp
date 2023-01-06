@@ -1273,6 +1273,18 @@ TEST(fixed_point128, atan) {
         EXPECT_DOUBLE_EQ(fp128_res, res) << "atan: " << "value=" << value;
     }
 }
+TEST(fixed_point128, atan2) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random(-10, 14); //lower exponent results in lost bits
+        double value2 = get_double_random(-10, 14); //lower exponent results in lost bits
+        double res = atan2(value1, value2);
+        fixed_point128<16> f1 = value1;
+        fixed_point128<16> f2 = value2;
+        fixed_point128<16> fp128_res = atan2(f1, f2);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "atan2: " << " value1=" << value1 << ", value2=" << value2;
+    }
+}
 TEST(fixed_point128, exp) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
