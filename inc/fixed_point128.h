@@ -2075,7 +2075,7 @@ private:
     }
     /**
      * @brief Calculates the inverse hyperbolic cosine
-     * @param x value in radians
+     * @param x value
      * @return hyperbolic sine of x
     */
     friend FP128_INLINE fixed_point128 acosh(const fixed_point128& x) noexcept
@@ -2084,16 +2084,23 @@ private:
     }
     /**
      * @brief Calculates the hyperbolic cosine
-     * @param x value in radians
+     * @param x value
      * @return hyperbolic sine of x
     */
     friend FP128_INLINE fixed_point128 tanh(const fixed_point128& x) noexcept
     {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        fixed_point128 ex = exp(x); // e^x
+        fixed_point128 exm1 = exp(-x); // e^(-x)
+        //
+        //           e^x - e^(-x)
+        // tanh(x) = ------------
+        //           e^x + e^(-x)
+        //
+        return (ex - exm1) / (ex + exm1);
     }
     /**
      * @brief Calculates the inverse hyperbolic cosine
-     * @param x value in radians
+     * @param x value
      * @return hyperbolic sine of x
     */
     friend FP128_INLINE fixed_point128 atanh(const fixed_point128& x) noexcept

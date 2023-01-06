@@ -1336,3 +1336,13 @@ TEST(fixed_point128, cosh) {
         EXPECT_DOUBLE_EQ(fp128_res, res) << "cosh: " << "value=" << value;
     }
 }
+TEST(fixed_point128, tanh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::tanh(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = tanh(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "tanh: " << "value=" << value;
+    }
+}
