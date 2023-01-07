@@ -418,7 +418,7 @@ public:
      * Allows creating very high precision values. Much slower than the other constructors.
      * @param x Input string
     */
-    FP128_INLINE fixed_point128(const std::string& x) noexcept {
+    __forceinline fixed_point128(const std::string& x) noexcept {
         fixed_point128 temp = x.c_str();
         *this = temp;
     }
@@ -428,7 +428,7 @@ public:
      * @param h High QWORD
      * @param s Sign - zero for positive, 1 for negative.
     */
-    FP128_INLINE fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept:
+    __forceinline fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept:
         low(l), high(h) ,sign(s) {
         sign = (sign != 0);
     }
@@ -442,7 +442,7 @@ public:
      * @param other Object to copy from 
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator=(const fixed_point128& other) noexcept {
+    __forceinline fixed_point128& operator=(const fixed_point128& other) noexcept {
         high = other.high;
         low = other.low;
         sign = other.sign;
@@ -453,7 +453,7 @@ public:
      * @param other Object to copy from
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator=(const fixed_point128&& other) noexcept {
+    __forceinline fixed_point128& operator=(const fixed_point128&& other) noexcept {
         high = other.high;
         low = other.low;
         sign = other.sign;
@@ -776,8 +776,10 @@ public:
         const bool need_rounding = (res[index] & half) != 0;
 
         // copy block #1 (lowest)
-        low = __shiftright128(res[index], res[index + 1], lsb); // intrinsic is faster when shift is < 64
-        high = __shiftright128(res[index+1], res[index + 2], lsb);
+        //low = __shiftright128(res[index], res[index + 1], lsb); // intrinsic is faster when shift is < 64
+        //high = __shiftright128(res[index+1], res[index + 2], lsb);
+        low = shift_right128(res[index], res[index + 1], lsb); // custom function is 20% faster in Mandelbrot than the intrinsic
+        high = shift_right128(res[index+1], res[index + 2], lsb);
 
         if (need_rounding) {
             ++low; // low will wrap around to zero if overflowed
