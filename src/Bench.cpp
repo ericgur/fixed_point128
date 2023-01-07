@@ -101,6 +101,11 @@ void print_ips(const char* name, int64_t ips)
 */
 void bench_comparison_operators(double time_per_function = 1.0)
 {
+    printf("\n");
+    printf("-----------------------------\n");
+    printf("Comparison operator benchmark\n");
+    printf("-----------------------------\n");
+
     Duration dur;
     uint64_t total_iterations = 0;
     // setup
@@ -111,15 +116,18 @@ void bench_comparison_operators(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            dummy += (f1 > f2) && (f1 >= f2) && (f1 < f2) && (f1 <= f2);
+            dummy += (f1 > f2);
+            dummy += (f1 >= f2);
+            dummy += (f1 < f2);
+            dummy += (f1 <= f2);
         }
-        total_iterations += BENCH_ITERATIONS;
+        total_iterations += 4 * BENCH_ITERATIONS;
     }
     if (dummy > 5) { // trick the compiler to not optimize out the above loop
         printf("");
     }
 
-    print_ips("Operators >, >=, <, <= (all 4 in one line)", (uint64_t)(total_iterations / dur.duration()));
+    print_ips("Operators >, >=, <, <= (average of all 4)", (uint64_t)(total_iterations / dur.duration()));
 
     //dur.start();
     //while (dur.cur_duration() < time_per_function) {
@@ -600,6 +608,26 @@ void bench_sinh(double time_per_function = 1.0)
     print_ips("sinh", (uint64_t)(total_iterations / dur.duration()));
 }
 
+void bench_asinh(double time_per_function = 1.0)
+{
+    Duration dur;
+    uint64_t total_iterations = 0;
+    // setup
+    fixed_point128<10> f1 = fixed_point128<10>::pi() / 5;
+    fixed_point128<10> f2;
+    // start the clock
+    dur.start();
+    while (dur.cur_duration() < time_per_function) {
+        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+            f2 = asinh(f1);
+        }
+        total_iterations += BENCH_ITERATIONS;
+    }
+    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+
+    print_ips("asinh", (uint64_t)(total_iterations / dur.duration()));
+}
+
 void bench_cosh(double time_per_function = 1.0)
 {
     Duration dur;
@@ -620,6 +648,66 @@ void bench_cosh(double time_per_function = 1.0)
     print_ips("cosh", (uint64_t)(total_iterations / dur.duration()));
 }
 
+void bench_acosh(double time_per_function = 1.0)
+{
+    Duration dur;
+    uint64_t total_iterations = 0;
+    // setup
+    fixed_point128<10> f1 = fixed_point128<10>::e() / 2;
+    fixed_point128<10> f2;
+    // start the clock
+    dur.start();
+    while (dur.cur_duration() < time_per_function) {
+        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+            f2 = acosh(f1);
+        }
+        total_iterations += BENCH_ITERATIONS;
+    }
+    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+
+    print_ips("acosh", (uint64_t)(total_iterations / dur.duration()));
+}
+
+void bench_tanh(double time_per_function = 1.0)
+{
+    Duration dur;
+    uint64_t total_iterations = 0;
+    // setup
+    fixed_point128<10> f1 = fixed_point128<10>::e() / 2;
+    fixed_point128<10> f2;
+    // start the clock
+    dur.start();
+    while (dur.cur_duration() < time_per_function) {
+        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+            f2 = tanh(f1);
+        }
+        total_iterations += BENCH_ITERATIONS;
+    }
+    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+
+    print_ips("tanh", (uint64_t)(total_iterations / dur.duration()));
+}
+
+void bench_atanh(double time_per_function = 1.0)
+{
+    Duration dur;
+    uint64_t total_iterations = 0;
+    // setup
+    fixed_point128<10> f1 = fixed_point128<10>::e() / 4; // abs(v) < 1
+    fixed_point128<10> f2;
+    // start the clock
+    dur.start();
+    while (dur.cur_duration() < time_per_function) {
+        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+            f2 = tanh(f1);
+        }
+        total_iterations += BENCH_ITERATIONS;
+    }
+    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+
+    print_ips("atanh", (uint64_t)(total_iterations / dur.duration()));
+}
+
 /**
  * @brief Benches all simple arithmatic functions
  * @param time_per_function Time spent in each sub-test
@@ -627,6 +715,11 @@ void bench_cosh(double time_per_function = 1.0)
 
 void bench_arithmatic(double time_per_function = 1.0)
 {
+    printf("\n");
+    printf("--------------------\n");
+    printf("Arithmatic benchmark\n");
+    printf("--------------------\n");
+
     bench_addition(time_per_function);
     bench_subtraction(time_per_function);
     bench_multiplication(time_per_function);
@@ -641,6 +734,10 @@ void bench_arithmatic(double time_per_function = 1.0)
 
 void bench_exponents(double time_per_function = 1.0)
 {
+    printf("\n");
+    printf("-------------------\n");
+    printf("Exponents benchmark\n");
+    printf("-------------------\n");
     bench_sqrt(time_per_function);
     bench_exp(time_per_function);
     bench_exp2(time_per_function);
@@ -654,6 +751,11 @@ void bench_exponents(double time_per_function = 1.0)
 */
 void bench_log_functions(double time_per_function = 1.0)
 {
+    printf("\n");
+    printf("---------------------\n");
+    printf("Logarithmic benchmark\n");
+    printf("---------------------\n");
+
     bench_log(time_per_function);
     bench_log2(time_per_function);
     bench_log10(time_per_function);
@@ -666,24 +768,44 @@ void bench_log_functions(double time_per_function = 1.0)
 */
 void bench_trig_functions(double time_per_function = 1.0)
 {
+    printf("\n");
+    printf("----------------------\n");
+    printf("Trigonometic benchmark\n");
+    printf("----------------------\n");
+
     bench_sin(time_per_function);
     bench_asin(time_per_function);
     bench_cos(time_per_function);
     bench_acos(time_per_function);
     bench_tan(time_per_function);
     bench_atan(time_per_function);
-    bench_sinh(time_per_function);
-    bench_cosh(time_per_function);
 }
+void bench_hyperbolic_trig_functions(double time_per_function = 1.0)
+{
+    printf("\n");
+    printf("---------------------------------\n");
+    printf("Hyperbolic trigonometic benchmark\n");
+    printf("---------------------------------\n");
 
+    bench_sinh(time_per_function);
+    bench_asinh(time_per_function);
+    bench_cosh(time_per_function);
+    bench_acosh(time_per_function);
+    bench_tanh(time_per_function);
+    bench_atanh(time_per_function);
+}
 /**
  * @brief Main benchmark function
 */
 void bench() 
 {
+    printf("=========================\n");
+    printf("Single threaded benchmark\n");
+    printf("=========================\n");
     bench_comparison_operators(1);
     bench_arithmatic(1);
     bench_exponents(1);
     bench_log_functions(1);
     bench_trig_functions(1);
+    bench_hyperbolic_trig_functions(1);
 }
