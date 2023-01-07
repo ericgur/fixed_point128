@@ -2018,33 +2018,28 @@ private:
         static const fixed_point128& quarter_pi = fixed_point128::half_pi() >> 1; // pi / 4
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
 
+        // x == 0
         if (!x) {
             if (!y) return 0;
 
             return (y.is_negative()) ? -half_pi : half_pi;
         }
+        // y == 0
         if (!y)
             return (x.is_negative()) ? -pi : pi;
         
         fixed_point128 res;
         // save the signs of x, y
-        int32_t x_sign = x.is_negative();
-        int32_t y_sign = y.is_negative();
         bool comp = fabs(y) > fabs(x);
         fixed_point128 ratio;
-        // work with positive x, y
-        //x.sign = 0;
-        //y.sign = 0;
 
-        // calculate the complementary to pi/2
+        // calculate the ratio keeping it below 1.0
         ratio = (comp) ? x / y : y / x;
         res = atan(ratio);
 
         if (comp)
             res = (res.is_negative()) ? -half_pi - res : half_pi - res;
-        //if (y_sign) 
-        //    res += half_pi;
-        //return (x_sign) ? -res : res;
+
         if (x > 0)
             return res;
 
