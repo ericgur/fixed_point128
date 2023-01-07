@@ -69,6 +69,7 @@ template<int32_t I> fixed_point128<I> floor(const fixed_point128<I>& x) noexcept
 template<int32_t I> fixed_point128<I> ceil(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> trunc(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> round(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> copysign(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> fmod(const fixed_point128<I>& x, const fixed_point128<I>& y);
 template<int32_t I> fixed_point128<I> modf(const fixed_point128<I>& x, fixed_point128<I>* iptr) noexcept;
 template<int32_t I> fixed_point128<I> sqrt(const fixed_point128<I>& x, uint32_t iterations = 3) noexcept;
@@ -1600,6 +1601,18 @@ private:
         return res;
     }
     /**
+     * @brief returns the value of x with the sign of y.
+     * @param x The value that's returned as the magnitude of the result.
+     * @param x The floating-point value that's returned as the magnitude of the result.
+     * @return The copysign functions return a floating-point value that combines the magnitude of x and the sign of y.
+    */
+    friend FP128_INLINE fixed_point128 copysign(const fixed_point128& x, const fixed_point128& y) noexcept
+    {
+        fixed_point128 res = x;
+        res.sign = y.sign;
+        return res;
+    }
+    /**
      * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/root.
      * @param x Numerator
      * @param y Denominator
@@ -1609,7 +1622,6 @@ private:
     {
         return x % y;
     }
-
     /**
      * @brief Split into integer and fraction parts.
      * Both results carry the sign of the input variable.
