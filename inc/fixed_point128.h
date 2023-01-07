@@ -72,6 +72,9 @@ template<int32_t I> fixed_point128<I> round(const fixed_point128<I>& x) noexcept
 template<int32_t I> fixed_point128<I> copysign(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> fmod(const fixed_point128<I>& x, const fixed_point128<I>& y);
 template<int32_t I> fixed_point128<I> modf(const fixed_point128<I>& x, fixed_point128<I>* iptr) noexcept;
+template<int32_t I> fixed_point128<I> fdim(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template<int32_t I> fixed_point128<I> fmin(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template<int32_t I> fixed_point128<I> fmax(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> sqrt(const fixed_point128<I>& x, uint32_t iterations = 3) noexcept;
 template<int32_t I> fixed_point128<I> sin(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> asin(fixed_point128<I> x) noexcept;
@@ -1641,6 +1644,36 @@ private:
         fixed_point128 res = x;
         res.high &= ~x.int_mask; // lose the integer part
         return res;
+    }
+    /**
+     * @brief Determines the positive difference between the first and second values.
+     * @param x First value
+     * @param y Second value
+     * @return If x > y returns x - y. Otherwise zero.
+    */
+    friend FP128_INLINE fixed_point128 fdim(const fixed_point128& x, const fixed_point128& y) noexcept
+    {
+        return (x > y) ? x - y : 0;
+    }
+    /**
+     * @brief Returns the mimimun between x and y.
+     * @param x First value
+     * @param y Second value
+     * @return If x < y returns x. Otherwise y.
+    */
+    friend FP128_INLINE fixed_point128 fmin(const fixed_point128& x, const fixed_point128& y) noexcept
+    {
+        return (x < y) ? x : y;
+    }
+    /**
+     * @brief Returns the maximum between x and y.
+     * @param x First value
+     * @param y Second value
+     * @return If x > y returns x. Otherwise y.
+    */
+    friend FP128_INLINE fixed_point128 fmax(const fixed_point128& x, const fixed_point128& y) noexcept
+    {
+        return (x > y) ? x : y;
     }
     /**
      * @brief Calculates the left zero count of value x, ignoring the sign.
