@@ -2048,12 +2048,7 @@ private:
     }
     /**
     * @brief Calculate the hyperbolic sine function
-    * Using the Maclaurin series expansion, the formula is:
-    *               x^3   x^5   x^7
-    * sinh(x) = x + --- + --- + --- + ...
-    *                2!    4!    6!
-    * or if x > 1, use the exponent function:
-    * 
+    * Use the exponent function which produces more accurate results than the power series.
     *           e^x - e^(-x)
     * sinh(x) = ------------
     *                2
@@ -2069,6 +2064,11 @@ private:
     //        return (exp(x) - exp(-x)) >> 1;
     //    }
     //    else {
+    //        // Using the Maclaurin series expansion, the formula is :
+    //        //                x^3   x^5   x^7
+    //        //  sinh(x) = x + --- + --- + ---  +...
+    //        //                 2!    4!    6!
+    //        
     //        // first part of the series is just 'x'
     //        const fixed_point128 xx = x * x;
     //        fixed_point128 elem_denom, elem_nom = x;
@@ -2089,19 +2089,24 @@ private:
     }
     /**
      * @brief Calculates the inverse hyperbolic sine
-     * @param x value in radians
-     * @return hyperbolic sine of x
+     * For positive x:
+     * asinh(x) = log(x + sqrt(x^2 + 1))
+     * For negative x, the function returns the result with the sign inverted
+     * @param x value
+     * @return Inverse hyperbolic sine of x
     */
     friend FP128_INLINE fixed_point128 asinh(const fixed_point128& x) noexcept
     {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        fixed_point128 absx = fabs(x);
+        fixed_point128 res = log(absx + sqrt(absx * absx + fixed_point128::one()));
+
+        return (x.is_positive()) ? res : -res;
     }
     /**
     * @brief Calculate the hyperbolic cosine function over a limited range [-0.5pi, 0.5pi]
-    * Using the Maclaurin series expansion, the formula is:
-    *               x^2   x^4   x^6
-    * sinh(x) = 1 + --- + --- + --- + ...
-    *                2!    4!    6!
+    *           e^x + e^(-x)
+    * cosh(x) = ------------
+    *                2
     * @param x value in Radians in the range [-0.5pi, 0.5pi]
     * @return Sine of x
     */
@@ -2109,6 +2114,11 @@ private:
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cosh()!");
         return (exp(x) + exp(-x)) >> 1;
+
+        // Using the Maclaurin series expansion, the formula is:
+        //               x^2   x^4   x^6
+        // sinh(x) = 1 + --- + --- + --- + ...
+        //                2!    4!    6!
 
         //const fixed_point128 xx = x * x;
         //fixed_point128 elem_denom, elem_nom = fixed_point128::one();
@@ -2130,17 +2140,26 @@ private:
     }
     /**
      * @brief Calculates the inverse hyperbolic cosine
-     * @param x value
-     * @return hyperbolic sine of x
+     * For x >= 1:
+     * acosh(x) = log(x + sqrt(x^2 - 1))
+     * For x < 1, the function return zero
+     * @param x value in the range [1, inf]
+     * @return Inverse hyperbolic cosine of x
     */
     friend FP128_INLINE fixed_point128 acosh(const fixed_point128& x) noexcept
     {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        if (x < 1) return 0;
+
+        fixed_point128 res = log(x + sqrt(x * x - fixed_point128::one()));
+        return res;
     }
     /**
-     * @brief Calculates the hyperbolic cosine
+     * @brief Calculates the hyperbolic tangent
+     *           e^x - e^(-x)
+     * tanh(x) = ------------
+     *           e^x + e^(-x)
      * @param x value
-     * @return hyperbolic sine of x
+     * @return hyperbolic tangent of x
     */
     friend FP128_INLINE fixed_point128 tanh(const fixed_point128& x) noexcept
     {
@@ -2156,7 +2175,7 @@ private:
     /**
      * @brief Calculates the inverse hyperbolic cosine
      * @param x value
-     * @return hyperbolic sine of x
+     * @return Inverse hyperbolic tangent of x
     */
     friend FP128_INLINE fixed_point128 atanh(const fixed_point128& x) noexcept
     {

@@ -1350,6 +1350,16 @@ TEST(fixed_point128, sinh) {
         EXPECT_DOUBLE_EQ(fp128_res, res) << "sinh: " << "value=" << value;
     }
 }
+TEST(fixed_point128, asinh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::asinh(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = asinh(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "asinh: " << "value=" << value;
+    }
+}
 TEST(fixed_point128, cosh) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -1358,6 +1368,16 @@ TEST(fixed_point128, cosh) {
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = cosh(f1);
         EXPECT_DOUBLE_EQ(fp128_res, res) << "cosh: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, acosh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = 1.0 + fabs(get_double_random(-60, 2)); // must be >= 1
+        double res = ::acosh(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = acosh(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "acosh: " << "value=" << value;
     }
 }
 TEST(fixed_point128, tanh) {
