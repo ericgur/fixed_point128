@@ -438,6 +438,17 @@ void test_functions()
 void test_comparison()
 {
     printf("\nTest comparison\n");
+
+    auto t = fixed_point128<10>::one();
+    assert(1 == t);
+    assert(t == 1);
+    assert(2 > t);
+    assert(!(t > 2));
+    assert(t >= 1.0);
+    assert(1.0 >= t);
+    assert(t > 0.0);
+    assert(!(0.0 > t));
+
     double values[][2] = {
             {2, 1},
             {-2, 1},
@@ -447,6 +458,7 @@ void test_comparison()
             { 1.00000000000002, -1.00000000000001},
             { 1.0000000001, 1.0000000001 }
     };
+
     constexpr int len = sizeof(values) / sizeof(double) / 2;
     for (int i = 0; i < len; ++i) {
         double d0 = values[i][0];

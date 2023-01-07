@@ -1180,128 +1180,6 @@ public:
         temp.reset_sign_for_zero();
         return temp;
     }
-
-    //
-    // Comparison operators
-    //
-    /**
-     * @brief Compare logical/bitwise equal.
-     * @param other Righthand operand
-     * @return True if this and other are equal.
-    */
-    __forceinline bool operator==(const fixed_point128& other) const noexcept {
-        return sign == other.sign && high == other.high && low == other.low;
-    }
-    /**
-     * @brief Compare logical/bitwise equal.
-     * @param other Righthand operand
-     * @return True if this and other are equal.
-    */
-    template<typename T>
-    __forceinline bool operator==(T other) const noexcept {
-        return *this == fixed_point128(other);
-    }
-    /**
-     * @brief Return true when objects are not equal. Can be used as logical XOR.
-     * @param other Righthand operand.
-     * @return True of not equal.
-    */
-    __forceinline bool operator!=(const fixed_point128& other) const noexcept {
-        return sign != other.sign || high != other.high || low != other.low;
-    }
-    /**
-     * @brief Return true when objects are not equal. Can be used as logical XOR.
-     * @param other Righthand operand.
-     * @return True of not equal.
-    */
-    template<typename T>
-    __forceinline bool operator!=(T other) const noexcept {
-        return *this != fixed_point128(other);
-    }
-    /**
-     * @brief Return true if this object is small than the other
-     * @param other Righthand operand.
-     * @return True when this object is smaller.
-    */
-    __forceinline bool operator<(const fixed_point128& other) const noexcept {
-        // signs are different
-        if (sign != other.sign)
-            return sign > other.sign; // true when sign is 1 and other.sign is 0
-
-        // MSB is the same, check the LSB
-        if (high == other.high)
-            return (sign) ? low > other.low : low < other.low;
-
-        return (sign) ? high > other.high : high < other.high;
-    }
-    /**
-     * @brief Return true if this object is small than the other
-     * @param other Righthand operand.
-     * @return True when this object is smaller.
-    */
-    template<typename T>
-    __forceinline bool operator<(T other) const noexcept {
-        return operator<(fixed_point128(other));
-    }
-    /**
-     * @brief Return true this object is small or equal than the other
-     * @param other Righthand operand.
-     * @return True when this object is smaller or equal.
-    */
-    __forceinline bool operator<=(const fixed_point128& other) const noexcept {
-        return !(*this > other);
-    }
-    /**
-     * @brief Return true this object is small or equal than the other
-     * @param other Righthand operand.
-     * @return True when this object is smaller or equal.
-    */
-    template<typename T>
-    __forceinline bool operator<=(T other) const noexcept {
-        return !(*this > fixed_point128(other));
-    }
-    /**
-     * @brief Return true this object is larger than the other
-     * @param other Righthand operand.
-     * @return True when this objext is larger.
-    */
-    __forceinline bool operator>(const fixed_point128& other) const noexcept {
-        // signs are different
-        if (sign != other.sign)
-            return sign < other.sign; // true when sign is 0 and other.sign is 1
-
-        // MSB is the same, check the LSB
-        if (high == other.high)
-            return (sign) ? low < other.low : low > other.low;
-
-        return (sign) ? high < other.high : high > other.high;
-    }
-    /**
-     * @brief Return true this object is larger than the other
-     * @param other Righthand operand.
-     * @return True when this objext is larger.
-    */
-    template<typename T>
-    __forceinline bool operator>(T other) const noexcept {
-        return *this > fixed_point128(other);
-    }
-    /**
-     * @brief Return true this object is larger or equal than the other
-     * @param other Righthand operand.
-     * @return True when this objext is larger or equal.
-    */
-    __forceinline bool operator>=(const fixed_point128& other) const noexcept {
-        return !(*this < other);
-    }
-    /**
-     * @brief Return true this object is larger or equal than the other
-     * @param other Righthand operand.
-     * @return True when this objext is larger or equal.
-    */
-    template<typename T>
-    __forceinline bool operator>=(T other) const noexcept {
-        return !(*this < fixed_point128(other));
-    }
     //
     // useful public functions
     //
@@ -1499,7 +1377,7 @@ private:
     }
     
     //
-    // Binary math operators
+    // Binary bitwise operators
     //
 
     /**
@@ -1534,12 +1412,135 @@ private:
     }
 
     //
+    // Comparison operators
+    //
+
+    /**
+     * @brief Compare logical/bitwise equal.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True if this and other are equal.
+    */
+    friend __forceinline bool operator==(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+        return lhs.sign == rhs.sign && lhs.high == rhs.high && lhs.low == rhs.low;
+    }
+    template<typename T>
+    friend __forceinline bool operator==(const fixed_point128& lhs, const T& rhs) noexcept {
+        return lhs == fixed_point128(rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator==(const T& lhs, const fixed_point128& rhs) noexcept {
+        return rhs == fixed_point128(lhs);
+    }
+    /**
+     * @brief Return true when objects are not equal. Can be used as logical XOR.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True if not equal.
+    */
+    friend __forceinline bool operator!=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+        return lhs.sign != rhs.sign || lhs.high != rhs.high || lhs.low != rhs.low;
+    }
+    template<typename T>
+    friend __forceinline bool operator!=(const fixed_point128& lhs, const T& rhs) noexcept {
+        return lhs != fixed_point128(rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator!=(const T& lhs, const fixed_point128& rhs) noexcept {
+        return rhs != fixed_point128(lhs);
+    }
+    /**
+     * @brief Return true if this object is small than the other
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True when this object is smaller.
+    */
+    friend __forceinline bool operator<(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+        // signs are different
+        if (lhs.sign != rhs.sign)
+            return lhs.sign > rhs.sign; // true when lhs.sign is 1 and rhs.sign is 0
+
+        // MSB is the same, check the LSB
+        if (lhs.high == rhs.high)
+            return (lhs.sign) ? lhs.low > rhs.low : lhs.low < rhs.low;
+
+        return (lhs.sign) ? lhs.high > rhs.high : lhs.high < rhs.high;
+    }
+    template<typename T>
+    friend __forceinline bool operator<(const fixed_point128& lhs, const T& rhs) noexcept {
+        return lhs < fixed_point128(rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator<(const T& lhs, const fixed_point128& rhs) noexcept {
+        return fixed_point128(lhs) < rhs;
+    }
+    /**
+     * @brief Return true this object is small or equal than the other
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True when this object is smaller or equal.
+    */
+    friend __forceinline bool operator<=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+        return !(lhs > rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator<=(const fixed_point128& lhs, const T& rhs) noexcept {
+        return !(lhs > fixed_point128(rhs));
+    }
+    template<typename T>
+    friend __forceinline bool operator<=(const T& lhs, const fixed_point128& rhs) noexcept {
+        return !(fixed_point128(lhs) > rhs);
+    }
+    /**
+     * @brief Return true this object is larger than the other
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True when this object is larger.
+    */
+    friend __forceinline bool operator>(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+        // signs are different
+        if (lhs.sign != rhs.sign)
+            return lhs.sign < rhs.sign; // true when sign is 0 and other.sign is 1
+
+        // MSB is the same, check the LSB
+        if (lhs.high == rhs.high)
+            return (lhs.sign) ? lhs.low < rhs.low : lhs.low > rhs.low;
+
+        return (lhs.sign) ? lhs.high < rhs.high : lhs.high > rhs.high;
+    }
+    template<typename T>
+    friend __forceinline bool operator>(const fixed_point128& lhs, const T& rhs) noexcept {
+        return lhs > fixed_point128(rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator>(const T& lhs, const fixed_point128& rhs) noexcept {
+        return fixed_point128(lhs) > rhs;
+    }
+    /**
+     * @brief Return true this object is larger or equal than the other
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True when this objext is larger or equal.
+    */
+    friend __forceinline bool operator>=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+        return !(lhs < rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator>=(const fixed_point128& lhs, const T& rhs) noexcept {
+        return !(lhs < fixed_point128(rhs));
+    }
+    template<typename T>
+    friend __forceinline bool operator>=(const T& lhs, const fixed_point128& rhs) noexcept {
+        return !(fixed_point128(lhs) < rhs);
+    }
+
+    //
     // Floating point style functions, implemented as friend functions
     //
 
     /**
      * @brief Returns the absolute value
-     * @param x Fixed_point128 object
+     * @param x Input valu
      * @return A copy of x with sign removed
     */
     friend __forceinline fixed_point128 fabs(const fixed_point128& x) noexcept
