@@ -682,8 +682,8 @@ public:
             twos_complement128(temp.low, temp.high);
         }
         //add the other value
-        const uint8_t carry = _addcarry_u64(0, low, temp.low, &low);
-        high += temp.high + carry;
+        const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
+        _addcarryx_u64(carry, high, temp.high, &high);
 
         // if result is with a different sign, invert it along with the sign.
         if (result_has_different_sign) {
@@ -718,7 +718,7 @@ public:
             twos_complement128(temp.low, temp.high);
         }
         //add the other value
-        const uint8_t carry = _addcarry_u64(0, low, temp.low, &low);
+        const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
         high += temp.high + carry;
 
         // if result is with a different sign, invert it along with the sign.
@@ -753,20 +753,20 @@ public:
         uint64_t temp1[2], temp2[2];
 
         // multiply low QWORDs
-        res[0] = _umul128(low, other.low, &res[1]);
+        res[0] = _mulx_u64(low, other.low, &res[1]);
 
         // multiply high QWORDs (overflow can happen)
-        res[2] = _umul128(high, other.high, &res[3]);
+        res[2] = _mulx_u64(high, other.high, &res[3]);
 
         // multiply low this and high other
-        temp1[0] = _umul128(low, other.high, &temp1[1]);
-        uint8_t carry = _addcarry_u64(0, res[1], temp1[0], &res[1]);
-        res[3] += _addcarry_u64(carry, res[2], temp1[1], &res[2]);
+        temp1[0] = _mulx_u64(low, other.high, &temp1[1]);
+        uint8_t carry = _addcarryx_u64(0, res[1], temp1[0], &res[1]);
+        res[3] += _addcarryx_u64(carry, res[2], temp1[1], &res[2]);
 
         // multiply high this and low other
-        temp2[0] = _umul128(high, other.low, &temp2[1]);
-        carry = _addcarry_u64(0, res[1], temp2[0], &res[1]);
-        res[3] += _addcarry_u64(carry, res[2], temp2[1], &res[2]);
+        temp2[0] = _mulx_u64(high, other.low, &temp2[1]);
+        carry = _addcarryx_u64(0, res[1], temp2[0], &res[1]);
+        res[3] += _addcarryx_u64(carry, res[2], temp2[1], &res[2]);
 
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F

@@ -188,10 +188,11 @@ void bench_multiplication(double time_per_function = 1.0)
 {
     Duration dur;
     uint64_t total_iterations = 0;
+    srand(0x12345678);
     // setup
-    fixed_point128<10> f1 = fabs(fixed_point128<10>::pi());
-    fixed_point128<10> f2 = fixed_point128<10>::e();
-    fixed_point128<10> f3;
+    fixed_point128<8> f1 = fabs(fixed_point128<10>::pi());
+    fixed_point128<8> f2 = (double)rand() / 1.0101010101010101;
+    fixed_point128<8> f3;
 
     // start the clock
     total_iterations = 0;
