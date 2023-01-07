@@ -2173,13 +2173,20 @@ private:
         return (ex - exm1) / (ex + exm1);
     }
     /**
-     * @brief Calculates the inverse hyperbolic cosine
-     * @param x value
+     * @brief Calculates the inverse hyperbolic tangent
+     *                       1 + x
+     * atanh(x) = 0.5 * log( -----)
+     *                       1 - x
+     * @param x value in the range (-1, 1)
      * @return Inverse hyperbolic tangent of x
     */
     friend FP128_INLINE fixed_point128 atanh(const fixed_point128& x) noexcept
     {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        auto one = fixed_point128::one();
+        if (fabs(x) >= 1)
+            return 0;
+
+        return log((one + x) / (one - x)) >> 1;
     }
     /**
      * @brief Calculates the exponent of x: e^x

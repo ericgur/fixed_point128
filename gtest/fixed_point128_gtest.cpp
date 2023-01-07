@@ -1390,3 +1390,14 @@ TEST(fixed_point128, tanh) {
         EXPECT_DOUBLE_EQ(fp128_res, res) << "tanh: " << "value=" << value;
     }
 }
+
+TEST(fixed_point128, atanh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, -1); // must be: -1 < value < 1
+        double res = ::atanh(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = atanh(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "atanh: " << "value=" << value;
+    }
+}
