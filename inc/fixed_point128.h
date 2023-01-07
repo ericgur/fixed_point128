@@ -75,6 +75,7 @@ template<int32_t I> fixed_point128<I> modf(const fixed_point128<I>& x, fixed_poi
 template<int32_t I> fixed_point128<I> fdim(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> fmin(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> fmax(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template<int32_t I> fixed_point128<I> hypot(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> sqrt(const fixed_point128<I>& x, uint32_t iterations = 3) noexcept;
 template<int32_t I> fixed_point128<I> sin(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> asin(fixed_point128<I> x) noexcept;
@@ -1674,6 +1675,16 @@ private:
     friend FP128_INLINE fixed_point128 fmax(const fixed_point128& x, const fixed_point128& y) noexcept
     {
         return (x > y) ? x : y;
+    }
+    /**
+     * @brief Calculates the hypotenuse. i.e. sqrt(x^2 + y^2)
+     * @param x First value
+     * @param y Second value
+     * @return sqrt(x^2 + y^2).
+    */
+    friend FP128_INLINE fixed_point128 hypot(const fixed_point128& x, const fixed_point128& y) noexcept
+    {
+        return sqrt(x * x + y * y);
     }
     /**
      * @brief Calculates the left zero count of value x, ignoring the sign.

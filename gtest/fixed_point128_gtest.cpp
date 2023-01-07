@@ -1156,8 +1156,8 @@ TEST(fixed_point128, round) {
 TEST(fixed_point128, copysign) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random(-15, 15); // can't exceed this range to avoid overflow
-        double value2 = get_double_random(-15, 15); // can't exceed this range to avoid overflow
+        double value1 = get_double_random(-15, 15);
+        double value2 = get_double_random(-15, 15);
         double res = copysign(value1, value2);
         fixed_point128<16> f1 = value1;
         fixed_point128<16> f2 = value2;
@@ -1173,6 +1173,28 @@ TEST(fixed_point128, reciprocal) {
         fixed_point128<16> f1 = value;
         fixed_point128<16> fp128_res = reciprocal(f1);
         EXPECT_DOUBLE_EQ(fp128_res, res) << "reciprocal: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, sqrt) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random(-30, 15)); // can't exceed this range to avoid overflow
+        double res = ::sqrt(value);
+        fixed_point128<16> f1 = value;
+        fixed_point128<16> fp128_res = sqrt(f1);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "sqrt: " << "value=" << value;
+    }
+}
+TEST(fixed_point128, hypot) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random(-15, 3);
+        double value2 = get_double_random(-15, 3);
+        double res = hypot(value1, value2);
+        fixed_point128<16> f1 = value1;
+        fixed_point128<16> f2 = value2;
+        fixed_point128<16> fp128_res = hypot(f1, f2);
+        EXPECT_DOUBLE_EQ(fp128_res, res) << "hypot: " << "value1=" << value1 << ", value2=" << value2;
     }
 }
 TEST(fixed_point128, log) {
