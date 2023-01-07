@@ -1197,6 +1197,16 @@ TEST(fixed_point128, hypot) {
         EXPECT_DOUBLE_EQ(fp128_res, res) << "hypot: " << "value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(fixed_point128, ilogb) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 15); // lower exponent results in lost bits
+        int32_t res = ::ilogb(value);
+        fixed_point128<16> f1 = value;
+        int32_t fp128_res = ilogb(f1);
+        EXPECT_EQ(fp128_res, res) << "ilogb: " << "value=" << value;
+    }
+}
 TEST(fixed_point128, log) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {

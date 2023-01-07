@@ -61,14 +61,16 @@ namespace fp128 {
 class fp128_gtest; // Google test class
 template<int32_t I> class fixed_point128;
 // Note: Release builds will fail without these forward declarations. Hints towards compiler a bug (VS2022 v17.4)
-// The compiler and Inteliisense don't match these functions in some cases and try to use the CRT versions which 
-// a causes a compilations error.
+// The compiler and Intelisense don't match these functions in some cases and try to use the CRT versions which 
+// causes a compilation error.
+
 // CRT style function
 template<int32_t I> fixed_point128<I> fabs(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> floor(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> ceil(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> trunc(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> round(const fixed_point128<I>& x) noexcept;
+template<int32_t I> int32_t ilogb(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> copysign(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
 template<int32_t I> fixed_point128<I> fmod(const fixed_point128<I>& x, const fixed_point128<I>& y);
 template<int32_t I> fixed_point128<I> modf(const fixed_point128<I>& x, fixed_point128<I>* iptr) noexcept;
@@ -1603,6 +1605,15 @@ private:
         // restore the sign
         res.sign = sign;
         return res;
+    }
+    /**
+     * @brief Retrieves an integer that represents the base-2 exponent of the specified value.
+     * @param x The specified value.
+     * @return Integer value, rounded towards the nearest integer.
+    */
+    friend FP128_INLINE int32_t ilogb(const fixed_point128& x) noexcept
+    {
+        return x.get_exponent();
     }
     /**
      * @brief returns the value of x with the sign of y.
