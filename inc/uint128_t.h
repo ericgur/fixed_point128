@@ -473,8 +473,8 @@ public:
      * @return This object.
     */
     UINT128_T_INLINE uint128_t& operator+=(const uint128_t& rhs) noexcept {
-        const uint8_t carry = _addcarry_u64(0, low, rhs.low, &low);
-        high += rhs.high + carry;
+        const uint8_t carry = _addcarryx_u64(0, low, rhs.low, &low);
+        _addcarryx_u64(carry, high, rhs.high, &high);
         return *this;
     }
     /**
@@ -496,8 +496,8 @@ public:
     UINT128_T_INLINE uint128_t& operator-=(const uint128_t& rhs) noexcept {
         uint128_t temp = rhs;
         twos_complement128(temp.low, temp.high);
-        const uint8_t carry = _addcarry_u64(0, low, temp.low, &low);
-        high += temp.high + carry;
+        const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
+        _addcarryx_u64(carry, high, temp.high, &high);
         return *this;
     }
     /**
@@ -519,13 +519,10 @@ public:
         uint128_t temp = *this;
 
         // multiply low QWORDs
-        low = _umul128(temp.low, rhs.low, &high);
+        low = _mulx_u64(temp.low, rhs.low, &high);
 
-        // multiply low this and high rhs
-        high += temp.low * rhs.high;
-
-        // multiply high this and low rhs
-        high += temp.high * rhs.low;
+        // multiply low this and high rhs; multiply high this and low rhs
+        high += temp.low * rhs.high + temp.high * rhs.low;
         return *this;
     }
     /**
@@ -544,7 +541,7 @@ public:
         uint64_t temp;
         const uint64_t uval = static_cast<uint64_t>(x);
         // multiply low QWORDs
-        low = _umul128(low, uval, &temp);
+        low = _mulx_u64(low, uval, &temp);
         high = high * uval + temp;
 
         return *this;
@@ -577,7 +574,7 @@ public:
         uint64_t q[2]{}; 
         const uint64_t nom[2] = { low, high };
 
-        // optimization for when dividing by a small integer
+        // optimization for when dividing by a small (<= 64 bit) integer
         if (rhs.high == 0) {
             if (div_64bit((uint64_t*)q, nullptr, (uint64_t*)nom, rhs.low, 2)) {
                 FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
