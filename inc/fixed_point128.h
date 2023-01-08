@@ -628,7 +628,7 @@ public:
         while (digits++ < max_frac_digits && temp) {
             if constexpr (I < 4) {
 
-                res[0] = _umul128(high, 10ull, &res[1]); // multiply by 10
+                res[0] = _mulx_u64(high, 10ull, &res[1]); // multiply by 10
                 // extract the integer part
                 integer = shift_right128_round(res[0], res[1], upper_frac_bits);
                 temp *= 10; // move another digit to the integer area
@@ -770,9 +770,9 @@ public:
 
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F
-        static constexpr int32_t index = F >> 6; // / 64;
-        static constexpr int32_t lsb = F & FP128_MAX_VALUE_64(6); // bit within the 64bit data pointed by res[index]
-        static constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
+        constexpr int32_t index = F >> 6; // / 64;
+        constexpr int32_t lsb = F & FP128_MAX_VALUE_64(6); // bit within the 64bit data pointed by res[index]
+        constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
         const bool need_rounding = (res[index] & half) != 0;
 
         // copy block #1 (lowest)
@@ -799,7 +799,7 @@ public:
         uint64_t temp;
 
         // multiply low QWORDs
-        low = _umul128(low, x, &temp);
+        low = _mulx_u64(low, x, &temp);
         high = high * x + temp;
         reset_sign_for_zero();
         return *this;
@@ -847,7 +847,6 @@ public:
         }
         // optimization for when dividing by an integer
         else if (other.is_int() && (uint64_t)other <= UINT64_MAX) {
-            //*this *= fabs(reciprocal(other));
             uint64_t q[2]{};
             const uint64_t nom[2] = { low, high };
             const uint64_t denom = (uint64_t)other;
@@ -1829,7 +1828,8 @@ private:
         for (; i < max_iterations && (y_prev != y) && (xy < xy_min || xy > xy_max); ++i) {
             y_prev = y;
             xy = x * y;
-            y = y * (two - xy);
+            //y = y * (two - xy);
+            y *= two - xy;
         }
 
         if constexpr (debug) {
@@ -2271,7 +2271,7 @@ private:
 
         // compute e^ix (integer part of x)
         if (ix > 0) {
-            exp_ix = 1;      // result
+            exp_ix = 1;           // result
             fixed_point128 b = e; // value of e^1
             while (ix > 0) {
                 if (ix & 1)
@@ -2355,46 +2355,46 @@ private:
         return exp(y * lan_x);
     }
     /**
-     * @brief Calculates the Log base 2 of x: log2(x)
+     * @brief Calculates the Log base 2 of x: y = log2(x)
      * @param x The number to perform log2 on.
      * @return log2(x)
     */
     friend FP128_INLINE fixed_point128 log2(fixed_point128 x) noexcept
     {
         static const fixed_point128 two(2); 
-        fixed_point128 b = fixed_point128::one() >> 1;
-        fixed_point128 y = 0;
+        fixed_point128 b = fixed_point128::one() >> 1; // 0.5
 
-        if (!x.is_positive() || x.is_zero()) {
+        if (x.is_negative() || x.is_zero()) {
             return fixed_point128(UINT64_MAX, UINT64_MAX, 1); // represents negative infinity
         }
 
         // bring x to the range [1,2)
-        while (x < fixed_point128::one()) {
-            x <<= 1;
-            --y;
-        }
-
-        while (x >= two) {
-            x >>= 1;
-            ++y;
-        }
-
+        auto expo = x.get_exponent();
+        fixed_point128 y = expo;
+        
         // x is an exponent of 2.
-        if (x == fixed_point128::one())
+        if (x.is_int())
             return y;
 
-        fixed_point128 z = x;
+        if (expo < 0) {
+            x <<= -expo;
+        }
+        else if (expo > 0) {
+            x >>= expo;
+        }
+
+        fixed_point128 fy;
+        
         for (size_t i = 0; i < fixed_point128::F; ++i) {
-            z *= z;
-            if (z >= two) {
-                z >>= 1;
-                y += b;
+            x *= x;
+            if (x >= two) {
+                x >>= 1;
+                fy |= b;
             }
             b >>= 1;
         }
 
-        return y;
+        return y + fy;
     }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
