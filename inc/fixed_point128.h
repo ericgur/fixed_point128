@@ -817,11 +817,14 @@ public:
         }
         // integers: convert to uint64 for a simpler operation.
         if constexpr (std::is_signed_v<T>) {
+        #pragma warning(push) 
+        #pragma warning(disable: 4702) // static analysis bug in VS 2022 17.4. This code is reachable.
             // alway do positive multiplication
             if (x < 0) {
                 x = -x;
                 sign ^= 1;
             }
+        #pragma warning(pop) 
         }
         
         return operator*=(static_cast<uint64_t>(x));
@@ -1040,6 +1043,8 @@ public:
         }
         else {
             low = high = 0;
+            sign = 0;
+            return *this;
         }
         reset_sign_for_zero();
         return *this;
@@ -1052,8 +1057,6 @@ public:
     __forceinline fixed_point128& operator&=(const fixed_point128& rhs) noexcept {
         low &= rhs.low;
         high &= rhs.high;
-        sign &= rhs.sign;
-        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -1066,14 +1069,13 @@ public:
         return operator&=(fixed_point128(rhs));
     }
     /**
-     * @brief Bitwise OR=
+     * @brief Bitwise OR= of the object's, the sign of the object is untouched
      * @param other OR mask.
      * @return This object.
     */
     __forceinline fixed_point128& operator|=(const fixed_point128& other) noexcept {
         low |= other.low;
         high |= other.high;
-        sign |= other.sign;
         return *this;
     }
     /**
@@ -1086,14 +1088,13 @@ public:
         return operator|=(fixed_point128(rhs));
     }
     /**
-     * @brief Bitwise XOR=
+     * @brief Bitwise XOR= of the object's, the sign of the object is untouched
      * @param other XOR mask.
      * @return This object.
     */
     __forceinline fixed_point128& operator^=(const fixed_point128& other) noexcept {
         low ^= other.low;
         high ^= other.high;
-        sign ^= other.sign;
         return *this;
     }
     /**
@@ -2361,21 +2362,14 @@ private:
     */
     friend FP128_INLINE fixed_point128 log2(fixed_point128 x) noexcept
     {
-        static const fixed_point128 two(2); 
-        fixed_point128 b = fixed_point128::one() >> 1; // 0.5
-
         if (x.is_negative() || x.is_zero()) {
             return fixed_point128(UINT64_MAX, UINT64_MAX, 1); // represents negative infinity
         }
 
         // bring x to the range [1,2)
         auto expo = x.get_exponent();
-        fixed_point128 y = expo;
+        fixed_point128 iy = expo; // integer part of the result
         
-        // x is an exponent of 2.
-        if (x.is_int())
-            return y;
-
         if (expo < 0) {
             x <<= -expo;
         }
@@ -2383,18 +2377,25 @@ private:
             x >>= expo;
         }
 
-        fixed_point128 fy;
-        
+        // x is an exponent of 2.
+        if (x.is_int())
+            return iy;
+
+        static const fixed_point128 two(2);
+        fixed_point128 b = fixed_point128::one() >> 1; // 0.5
+        const auto high2 = two.high;
+        fixed_point128 fy; // fracion part of the result
         for (size_t i = 0; i < fixed_point128::F; ++i) {
             x *= x;
-            if (x >= two) {
+            //if (x >= two) {
+            if (x.high >= high2) {
                 x >>= 1;
-                fy |= b;
+                fy |= b; // ORing is identical (in this case) but faster than addition.
             }
             b >>= 1;
         }
 
-        return y + fy;
+        return iy + fy;
     }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
