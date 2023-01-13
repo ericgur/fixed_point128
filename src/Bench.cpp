@@ -722,6 +722,38 @@ void bench_atanh(double time_per_function = 1.0)
     print_ips("atanh", (uint64_t)(total_iterations / dur.duration()));
 }
 
+void bench_mandelbrot(double time_per_function = 1.0)
+{
+    Duration dur;
+    uint64_t total_iterations = 0;
+    // setup
+    fixed_point128<10> usq, vsq, tmp, modulus, u, v;
+    // a point that doesn't diverge quickly
+    fixed_point128<10> x = -0.7294734415;
+    fixed_point128<10> y = 0.242809;
+    // start the clock
+    dur.start();
+    while (dur.cur_duration() < time_per_function) {
+        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+            // real
+            tmp = usq - vsq + x;
+
+            // imaginary
+            // v = 2.0 * (u * v) + y;
+            v = ((u * v) << 1) + y;
+            u = tmp;
+            usq = u * u;
+            vsq = v * v;
+            // check uv vector amplitude is smaller than 2
+            modulus = usq + vsq;
+
+        }
+        total_iterations += BENCH_ITERATIONS;
+    }
+    if (modulus) { modulus++; } // fool the complier into not optimizing away the benchmark
+
+    print_ips("Mandelbrot", (uint64_t)(total_iterations / dur.duration()));
+}
 /**
  * @brief Benches all simple arithmatic functions
  * @param time_per_function Time spent in each sub-test
@@ -794,6 +826,21 @@ void bench_trig_functions(double time_per_function = 1.0)
     bench_tan(time_per_function);
     bench_atan(time_per_function);
 }
+
+/**
+ * @brief Benches all special functions
+ * @param time_per_function Time spent in each sub-test
+*/
+void bench_special_functions(double time_per_function = 1.0)
+{
+    printf("\n");
+    printf("--------------------------\n");
+    printf("Special function benchmark\n");
+    printf("--------------------------\n");
+
+    bench_mandelbrot(time_per_function);
+}
+
 void bench_hyperbolic_trig_functions(double time_per_function = 1.0)
 {
     printf("\n");
@@ -824,4 +871,5 @@ void bench()
     bench_log_functions(TIME_PER_FUNCTION);
     bench_trig_functions(TIME_PER_FUNCTION);
     bench_hyperbolic_trig_functions(TIME_PER_FUNCTION);
+    bench_special_functions(TIME_PER_FUNCTION);
 }
