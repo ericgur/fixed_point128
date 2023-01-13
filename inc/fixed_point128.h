@@ -673,26 +673,34 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator+=(const fixed_point128& other) noexcept {
-        bool result_has_different_sign = false;
-        fixed_point128 temp = other;
-
+        // same sign: the simple case
+        if (other.sign == sign) {
+            //add the other value
+            const uint8_t carry = _addcarryx_u64(0, low, other.low, &low);
+            _addcarryx_u64(carry, high, other.high, &high);
+        }
         // different sign: invert the sign for other and subtract
-        if (other.sign != sign) {
+        else {
+            bool result_has_different_sign = false;
+            fixed_point128 temp = other;
+
             temp.sign ^= 1;
             result_has_different_sign = (sign) ? temp < *this : temp > *this;
             twos_complement128(temp.low, temp.high);
-        }
-        //add the other value
-        const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
-        _addcarryx_u64(carry, high, temp.high, &high);
 
-        // if result is with a different sign, invert it along with the sign.
-        if (result_has_different_sign) {
-            sign ^= 1;
-            twos_complement128(low, high);
+            //add the other value
+            const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
+            _addcarryx_u64(carry, high, temp.high, &high);
+
+            // if result is with a different sign, invert it along with the sign.
+            if (result_has_different_sign) {
+                sign ^= 1;
+                twos_complement128(low, high);
+            }
+
+            reset_sign_for_zero();
+
         }
-        
-        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -710,25 +718,33 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator-=(const fixed_point128& other) noexcept {
-        bool result_has_different_sign = false;
-        fixed_point128 temp = other;
 
+        // different sign: just add the values
+        if (other.sign != sign) {
+            //add the other value
+            const uint8_t carry = _addcarryx_u64(0, low, other.low, &low);
+            high += other.high + carry;
+        }
         // same sign: invert the sign for other and subtract
-        if (other.sign == sign) {
+        else {
+            bool result_has_different_sign = false;
+            fixed_point128 temp = other;
+
             result_has_different_sign = (sign) ? temp < *this : temp > *this;
             twos_complement128(temp.low, temp.high);
-        }
-        //add the other value
-        const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
-        high += temp.high + carry;
 
-        // if result is with a different sign, invert it along with the sign.
-        if (result_has_different_sign) {
-            sign ^= 1;
-            twos_complement128(low, high);
-        }
+            //add the other value
+            const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
+            high += temp.high + carry;
 
-        reset_sign_for_zero();
+            // if result is with a different sign, invert it along with the sign.
+            if (result_has_different_sign) {
+                sign ^= 1;
+                twos_complement128(low, high);
+            }
+
+            reset_sign_for_zero();
+        }
         return *this;
     }
     /**
