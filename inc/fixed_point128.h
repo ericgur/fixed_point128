@@ -64,7 +64,7 @@ template<int32_t I> class fixed_point128;
 // The compiler and Intelisense don't match these functions in some cases and try to use the CRT versions which 
 // causes a compilation error.
 
-// CRT style function
+// CRT style functions
 template<int32_t I> fixed_point128<I> fabs(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> floor(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> ceil(const fixed_point128<I>& x) noexcept;
@@ -137,6 +137,7 @@ class fixed_point128
     static_assert(sizeof(void*) == 8, "fixed_point128 is supported in 64 bit builds only!");
 
     // friends
+    template<int32_t I2>
     friend class fixed_point128; // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
     friend class fp128_gtest;
 private:
@@ -398,7 +399,7 @@ public:
         const uint64_t int_val = std::strtoull(p, nullptr, 10) << upper_frac_bits;
 
         p = dec + 1;
-        int32_t digits = 0;
+        uint32_t digits = 0;
         fixed_point128<1> frac;
         // multiply each digits by 10^-n
         while (++digits < base10_table_size && isdigit(*p)) {
@@ -818,7 +819,7 @@ public:
         // integers: convert to uint64 for a simpler operation.
         if constexpr (std::is_signed_v<T>) {
         #pragma warning(push) 
-        #pragma warning(disable: 4702) // static analysis bug in VS 2022 17.4. This code is reachable.
+        #pragma warning(disable: 4702) // static analysis bug in VS 2022 17.4. This code _is_ reachable.
             // alway do positive multiplication
             if (x < 0) {
                 x = -x;
@@ -905,11 +906,22 @@ public:
     */
     template<typename T>
     __forceinline fixed_point128& operator/=(T x) {
-        if constexpr (std::is_floating_point<T>::value) {
+        if constexpr (std::is_floating_point_v<T>) {
             return operator/=(static_cast<double>(x));
         }
+        // integers: convert to uint64 for a simpler operation.
+        if constexpr (std::is_signed_v<T>) {
+        #pragma warning(push) 
+        #pragma warning(disable: 4702) // static analysis bug in VS 2022 17.4. This code _is_ reachable.
+            // alway do positive division
+            if (x < 0) {
+                x = -x;
+                sign ^= 1;
+            }
+        #pragma warning(pop) 
+        }
 
-        return operator/=(fixed_point128(x));
+        return operator/=(static_cast<uint64_t>(x));
     }
     /**
      * @brief Divide this object by x.
@@ -931,6 +943,21 @@ public:
 
         // normal division
         return *this /= fixed_point128(x);
+    }
+    /**
+     * @brief Divide this object by x.
+     * @param x Denominator.
+     * @return This object.
+    */
+    template<>
+    FP128_INLINE fixed_point128& operator/=<uint64_t>(uint64_t x) {
+        if (0 == x) FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+        const uint64_t nom[2] = { low, high };
+        if (0 != div_64bit(&low, nullptr, (uint64_t*)nom, x, 2)) {
+            *this = 0;
+        }
+
+        return *this;
     }
     /**
      * @brief %= operator
@@ -1898,8 +1925,6 @@ private:
     friend fixed_point128 sin(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
-        static const fixed_point128& pi = fixed_point128::pi();
-        static const fixed_point128& pi2 = fixed_point128::pi2(); // 2 * pi
         static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
@@ -1958,8 +1983,6 @@ private:
     friend fixed_point128 cos(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cos()!");
-        static const fixed_point128& pi = fixed_point128::pi();
-        static const fixed_point128& pi2 = fixed_point128::pi2(); // 2 * pi
         static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 

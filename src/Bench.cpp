@@ -46,6 +46,7 @@
 
 using namespace fp128;
 constexpr uint64_t BENCH_ITERATIONS = 5000;
+constexpr double TIME_PER_FUNCTION = 1.0;
 
 struct Duration
 {
@@ -242,6 +243,17 @@ void bench_division(double time_per_function = 1.0)
     if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
     print_ips("Division by double (exponent of 2)", (uint64_t)(total_iterations / dur.duration()));
 
+    total_iterations = 0;
+    dur.start();
+    while (dur.cur_duration() < time_per_function) {
+        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+            f3 = f1 / 5ll;
+        }
+        total_iterations += BENCH_ITERATIONS;
+    }
+    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    print_ips("Division by int64", (uint64_t)(total_iterations / dur.duration()));
+
 
     fixed_point128<10> f4 = 5;
     total_iterations = 0;
@@ -411,6 +423,7 @@ void bench_log(double time_per_function = 1.0)
 
 void bench_log2(double time_per_function = 1.0)
 {
+    log2(fixed_point128<10>(0.5));
     Duration dur;
     uint64_t total_iterations = 0;
     // setup
@@ -803,10 +816,12 @@ void bench()
     printf("=========================\n");
     printf("Single threaded benchmark\n");
     printf("=========================\n");
-    bench_comparison_operators(1);
-    bench_arithmatic(1);
-    bench_exponents(1);
-    bench_log_functions(1);
-    bench_trig_functions(1);
-    bench_hyperbolic_trig_functions(1);
+
+    // run the function groups
+    bench_comparison_operators(TIME_PER_FUNCTION);
+    bench_arithmatic(TIME_PER_FUNCTION);
+    bench_exponents(TIME_PER_FUNCTION);
+    bench_log_functions(TIME_PER_FUNCTION);
+    bench_trig_functions(TIME_PER_FUNCTION);
+    bench_hyperbolic_trig_functions(TIME_PER_FUNCTION);
 }
