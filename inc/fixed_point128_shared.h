@@ -165,6 +165,19 @@ __forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
     return x >> shift;
 }
 /**
+    * @brief Right shift a 128 bit integer (inplace). 
+    * Limited range, inplace and no paramter checks.
+    * @param l Low QWORD
+    * @param h High QWORD
+    * @param shift Bits to shift, between 1-63
+    * @return void
+*/
+__forceinline void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
+{
+   l = (l >> shift) | (h << (64 - shift));
+   h >>= shift;
+}
+/**
     * @brief Right shift a 128 bit integer.
     * @param l Low QWORD
     * @param h High QWORD

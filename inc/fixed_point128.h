@@ -95,12 +95,12 @@ template<int32_t I> fixed_point128<I> atanh(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> exp(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> exp2(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> expm1(const fixed_point128<I>& x) noexcept;
-template<int32_t I> fixed_point128<I> pow(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
-template<int32_t I> fixed_point128<I> log(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> log2(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> log10(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> logb(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> log1p(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> pow(const fixed_point128<I>& x, const fixed_point128<I>& y, int32_t f = fixed_point128<I>::F) noexcept;
+template<int32_t I> fixed_point128<I> log(fixed_point128<I> x, int32_t f = fixed_point128<I>::F) noexcept;
+template<int32_t I> fixed_point128<I> log2(fixed_point128<I> x, int32_t f = fixed_point128<I>::F) noexcept;
+template<int32_t I> fixed_point128<I> log10(fixed_point128<I> x, int32_t f = fixed_point128<I>::F) noexcept;
+template<int32_t I> fixed_point128<I> logb(fixed_point128<I> x, int32_t f = fixed_point128<I>::F) noexcept;
+template<int32_t I> fixed_point128<I> log1p(fixed_point128<I> x, int32_t f = fixed_point128<I>::F) noexcept;
 // non CRT function
 template<int32_t I> uint64_t lzcnt128(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> reciprocal(const fixed_point128<I>& x) noexcept;
@@ -149,7 +149,9 @@ private:
     uint32_t sign; // 0 = positive, 1 negative
 
     // useful const calculations
+public:
     static constexpr int32_t F = 128 - I;                               // fraction bit count
+private:
     static constexpr int32_t upper_frac_bits = F - 64;                  // how many bits of the fraction exist in the upper QWORD
     static constexpr uint64_t unity = 1ull << upper_frac_bits;          // upper QWORD value equal to '1'
     static inline const double upper_unity = ::pow(2, 64 - F);     // convert upper QWORD to floating point
@@ -2376,9 +2378,10 @@ private:
      * @brief Computes x to the power of y
      * @param x Base value, must be positive
      * @param y Exponent value
+     * @param f Optional how many fraction bits in the result. Default to all.
      * @return x^y
     */
-    friend FP128_INLINE fixed_point128 pow(const fixed_point128& x, const fixed_point128& y) noexcept
+    friend FP128_INLINE fixed_point128 pow(const fixed_point128& x, const fixed_point128& y, int32_t f = fixed_point128::F) noexcept
     {
         //
         // Based on exponent law: (x^n)^m = x^(m * n)
@@ -2388,7 +2391,7 @@ private:
         //
         if (x.is_negative()) return 0;
 
-        fixed_point128 lan_x = log(x);
+        fixed_point128 lan_x = log(x, f);
         if (!lan_x) 
             return lan_x;
 
@@ -2397,9 +2400,10 @@ private:
     /**
      * @brief Calculates the Log base 2 of x: y = log2(x)
      * @param x The number to perform log2 on.
+     * @param f Optional how many fraction bits in the result. Default to all.
      * @return log2(x)
     */
-    friend FP128_INLINE fixed_point128 log2(fixed_point128 x) noexcept
+    friend FP128_INLINE fixed_point128 log2(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
     {
         if (x.is_negative() || x.is_zero()) {
             return fixed_point128(UINT64_MAX, UINT64_MAX, 1); // represents negative infinity
@@ -2424,14 +2428,16 @@ private:
         fixed_point128 b = fixed_point128::one() >> 1; // 0.5
         const auto high2 = two.high;
         fixed_point128 fy; // fracion part of the result
-        for (size_t i = 0; i < fixed_point128::F; ++i) {
+        for (size_t i = 0; i < f; ++i) {
             x *= x;
-            //if (x >= two) {
+            // if x is greater than 2, we have another bit in the result
             if (x.high >= high2) {
-                x >>= 1;
+                // divide x by 2
+                shift_right128_inplace(x.low, x.high, 1);
                 fy |= b; // ORing is identical (in this case) but faster than addition.
             }
-            b >>= 1;
+            // divide base by 2
+            shift_right128_inplace(b.low, b.high, 1);
         }
 
         return iy + fy;
@@ -2439,32 +2445,35 @@ private:
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
+     * @param f Optional how many fraction bits in the result. Default to all.
      * @return log(x)
     */
-    friend FP128_INLINE fixed_point128 log(fixed_point128 x) noexcept
+    friend FP128_INLINE fixed_point128 log(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
     {
         static const fixed_point128 inv_log2_e = "0.693147180559945309417232121458176575";
-        fixed_point128 y = log2(x);
+        fixed_point128 y = log2(x, f);
         return y * inv_log2_e;
     }
     /**
      * @brief Calculates the natural Log (base e) of 1 + x: log(1 + x)
      * @param x The number to perform log on.
+     * @param f Optional how many fraction bits in the result. Default to all.
      * @return log1p(x)
     */
-    friend FP128_INLINE fixed_point128 log1p(fixed_point128 x) noexcept
+    friend FP128_INLINE fixed_point128 log1p(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
     {
-        return log(fixed_point128::one() + x);
+        return log(fixed_point128::one() + x, f);
     }
     /**
      * @brief Calculates Log base 10 of x: log10(x)
      * @param x The number to perform log on.
+     * @param f Optional how many fraction bits in the result. Default to all.
      * @return log10(x)
     */
-    friend FP128_INLINE fixed_point128 log10(fixed_point128 x) noexcept
+    friend FP128_INLINE fixed_point128 log10(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
     {
         static const fixed_point128 inv_log2_10 = "0.301029995663981195213738894724493068";
-        fixed_point128 y = log2(x);
+        fixed_point128 y = log2(x, f);
         return y * inv_log2_10;
     }
     /**
