@@ -57,15 +57,13 @@ void test_conversion()
     double d1 = 1e38;
     uint128_t i5a = d1;  // highest supported base 10 exponent
     uint128_t i5b = 1.0; // lowest supported
-    double d2 = (double)i5a;
-    assert(d1 == d2);
+    assert(d1 == (double)i5a);
     d1 = pow(2.1, 80);
     uint128_t i6 = d1;
     // assert(fabs((d1 / (double)i6) - 1.0) < 0.00001);
     assert(d1 == (double)i6);
     uint128_t i7 = -2;
-    int32_t temp = i7;
-    assert(temp == -2);
+    assert((int32_t)i7 == -2);
     //uint64_t i64 = (uint64_t)d1;
     printf("uint128_t: 1=%llu, UINT64_MAX=0x%llX, 0xDEADBEAFDEADBEAF=0x%llX\n", (uint64_t)i1, (uint64_t)i2, (uint64_t)i3);
     printf("uint128_t: 0xF123456789ABCDEFFEDCBA9876543210=%s\n", (char*)i4);
@@ -196,8 +194,7 @@ void test_multiplication()
         assert((uint64_t)i128b == val2);
         assert((uint64_t)(i128a * i128b) == (val1 * val2));
         assert((i128a * i128b) == (i128b * i128a));
-        bool cond = ((i128a * i128b) << 51) == (i128b * i128a * uint128_t(1ull << 51u));
-        assert(cond);
+        assert(((i128a * i128b) << 51) == i128b * i128a * uint128_t(1ull << 51u));
     }
 
     printf("uint128_t multiplication passed!\n");
@@ -300,8 +297,7 @@ void test_string()
             str[0] = '1';
         str[j] = '\0';
         uint128_t i128 = str;
-        char* const i128_str  = (char*)i128;
-        assert(0 == strcmp(i128_str, str));
+        assert(0 == strcmp((char*)i128, str));
     }
 
     printf("uint128_t string operations passed!\n");
@@ -439,7 +435,7 @@ void test_comparison()
 {
     printf("\nTest comparison\n");
 
-    auto t = fixed_point128<10>::one();
+    fixed_point128<10> t = fixed_point128<10>::one();
     assert(1 == t);
     assert(t == 1);
     assert(2 > t);
