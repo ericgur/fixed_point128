@@ -24,7 +24,7 @@
 #ifndef FIXED_POINT128_SHARED_H
 #define FIXED_POINT128_SHARED_H
 
-#include <intrin.h>
+#include <immintrin.h>
 #include <string>
 #include <cstdint>
 #include <cstdlib>
@@ -240,15 +240,13 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
 
     while (m > 0 && u[m - 1] == 0) --m;
 
-    uint64_t k = 0;
+    uint32_t k = 0;
     for (auto j = m - 1; j >= 0; --j) {
-        k = (k << 32) + u[j];
-        q[j] = static_cast<uint32_t>(k / v);
-        k -= static_cast<uint64_t>(q[j]) * v;
+        q[j] = _udiv64((((uint64_t)k) << 32) + u[j], v, &k);
     }
 
     if (r != nullptr)
-        *r = static_cast<uint32_t>(k);
+        *r = k;
     return 0;
 }
 /**
@@ -401,13 +399,12 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
 
     uint64_t k[2] = {};
     for (auto j = m - 1; j >= 0; --j) {
-        k[1] = k[0];
         k[0] = u[j];
-        q[j] = _udiv128(k[1], k[0], v, &k[0]);
+        q[j] = _udiv128(k[1], k[0], v, &k[1]);
     }
 
-    if (r != nullptr)
-        *r = k[0];
+    // Remainder
+    *r = k[1];
     return 0;
 }
 /**
