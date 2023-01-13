@@ -534,7 +534,7 @@ public:
     UINT128_T_INLINE uint128_t& operator*=(T x) noexcept {
         // check if the type is signed or not
         // for negative values, convert to uint128_t and multiply.
-        if constexpr (std::is_signed<T>::value) {
+        if constexpr (std::is_signed_v<T>) {
             if (x < 0) return operator*=(uint128_t(x));
         }
 
@@ -602,7 +602,7 @@ public:
 
         // check if the type is signed or not
         // for negative values only, convert to uint128 and divide.
-        if constexpr (std::is_signed<T>::value) {
+        if constexpr (std::is_signed_v<T>) {
             if (x < 0) return operator/=(uint128_t(x));
         }
 
