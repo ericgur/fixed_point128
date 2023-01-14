@@ -427,7 +427,10 @@ void test_functions()
     f6 = asin(-fixed_point128<16>::one());
     f6 = asin(fixed_point128<16>(0));
 
-
+    //f6 = fixed_point128<16>::pi() / 5;
+    //fixed_point128<16> f6_sin, f6_cos;
+    //_sincos_cordic(f6, f6_sin, f6_cos, true);
+    //_sincos_cordic(-f6, f6_sin, f6_cos, true);
     printf("\n");
 }
 
