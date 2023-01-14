@@ -2200,7 +2200,7 @@ private:
     friend FP128_INLINE fixed_point128 tan(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use tan()!");
-        constexpr bool use_cordic = false;
+        constexpr bool use_cordic = false; // CORDIC is currently slower and less accurate
         if constexpr (use_cordic) {
             fixed_point128 sin_x, cos_x;
             _sincos_cordic(x, sin_x, cos_x, false);
@@ -2532,7 +2532,7 @@ private:
      * @brief Computes x to the power of y
      * @param x Base value, must be positive
      * @param y Exponent value
-     * @param f Optional how many fraction bits in the result. Default to all.
+     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return x^y
     */
     friend FP128_INLINE fixed_point128 pow(const fixed_point128& x, const fixed_point128& y, int32_t f = fixed_point128::F) noexcept
@@ -2554,7 +2554,7 @@ private:
     /**
      * @brief Calculates the Log base 2 of x: y = log2(x)
      * @param x The number to perform log2 on.
-     * @param f Optional how many fraction bits in the result. Default to all.
+     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log2(x)
     */
     friend FP128_INLINE fixed_point128 log2(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
@@ -2562,6 +2562,11 @@ private:
         if (x.is_negative() || x.is_zero()) {
             return fixed_point128(UINT64_MAX, UINT64_MAX, 1); // represents negative infinity
         }
+        // Calculate the log in 2 steps:
+        // - The integer part (iy) is simple and fast via the get_exponent() function.
+        // - The fraction part (fy) is trickier. Uses Binary Logarithm
+        // The result is the sum of the two. Based on the identity:
+        // log(x + y) = log(x) + log(y)
 
         // bring x to the range [1,2)
         auto expo = x.get_exponent();
@@ -2581,16 +2586,17 @@ private:
         static const fixed_point128 two(2);
         fixed_point128 b = fixed_point128::one() >> 1; // 0.5
         const auto high2 = two.high;
-        fixed_point128 fy; // fracion part of the result
+        fixed_point128 fy; // fraction part of the result
         for (size_t i = 0; i < f; ++i) {
-            x *= x;
+            // x = x * x
+            x *= x; 
             // if x is greater than 2, we have another bit in the result
             if (x.high >= high2) {
-                // divide x by 2
+                // divide x by 2 using inplace shifts
                 shift_right128_inplace(x.low, x.high, 1);
                 fy |= b; // ORing is identical (in this case) but faster than addition.
             }
-            // divide base by 2
+            // divide base by 2 using inplace shifts
             shift_right128_inplace(b.low, b.high, 1);
         }
 
@@ -2599,7 +2605,7 @@ private:
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
-     * @param f Optional how many fraction bits in the result. Default to all.
+     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log(x)
     */
     friend FP128_INLINE fixed_point128 log(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
@@ -2611,7 +2617,7 @@ private:
     /**
      * @brief Calculates the natural Log (base e) of 1 + x: log(1 + x)
      * @param x The number to perform log on.
-     * @param f Optional how many fraction bits in the result. Default to all.
+     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log1p(x)
     */
     friend FP128_INLINE fixed_point128 log1p(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
@@ -2621,7 +2627,7 @@ private:
     /**
      * @brief Calculates Log base 10 of x: log10(x)
      * @param x The number to perform log on.
-     * @param f Optional how many fraction bits in the result. Default to all.
+     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log10(x)
     */
     friend FP128_INLINE fixed_point128 log10(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
