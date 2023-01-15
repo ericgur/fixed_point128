@@ -46,6 +46,17 @@
 #define FP128_INLINE __forceinline
 #endif
 
+// Set to TRUE to disable function inlining - useful for profiling a specific function
+#ifndef UINT128_T_DISABLE_INLINE
+#define UINT128_T_DISABLE_INLINE FALSE
+#endif 
+
+#if UINT128_T_DISABLE_INLINE != FALSE
+#define UINT128_T_INLINE __declspec(noinline)
+#else
+#define UINT128_T_INLINE __forceinline
+#endif
+
 static constexpr bool FP128_CPP_STYLE_MODULO = true; // set to false to test python style modulo
 static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 
@@ -177,6 +188,20 @@ __forceinline void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) n
    l = (l >> shift) | (h << (64 - shift));
    h >>= shift;
 }
+/**
+    * @brief Left shift a 128 bit integer (inplace).
+    * Limited range, inplace and no paramter checks.
+    * @param l Low QWORD
+    * @param h High QWORD
+    * @param shift Bits to shift, between 1-63
+    * @return void
+*/
+__forceinline void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
+{
+    h = (h << shift) | (l >> (64 - shift));
+    l <<= shift;
+}
+
 /**
     * @brief Right shift a 128 bit integer.
     * @param l Low QWORD

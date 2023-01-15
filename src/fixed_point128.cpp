@@ -33,6 +33,7 @@
 #include <cassert>
 #include "../inc/fixed_point128.h" 
 #include "../inc/uint128_t.h" 
+#include "../inc/float128.h" 
 
 #pragma warning(disable: 26493) // Don't use C-style casts.
 #pragma warning(disable: 26467) 
@@ -50,11 +51,18 @@ void test_conversion()
 {
     printf("\nTest Conversion\n");
 
+    float128 f128_zero;
+    double d1 = 0.51;
+    float128 df128_v1 = d1;
+    double f128_v1 = df128_v1;
+    d1 = pow(2, -1025);
+    float128 df128_v2 = d1;
+
     uint128_t i1 = 1;
     uint128_t i2 = UINT64_MAX;
     uint128_t i3 = "0xDEADBEAFDEADBEAF";
     uint128_t i4 = "0xF123456789ABCDEFFEDCBA9876543210";
-    double d1 = 1e38;
+    d1 = 1e38;
     uint128_t i5a = d1;  // highest supported base 10 exponent
     uint128_t i5b = 1.0; // lowest supported
     assert(d1 == (double)i5a);
@@ -509,6 +517,6 @@ void test()
 
 int main()
 {
-    //test();
+    test();
     bench();
 }

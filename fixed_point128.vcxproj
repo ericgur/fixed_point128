@@ -226,6 +226,7 @@
   <ItemGroup>
     <ClInclude Include="inc\fixed_point128.h" />
     <ClInclude Include="inc\fixed_point128_shared.h" />
+    <ClInclude Include="inc\float128.h" />
     <ClInclude Include="inc\uint128_t.h" />
   </ItemGroup>
   <ItemGroup>

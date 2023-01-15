@@ -24,6 +24,9 @@
     <ClInclude Include="inc\fixed_point128_shared.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="inc\float128.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\fixed_point128.cpp">

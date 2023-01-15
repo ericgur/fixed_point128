@@ -41,20 +41,6 @@
 
 #include "fixed_point128_shared.h"
 
-/***********************************************************************************
-*                                  Build Options
-************************************************************************************/
-// Set to TRUE to disable function inlining - useful for profiling a specific function
-#ifndef UINT128_T_DISABLE_INLINE
-#define UINT128_T_DISABLE_INLINE FALSE
-#endif 
-
-#if UINT128_T_DISABLE_INLINE != FALSE
-#define UINT128_T_INLINE __declspec(noinline)
-#else
-#define UINT128_T_INLINE __forceinline
-#endif
-
 namespace fp128 {
 
 /***********************************************************************************
