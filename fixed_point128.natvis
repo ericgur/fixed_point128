@@ -20,13 +20,20 @@
     </Expand>
   </Type>
   <Type Name="fp128::float128">
-    <DisplayString>{((high_bits.s) ? -1.0 : 1.0) * (1.0 + ((double)high_bits.f / (double)0x1000000000000) + (((double)low / (double)0x1000000000000 / (double)0x100000000 / (double)0x100000000)))}*2^{(int)high_bits.e - (int)0x3FFF,d}</DisplayString>
+    <Intrinsic Name="special" Expression="high_bits.e == 0x7FFF" />
+    <Intrinsic Name="fraction" Expression="high_bits.f != 0 || low != 0" />
+    <Intrinsic Name="sign" Expression="high_bits.s" />
+    <DisplayString Condition="special() &amp;&amp; fraction()">nan</DisplayString>
+    <DisplayString Condition="special() &amp;&amp; !fraction() &amp;&amp; !sign()">inf</DisplayString>
+    <DisplayString Condition="special() &amp;&amp; !fraction() &amp;&amp; sign()">-inf</DisplayString>
+    <DisplayString>{((sign()) ? -1.0 : 1.0) * (1.0 + ((double)high_bits.f / (double)0x1000000000000) + (((double)low / (double)0x1000000000000 / (double)0x100000000 / (double)0x100000000)))}*2**{(int)high_bits.e - (int)0x3FFF,d}</DisplayString>
     <Expand HideRawView="false" >
       <Item Name="[sign]"            ExcludeView="simple">high_bits.s,d</Item>
-      <Item Name="[exponent]"        ExcludeView="simple">(int)high_bits.e - (int)0x3FFF,d</Item>
-      <Item Name="[frac high (hex)]" ExcludeView="simple">high &amp; 0xffffffffffff,h</Item>
+      <Item Name="[exponent (hex)]"  ExcludeView="simple">high_bits.e,h</Item>
+      <Item Name="[frac high (hex)]" ExcludeView="simple">high_bits.f,h</Item>
       <Item Name="[frac low (hex)]"  ExcludeView="simple">low,h</Item>
-      <Item Name="[frac high (dec)]" ExcludeView="simple">high &amp; 0xffffffffffff,d</Item>
+      <Item Name="[exponent (dec)]"  ExcludeView="simple">(int)high_bits.e - (int)0x3FFF,d</Item>
+      <Item Name="[frac high (dec)]" ExcludeView="simple">high_bits.e,d</Item>
       <Item Name="[frac low (dec)]"  ExcludeView="simple">low,d</Item>
 
     </Expand>

@@ -89,6 +89,9 @@ class __declspec(align(16)) float128
     static constexpr uint64_t EXPONENT_BIAS = 0x3FFF;
     static constexpr uint64_t FRAC_BITS = 112;
     static constexpr uint64_t EXP_BITS = 15;
+    static constexpr uint64_t FRAC_MASK = FP128_MAX_VALUE_64(48);
+    static constexpr uint64_t EXP_MASK = INF_EXPONENT;
+    static constexpr uint64_t SIGN_MASK = 1ull << 63;
 #pragma warning(push)
 #pragma warning(disable: 4201) // nameless union/structs
     struct {
@@ -123,7 +126,7 @@ public:
      * @param l Low QWORD
      * @param h High QWORD
     */
-    __forceinline float128(uint64_t l, uint64_t h) noexcept :
+    __forceinline constexpr float128(uint64_t l, uint64_t h) noexcept :
         low(l), high(h) {}
     /**
      * @brief Low level constructor
@@ -153,9 +156,21 @@ public:
         // subnormal numbers
         if (d.e == 0) {
             // the exponent is -1022 (1-1023)
-            uint64_t f = d.f;
-            auto msb = 64 - _lzcnt_u64(f);
-            high_bits.e = EXPONENT_BIAS + msb - dbl_frac_bits; // TODO: check this is right
+            auto msb = 64 - static_cast<int32_t>(_lzcnt_u64(d.f));
+            // exponent
+            int32_t x_expo = static_cast<int32_t>(d.e) - 1023;
+            int32_t expo = x_expo + msb - dbl_frac_bits;
+            //fraction
+            low = d.f & ~(1ull << (msb - 1)); // clear the msb
+            auto shift = FRAC_BITS - msb + 1;
+            if (shift < 64)
+                shift_left128_inplace(low, high, FRAC_BITS - msb);
+            else {
+                high = low << (shift - 64);
+                low = 0;
+            }
+            
+            high_bits.e = EXPONENT_BIAS + expo;
         }
         // NaN & INF
         else if (d.e == 0x7FF)
@@ -203,50 +218,313 @@ public:
     //
     // conversion operators
     //
+
+    /**
+     * @brief Operator double
+    */
     FP128_INLINE operator double() const noexcept {
         Double d{};
 
+        // nan and inf
         if (high_bits.e == INF_EXPONENT) {
+            // zero fraction means inf, otherwise nan
             if (low == 0 && high_bits.f == 0)
                 return HUGE_VAL;
             return NAN;
         }
 
-        int64_t expo = static_cast<int64_t>(high_bits.e) - EXPONENT_BIAS;
+        int32_t expo = static_cast<int32_t>(high_bits.e) - EXPONENT_BIAS;
+        // subnormal and underflow
         if (expo < -1022) {
+            int32_t shift = (int32_t)(FRAC_BITS - dbl_frac_bits) -1022 - expo;
+            
+            // underflow
+            if (shift >= FRAC_BITS) {
+                return 0;
+            }
             // TODO: handle subnormal
-            d.val = 0;
+            d.e = 0;
+            // add the msb back
+            uint64_t h = high_bits.f | (1ull << (FRAC_BITS - 64));
+            d.f = shift_right128_round(low, h, shift);
+            d.s = high_bits.s;
+            return d.val;
         }
+        // too big for double
         else if (expo > 1023) {
             return HUGE_VAL;
         }
         // normal numbers
         else {
-            d.e = 1023 + expo;
-            d.f = shift_right128_round(low, high, FRAC_BITS - dbl_frac_bits);
+            d.e = 1023ull + expo;
+            d.f = shift_right128_round(low, high_bits.f, FRAC_BITS - dbl_frac_bits);
+            d.s = high_bits.s;
+            return d.val;
         }
-
-        d.s = high_bits.s;
-
-        return d.val;
+    }
+    /**
+     * @brief Operator double
+     */
+     /**
+      * @brief operator long double - converts to a long double
+      * @return Object value.
+     */
+    FP128_INLINE operator long double() const noexcept {
+        return operator double();
+    }
+    /**
+     * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
+     * @return object string representation
+    */
+    FP128_INLINE operator std::string() const noexcept {
+        return operator char* ();
+    }
+    /**
+     * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
+     * @return object string representation
+    */
+    explicit FP128_INLINE operator char* () const noexcept {
+        static thread_local char str[128]; // need roughly a (meaningful) decimal digit per 3.2 bits
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
 
+    //
+    // math operators
+    //
+    /**
+     * @brief Add a value to this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    FP128_INLINE float128& operator+=(const float128& other) noexcept {
+        // check trivial cases
+        if (high_bits.e == INF_EXPONENT || other.high_bits.e == INF_EXPONENT) {
+            if (isnan() || other.isnan())
+                *this = nan();
+            // return inf with the right sign
+            if (other.isinf())
+                *this = other;
+            return *this;
+        }
+        //if (is_zero()) {
+        //    *this = other;
+        //    return *this;
+        //}
+        //else if (other.is_zero())
+        //    return *this;
+
+        int32_t expo = get_exponent();
+        int32_t other_expo = other.get_exponent();
+        // exponents are too far apart, result will stay the same
+        if (expo >= other_expo + FRAC_BITS)
+            return *this;
+        // exponents are too far apart, use the other value
+        if (other_expo >= expo + FRAC_BITS) {
+            *this = other;
+            return *this;
+        }
+            
+
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        return *this;
+    }
+    /**
+     * @brief Add a value to this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE float128& operator+=(const T& other) {
+        return operator+=(fixed_point128(other));
+    }
+    /**
+     * @brief Subtract a value from this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    FP128_INLINE float128& operator-=(const float128& other) noexcept {
+        return *this+=(-other);
+    }
+    /**
+     * @brief Subtract a value from this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE float128& operator-=(const T& other) {
+        return operator+=(-fixed_point128(other));
+    }
+    /**
+     * @brief Multiply a value to this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    FP128_INLINE float128& operator*=(const float128& other) noexcept {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        return *this;
+    }
+    /**
+     * @brief Multiply a value to this object
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE float128& operator*=(const T& other) {
+        return operator*=(fixed_point128(other));
+    }
+    /**
+     * @brief Divide this object by a value
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    FP128_INLINE float128& operator/=(const float128& other) noexcept {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        return *this;
+    }
+    /**
+     * @brief Divide this object by a value
+     * @param other Right hand side operand
+     * @return This object.
+    */
+    template<typename T>
+    FP128_INLINE float128& operator/=(const T& other) {
+        return operator/=(fixed_point128(other));
+    }
+
+    //
+    // unary operations
+    //     
+    /**
+     * @brief Convert to bool
+    */
+    __forceinline operator bool() const noexcept {
+        return high != 0 || low != 0;
+    }
+    /**
+     * @brief Logical not (!). Opposite of operator bool.
+    */
+    __forceinline bool operator!() const noexcept {
+        return high == 0 && low == 0;
+    }
+    /**
+     * @brief Unary +. Returns a copy of the object.
+    */
+    __forceinline float128 operator+() const noexcept {
+        return *this;
+    }
+    /**
+     * @brief Unary -. Returns a copy of the object with sign inverted.
+    */
+    __forceinline float128 operator-() const noexcept {
+        return float128(low, high ^ SIGN_MASK);
+    }
+
+    //
+    // useful public functions
+    //
+    /**
+     * @brief Returns true if the value positive (incuding zero)
+     * @return True when the the value positive
+    */
+    __forceinline bool is_positive() const noexcept
+    {
+        return high_bits.s == 0;
+    }
+    /**
+     * @brief Returns true if the value negative (smaller than zero)
+     * @return True when the the value negative
+    */
+    __forceinline bool is_negative() const noexcept
+    {
+        return high_bits.s == 1;
+    }
+    /**
+     * @brief Returns true if the value is zero
+     * @return Returns true if the value is zero
+    */
+    __forceinline bool is_zero() const noexcept
+    {
+        return 0 == low && 0 == high;
+    }
+    /**
+     * @brief get a specific bit within the float128 data
+     * @param bit bit to get [0,127]
+     * @return 0 or 1. Undefined when bit > 127
+    */
+    __forceinline int32_t get_bit(uint32_t bit) const noexcept
+    {
+        if (bit < 64) {
+            return FP128_GET_BIT(low, bit);
+        }
+        return FP128_GET_BIT(high, bit - 64);
+    }
+    /**
+     * @brief Returns the exponent of the object - like the base 2 exponent of a floating point
+     * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
+     * @return Exponent of the number
+    */
+    __forceinline int32_t get_exponent() const noexcept
+    {
+        return static_cast<int32_t>(high_bits.e) - EXPONENT_BIAS;
+    }
+    /**
+     * @brief Tests if this value is a NaN
+     * @return True when the value is a NaN
+    */
+    __forceinline bool isnan() const {
+        // fraction is zero for +- INF, non-zero for NaN 
+        return high_bits.e == INF_EXPONENT && high_bits.f != 0;
+    }
+    /**
+     * @brief Tests if this value is an Infinite (negative or positive)
+     * @return True when the value is an Infinite
+    */
+    __forceinline bool isinf() const {
+        // fraction is zero for +- INF, non-zero for NaN 
+        return high_bits.e == INF_EXPONENT && high_bits.f == 0;
+    }
+
+
+    /**
+     * @brief Return the infinite constant
+     * @return INF
+    */
     static float128 inf() {
-        static float128 _inf(0, 0, INF_EXPONENT, 0);
+        static const float128 _inf(0, 0, INF_EXPONENT, 0);
         return _inf;
     }
-
+    /**
+     * @brief Return the quiet (non-signaling) NaN constant
+     * @return NaN
+    */
     static float128 nan() {
-        static float128 _nan(1, 0, INF_EXPONENT, 0);
+        static const float128 _nan(1, 0, INF_EXPONENT, 0);
         return _nan;
     }
-
+    /**
+     * @brief Return the NaN constant
+     * @param  
+     * @return 
+    */
     friend float128 nan(const float128&) {
-
+        return float128::nan();
     }
+    /**
+     * @brief Tests if the value is a NaN 
+     * @param x Value to test
+     * @return True when the value is a NaN
+    */
     friend bool isnan(const float128& x) {
         // zero for +- INF, non-zero for NaN 
-        return x.high_bits.e == INF_EXPONENT && x.high_bits.f != 0;
+        return x.isnan();
+    }
+    /**
+     * @brief Tests if the value is an Infinite (negative or positive)
+     * @param x Value to test
+     * @return True when the value is an Infinite
+    */
+    friend bool isinf(const float128& x) {
+        return x.isinf();
     }
 };
 
