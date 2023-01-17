@@ -64,7 +64,7 @@ static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 *                                  Macros
 ************************************************************************************/
 #define FP128_ONE_SHIFT(x)          (1ull << (x))
-#define FP128_MAX_VALUE_64(x)       (((uint64_t)-1ll) >> (64 - x))
+#define FP128_MAX_VALUE_64(x)       (((uint64_t)-1ll) >> (64 - (x)))
 #define FP128_GET_BIT(x, n)         (((x) >> (n)) & 1)
 #define FP128_GET_BITS(x, b, count) (((x) >> (b)) & FP128_MAX_VALUE_64(count))
 #define FP128_INT_DIVIDE_BY_ZERO_EXCEPTION   throw std::logic_error("Integer divide by zero!")
@@ -474,6 +474,16 @@ __forceinline uint32_t log2(uint32_t x) noexcept
 __forceinline uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
 {
     return __popcnt64(l) + __popcnt64(h);
+}
+/**
+ * @brief Left zero count 128 bit
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @return Left zero count
+*/
+__forceinline uint64_t lzcnt128(uint64_t l, uint64_t h) noexcept
+{
+    return (h != 0) ? __lzcnt64(h) : 64 + __lzcnt64(l);
 }
 
 } //namespace fp128 {

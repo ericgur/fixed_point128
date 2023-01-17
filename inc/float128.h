@@ -89,7 +89,8 @@ class __declspec(align(16)) float128
     static constexpr uint64_t EXPONENT_BIAS = 0x3FFF;
     static constexpr uint64_t FRAC_BITS = 112;
     static constexpr uint64_t EXP_BITS = 15;
-    static constexpr uint64_t FRAC_MASK = FP128_MAX_VALUE_64(48);
+    static constexpr uint64_t FRAC_MASK = FP128_MAX_VALUE_64(FRAC_BITS - 64);
+    static constexpr uint64_t FRAC_UNITY = FP128_ONE_SHIFT(FRAC_BITS - 64);
     static constexpr uint64_t EXP_MASK = INF_EXPONENT;
     static constexpr uint64_t SIGN_MASK = 1ull << 63;
 #pragma warning(push)
@@ -170,7 +171,7 @@ public:
                 low = 0;
             }
             
-            high_bits.e = EXPONENT_BIAS + expo;
+            set_exponent(expo);
         }
         // NaN & INF
         else if (d.e == 0x7FF)
@@ -183,7 +184,7 @@ public:
         else {
             low = d.f << 60;
             high = d.f >> 4;
-            high_bits.e = EXPONENT_BIAS + d.e - 1023;
+            set_exponent(static_cast<int32_t>(d.e) - 1023);
         }
 
         // copy the sign
@@ -233,7 +234,7 @@ public:
             return NAN;
         }
 
-        int32_t expo = static_cast<int32_t>(high_bits.e) - EXPONENT_BIAS;
+        int32_t expo = get_exponent();
         // subnormal and underflow
         if (expo < -1022) {
             int32_t shift = (int32_t)(FRAC_BITS - dbl_frac_bits) -1022 - expo;
@@ -315,17 +316,76 @@ public:
 
         int32_t expo = get_exponent();
         int32_t other_expo = other.get_exponent();
-        // exponents are too far apart, result will stay the same
-        if (expo >= other_expo + FRAC_BITS)
-            return *this;
-        // exponents are too far apart, use the other value
-        if (other_expo >= expo + FRAC_BITS) {
-            *this = other;
+        uint64_t l1 = low;
+        uint64_t h1 = high_bits.f | FRAC_UNITY;
+        uint64_t l2 = other.low;
+        uint64_t h2 = other.high_bits.f | FRAC_UNITY;
+
+        if (expo >= other_expo) {
+            // exponents are too far apart, result will stay the same
+            if (expo >= other_expo + FRAC_BITS)
+                return *this;
+            shift_right128_inplace(l2, h2 , expo - other_expo);
+        }
+        else {
+            // exponents are too far apart, use the other value
+            if (other_expo >= expo + FRAC_BITS) {
+                *this = other;
+                return *this;
+            }
+            shift_right128_inplace(l1, h1, other_expo - expo);
+            // result base exponent comes from the other value
+            expo = other_expo;
+        }
+
+        // same sign: the simple case
+        if (other.high_bits.s == high_bits.s) {
+            //add the other value
+            const uint8_t carry = _addcarryx_u64(0, l1, l2, &l1);
+            _addcarryx_u64(carry, h1, h2, &h1);
+        }
+        // different sign: invert the sign for other and subtract
+        else {
+            // this value is negative
+            if (high_bits.s)
+                twos_complement128(l1, h1);
+            // other value is negative
+            else
+                twos_complement128(l2, h2);
+
+            //add the other value, results stored in l1
+            const uint8_t carry = _addcarryx_u64(0, l1, l2, &l1);
+            _addcarryx_u64(carry, h1, h2, &h1);
+
+            // bit 63 is high - got a negative result
+            // flip the bits and invert the sign
+            if (h1 & FP128_ONE_SHIFT(63)) {
+                twos_complement128(l1, h1);
+                invert_sign();
+            }
+        }
+
+        // fix the exponent
+        auto msb = 127 - static_cast<int32_t>(lzcnt128(l1, h1));
+        // all zeros
+        if (msb < 0) {
+            low = high = 0;
             return *this;
         }
-            
 
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // if the msb is exactly msb == FRAC_BITS the exponent stays the same
+        int32_t shift = msb - FRAC_BITS;
+
+        expo += shift;
+        if (shift >= 0) {
+            shift_right128_inplace(l1, h1, shift);
+        }
+        else {
+            shift_left128_inplace(l1, h1, -shift);
+        }
+        low = l1;
+        high_bits.f = h1;
+        set_exponent(expo);
         return *this;
     }
     /**
@@ -459,6 +519,13 @@ public:
         return FP128_GET_BIT(high, bit - 64);
     }
     /**
+     * @brief Inverts the sign
+    */
+    __forceinline void invert_sign() noexcept
+    {
+        high_bits.s ^= 1;
+    }
+    /**
      * @brief Returns the exponent of the object - like the base 2 exponent of a floating point
      * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
      * @return Exponent of the number
@@ -466,6 +533,12 @@ public:
     __forceinline int32_t get_exponent() const noexcept
     {
         return static_cast<int32_t>(high_bits.e) - EXPONENT_BIAS;
+    }
+    __forceinline void set_exponent(int32_t e) noexcept
+    {
+        assert(e + EXPONENT_BIAS > 0);
+        assert(e <= static_cast<int32_t>(INF_EXPONENT));
+        high_bits.e =  e + EXPONENT_BIAS;
     }
     /**
      * @brief Tests if this value is a NaN
