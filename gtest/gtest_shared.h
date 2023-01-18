@@ -1,5 +1,6 @@
 #include "..\inc\fixed_point128.h"
 #include "..\inc\uint128_t.h"
+#include "..\inc\float128.h"
 #ifndef GTEST_SHARED_H
 #define GTEST_SHARED_H
 

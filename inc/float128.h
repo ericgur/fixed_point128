@@ -163,9 +163,10 @@ public:
             int32_t expo = x_expo + msb - dbl_frac_bits;
             //fraction
             low = d.f & ~(1ull << (msb - 1)); // clear the msb
-            auto shift = FRAC_BITS - msb + 1;
+            auto shift = static_cast<int32_t>(FRAC_BITS - msb + 1);
             if (shift < 64)
-                shift_left128_inplace(low, high, FRAC_BITS - msb);
+                // Note shift cannot be zero
+                shift_left128_inplace(low, high, shift);
             else {
                 high = low << (shift - 64);
                 low = 0;
@@ -188,9 +189,43 @@ public:
         }
 
         // copy the sign
-        high_bits.s = d.s;
+        set_sign(d.s);
     }
+    template<typename T>
+    FP128_INLINE float128(T x) noexcept {
+        if constexpr (std::is_floating_point_v<T>) {
+            new(this) float128(static_cast<double>(x));
+            return;
+        }
+        uint64_t sign = 0;
+        if constexpr (std::is_signed_v<T>) {
+        #pragma warning(push) 
+        #pragma warning(disable: 4702) // static analysis bug in VS 2022 17.4. This code _is_ reachable.
+            // alway do positive multiplication
+            if (x < 0) {
+                x = -x;
+                sign = 1;
+            }
+        #pragma warning(pop) 
+        }
 
+        // integers: convert to uint64 for a simpler operation.
+        high = 0;
+        low = static_cast<uint64_t>(x);
+        if (low == 0)
+            return;
+        
+        auto expo = log2(low); // this is the index of the msb as well
+        auto shift = static_cast<int32_t>(FRAC_BITS - expo);
+        if (shift < 64)
+            shift_left128_inplace(low, high, shift);
+        else {
+            high = low << (shift - 64);
+            low = 0;
+        }
+        set_sign(sign);
+        set_exponent(static_cast<int32_t>(expo));
+    }
     /**
      * @brief Destructor
     */
@@ -229,8 +264,9 @@ public:
         // nan and inf
         if (high_bits.e == INF_EXPONENT) {
             // zero fraction means inf, otherwise nan
-            if (low == 0 && high_bits.f == 0)
-                return HUGE_VAL;
+            if (low == 0 && high_bits.f == 0) {
+                return (get_sign()) ? -HUGE_VAL : HUGE_VAL;
+            }
             return NAN;
         }
 
@@ -264,9 +300,70 @@ public:
         }
     }
     /**
-     * @brief Operator double
-     */
-     /**
+     * @brief operator float converts to a float
+    */
+    FP128_INLINE operator float() const noexcept {
+        // TODO: write proper function
+        double v = static_cast<double>(*this);
+        return static_cast<float>(v);
+    }
+    /**
+     * @brief operator uint64_t converts to a uint64_t
+    */
+    FP128_INLINE operator uint64_t() const noexcept {
+        auto expo = get_exponent();
+        if (expo > 63) return (get_sign()) ? static_cast<uint64_t>(INT64_MIN) : UINT64_MAX;
+        if (expo < 0) return 0;
+        
+        auto shift = static_cast<int>(FRAC_BITS) - expo;
+        uint64_t res = shift_right128(low, high_bits.f, shift);
+        // Add msb
+        res |= FP128_ONE_SHIFT(expo);
+        return res;
+    }
+    /**
+     * @brief operator int64_t converts to a int64_t
+    */
+    FP128_INLINE operator int64_t() const noexcept {
+        auto expo = get_exponent();
+        if (expo > 62) return (get_sign()) ? INT64_MIN : INT64_MAX;
+        if (expo < 0) return 0;
+
+        auto shift = static_cast<int>(FRAC_BITS) - expo;
+        int64_t res = static_cast<int64_t>(shift_right128(low, high_bits.f, shift));
+        // Add msb
+        res |= FP128_ONE_SHIFT(expo);
+        return  (get_sign()) ? -res : res;
+    }
+    /**
+     * @brief operator uint32_t converts to a uint32_t
+    */
+    FP128_INLINE operator uint32_t() const noexcept {
+        auto expo = get_exponent();
+        if (expo > 31) return (get_sign()) ? static_cast<uint32_t>(INT32_MIN) : UINT32_MAX;
+        if (expo < 0) return 0;
+
+        auto shift = static_cast<int>(FRAC_BITS) - expo;
+        uint64_t res = high_bits.f >> shift;
+        // Add msb
+        res |= FP128_ONE_SHIFT(expo);
+        return static_cast<uint32_t>(res);
+    }
+    /**
+     * @brief operator int32_t converts to a int32_t
+    */
+    FP128_INLINE operator int32_t() const noexcept {
+        auto expo = get_exponent();
+        if (expo > 30) return (get_sign()) ? INT32_MIN : INT32_MAX;
+        if (expo < 0) return 0;
+
+        auto shift = static_cast<int>(FRAC_BITS) - expo;
+        int32_t res = static_cast<int32_t>(high_bits.f >> shift);
+        // Add msb
+        res |= FP128_ONE_SHIFT(expo);
+        return  (get_sign()) ? -res : res;
+    }
+    /**
       * @brief operator long double - converts to a long double
       * @return Object value.
      */
@@ -307,12 +404,6 @@ public:
                 *this = other;
             return *this;
         }
-        //if (is_zero()) {
-        //    *this = other;
-        //    return *this;
-        //}
-        //else if (other.is_zero())
-        //    return *this;
 
         int32_t expo = get_exponent();
         int32_t other_expo = other.get_exponent();
@@ -320,26 +411,38 @@ public:
         uint64_t h1 = high_bits.f | FRAC_UNITY;
         uint64_t l2 = other.low;
         uint64_t h2 = other.high_bits.f | FRAC_UNITY;
+        int32_t shift = expo - other_expo;
 
-        if (expo >= other_expo) {
+        if (shift > 0) {
             // exponents are too far apart, result will stay the same
-            if (expo >= other_expo + FRAC_BITS)
+            if (shift >= FRAC_BITS)
                 return *this;
-            shift_right128_inplace(l2, h2 , expo - other_expo);
+            if (shift <  64)
+                shift_right128_inplace(l2, h2 , shift);
+            else {
+                l2 = h2 >> (shift - 64);
+                h2 = 0;
+            }
         }
-        else {
+        else if (shift < 0) {
+            shift = -shift;
             // exponents are too far apart, use the other value
-            if (other_expo >= expo + FRAC_BITS) {
+            if (shift >= FRAC_BITS) {
                 *this = other;
                 return *this;
             }
-            shift_right128_inplace(l1, h1, other_expo - expo);
+            if (shift < 64)
+                shift_right128_inplace(l1, h1, shift);
+            else {
+                l1 = h1 >> (shift - 64);
+                h1 = 0;
+            }
             // result base exponent comes from the other value
             expo = other_expo;
         }
 
         // same sign: the simple case
-        if (other.high_bits.s == high_bits.s) {
+        if (other.get_sign() == get_sign()) {
             //add the other value
             const uint8_t carry = _addcarryx_u64(0, l1, l2, &l1);
             _addcarryx_u64(carry, h1, h2, &h1);
@@ -359,10 +462,11 @@ public:
 
             // bit 63 is high - got a negative result
             // flip the bits and invert the sign
-            if (h1 & FP128_ONE_SHIFT(63)) {
+            uint64_t sign = FP128_GET_BIT(h1, 63);
+            if (sign) {
                 twos_complement128(l1, h1);
-                invert_sign();
             }
+            set_sign(sign);
         }
 
         // fix the exponent
@@ -374,13 +478,13 @@ public:
         }
 
         // if the msb is exactly msb == FRAC_BITS the exponent stays the same
-        int32_t shift = msb - FRAC_BITS;
+        shift = msb - FRAC_BITS;
 
         expo += shift;
-        if (shift >= 0) {
+        if (shift > 0) {
             shift_right128_inplace(l1, h1, shift);
         }
-        else {
+        else if (shift < 0) {
             shift_left128_inplace(l1, h1, -shift);
         }
         low = l1;
@@ -395,7 +499,7 @@ public:
     */
     template<typename T>
     FP128_INLINE float128& operator+=(const T& other) {
-        return operator+=(fixed_point128(other));
+        return operator+=(float128(other));
     }
     /**
      * @brief Subtract a value from this object
@@ -412,7 +516,7 @@ public:
     */
     template<typename T>
     FP128_INLINE float128& operator-=(const T& other) {
-        return operator+=(-fixed_point128(other));
+        return operator+=(-float128(other));
     }
     /**
      * @brief Multiply a value to this object
@@ -430,7 +534,7 @@ public:
     */
     template<typename T>
     FP128_INLINE float128& operator*=(const T& other) {
-        return operator*=(fixed_point128(other));
+        return operator*=(float128(other));
     }
     /**
      * @brief Divide this object by a value
@@ -448,7 +552,7 @@ public:
     */
     template<typename T>
     FP128_INLINE float128& operator/=(const T& other) {
-        return operator/=(fixed_point128(other));
+        return operator/=(float128(other));
     }
 
     //
@@ -526,6 +630,20 @@ public:
         high_bits.s ^= 1;
     }
     /**
+     * @brief Sets the sign
+    */
+    __forceinline void set_sign(uint64_t s) noexcept
+    {
+        high_bits.s = s;
+    }
+    /**
+     * @brief Gets the sign
+    */
+    __forceinline uint64_t get_sign() const noexcept
+    {
+        return high_bits.s;
+    }
+    /**
      * @brief Returns the exponent of the object - like the base 2 exponent of a floating point
      * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
      * @return Exponent of the number
@@ -556,8 +674,6 @@ public:
         // fraction is zero for +- INF, non-zero for NaN 
         return high_bits.e == INF_EXPONENT && high_bits.f == 0;
     }
-
-
     /**
      * @brief Return the infinite constant
      * @return INF
@@ -574,6 +690,185 @@ public:
         static const float128 _nan(1, 0, INF_EXPONENT, 0);
         return _nan;
     }
+
+    //
+    // End of class method implementation
+    //
+
+    //
+    // Binary math operators
+    //
+    /**
+     * @brief Adds 2 values and returns the result.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return Result of the operation
+    */
+    template<typename T>
+    friend __forceinline float128 operator+(float128 lhs, const T& rhs) noexcept {
+        return lhs += rhs;
+    }
+    /**
+     * @brief subtracts the right hand side operand to this object to and returns the result.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The float128 result
+    */
+    template<typename T>
+    friend __forceinline float128 operator-(float128 lhs, const T& rhs) noexcept {
+        return lhs -= rhs;
+    }
+    /**
+     * @brief Multiplies the right hand side operand with this object to and returns the result.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The float128 result
+    */
+    template<typename T>
+    friend __forceinline float128 operator*(float128 lhs, const T& rhs) noexcept {
+        return lhs *= rhs;
+    }
+    /**
+     * @brief Divides this object by the right hand side operand and returns the result.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return The float128 result
+    */
+    template<typename T>
+    friend __forceinline float128 operator/(float128 lhs, const T& rhs) {
+        return lhs /= rhs;
+    }
+
+    //
+    // Comparison operators
+    //
+
+    /**
+     * @brief Compare logical/bitwise equal.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True if this and other are equal.
+    */
+    friend __forceinline bool operator==(const float128& lhs, const float128& rhs) noexcept {
+        return lhs.high == rhs.high && lhs.low == rhs.low;
+    }
+    template<typename T>
+    friend __forceinline bool operator==(const float128& lhs, const T& rhs) noexcept {
+        return lhs == float128(rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator==(const T& lhs, const float128& rhs) noexcept {
+        return rhs == float128(lhs);
+    }
+    /**
+     * @brief Return true when objects are not equal. Can be used as logical XOR.
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True if not equal.
+    */
+    friend __forceinline bool operator!=(const float128& lhs, const float128& rhs) noexcept {
+        return lhs.high != rhs.high || lhs.low != rhs.low;
+    }
+    template<typename T>
+    friend __forceinline bool operator!=(const float128& lhs, const T& rhs) noexcept {
+        return lhs != float128(rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator!=(const T& lhs, const float128& rhs) noexcept {
+        return rhs != float128(lhs);
+    }
+
+    /**
+     * @brief Return true if this object is small than the other
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True when this object is smaller.
+    */
+    friend __forceinline bool operator<(const float128& lhs, const float128& rhs) noexcept {
+        auto rhs_sign = rhs.get_sign();
+        auto lhs_sign = lhs.get_sign();
+
+        // signs are different
+        if (lhs_sign != rhs_sign)
+            return lhs_sign > rhs_sign; // true when lhs_sign is 1 and rhs.sign is 0
+
+        // MSB is the same, check the LSB, implies the exponent is identical
+        if (lhs.high == rhs.high)
+            return (lhs_sign) ? lhs.low > rhs.low : lhs.low < rhs.low;
+
+        return (lhs_sign) ? lhs.high > rhs.high : lhs.high < rhs.high;
+    }
+    template<typename T>
+    friend __forceinline bool operator<(const float128& lhs, const T& rhs) noexcept {
+        return lhs < float128(rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator<(const T& lhs, const float128& rhs) noexcept {
+        return float128(lhs) < rhs;
+    }
+    /**
+     * @brief Return true this object is small or equal than the other
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True when this object is smaller or equal.
+    */
+    friend __forceinline bool operator<=(const float128& lhs, const float128& rhs) noexcept {
+        return !(lhs > rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator<=(const float128& lhs, const T& rhs) noexcept {
+        return !(lhs > float128(rhs));
+    }
+    template<typename T>
+    friend __forceinline bool operator<=(const T& lhs, const float128& rhs) noexcept {
+        return !(float128(lhs) > rhs);
+    }
+    /**
+     * @brief Return true this object is larger than the other
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True when this object is larger.
+    */
+    friend __forceinline bool operator>(const float128& lhs, const float128& rhs) noexcept {
+        auto rhs_sign = rhs.get_sign();
+        auto lhs_sign = lhs.get_sign();
+
+        // signs are different
+        if (lhs_sign != rhs_sign)
+            return lhs_sign < rhs_sign; // true when lhs_sign is 1 and rhs.sign is 0
+
+        // MSB is the same, check the LSB, implies the exponent is identical
+        if (lhs.high == rhs.high)
+            return (lhs_sign) ? lhs.low < rhs.low : lhs.low > rhs.low;
+
+        return (lhs_sign) ? lhs.high < rhs.high : lhs.high > rhs.high;
+    }
+    template<typename T>
+    friend __forceinline bool operator>(const float128& lhs, const T& rhs) noexcept {
+        return lhs > float128(rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator>(const T& lhs, const float128& rhs) noexcept {
+        return float128(lhs) > rhs;
+    }
+    /**
+     * @brief Return true this object is larger or equal than the other
+     * @param lhs left hand side operand
+     * @param rhs Right hand side operand
+     * @return True when this objext is larger or equal.
+    */
+    friend __forceinline bool operator>=(const float128& lhs, const float128& rhs) noexcept {
+        return !(lhs < rhs);
+    }
+    template<typename T>
+    friend __forceinline bool operator>=(const float128& lhs, const T& rhs) noexcept {
+        return !(lhs < float128(rhs));
+    }
+    template<typename T>
+    friend __forceinline bool operator>=(const T& lhs, const float128& rhs) noexcept {
+        return !(float128(lhs) < rhs);
+    }
+
     /**
      * @brief Return the NaN constant
      * @param  

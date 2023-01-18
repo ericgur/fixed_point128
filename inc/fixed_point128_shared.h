@@ -164,14 +164,14 @@ __forceinline uint32_t shift_left64(uint32_t l, uint32_t h, int shift) noexcept
 }
 /**
     * @brief shift right 'x' by 'shift' bits with rounding
-    * Undefined behavior when shift is outside the range [1, 63]
+    * Undefined behavior when shift is outside the range [0, 63]
     * @param x value to shift
     * @param shift how many bits to shift
     * @return result of 'x' right shifted by 'shift' bits.
 */
 __forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 {
-    FP128_ASSERT(shift >= 0 && shift < 64);
+    assert(shift > 0 && shift < 64);
     x += 1ull << (shift - 1);
     return x >> shift;
 }
@@ -185,7 +185,8 @@ __forceinline uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 */
 __forceinline void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
 {
-   l = (l >> shift) | (h << (64 - shift));
+    assert(shift > 0 && shift < 64);
+    l = (l >> shift) | (h << (64 - shift));
    h >>= shift;
 }
 /**
@@ -198,6 +199,7 @@ __forceinline void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) n
 */
 __forceinline void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
 {
+    assert(shift > 0 && shift < 64);
     h = (h << shift) | (l >> (64 - shift));
     l <<= shift;
 }
@@ -211,6 +213,7 @@ __forceinline void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) no
 */
 __forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
+    assert(shift >= 0 && shift < 128);
     if (shift == 0) return l;
     if (shift < 64) return (l >> shift) | (h << (64 - shift));
     if (shift < 128) return h >> (shift ^ 64);
@@ -225,6 +228,7 @@ __forceinline uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcep
 */
 __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
+    assert(shift >= 0 && shift < 128);
     if (shift == 0) return l;
     if (shift < 64) {
         const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
@@ -246,6 +250,7 @@ __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) n
 */
 __forceinline uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
+    assert(shift >= 0 && shift < 128);
     if (shift == 0) return h;
     if (shift < 64) return (h << shift) | (l >> (64 - shift));
     if (shift < 128) return l << (shift - 64);
