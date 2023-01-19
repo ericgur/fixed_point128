@@ -314,100 +314,116 @@ TEST(float128, SubtractUnsignedInt64) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-//TEST(float128, MultiplyByFloat128 ) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value1 = get_double_random();
-//        double value2 = get_double_random();
-//        double res = value1 * value2;
-//        float128 f1 = value1;
-//        float128 f2 = value2;
-//        float128 f3 = f1 * f2;
-//
-//        double float128_res = static_cast<double>(f3);
-//        // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-//        if (is_similar_double(float128_res, res))
-//            continue;
-//
-//        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
-//TEST(float128, MultiplyByDouble) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value1 = get_double_random();
-//        double value2 = get_double_random();
-//        double res = value1 * value2;
-//        float128 f1 = value1;
-//        float128 f3 = f1 * value2;
-//        double float128_res = static_cast<double>(f3);
-//        // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-//        //if (is_similar_double(float128_res, res))
-//        //    continue;
-//
-//        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
-//TEST(float128, MultiplyByFloat) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        float value1 = (float)get_double_random();
-//        float value2 = (float)get_double_random();
-//        float res = value1 * value2;
-//        float128 f1 = value1;
-//        float128 f3 = f1 * value2;
-//        double float128_res = static_cast<double>(f3);
-//        // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-//        //if (is_similar_double(float128_res, res))
-//        //    continue;
-//
-//        EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
-//TEST(float128, MultiplyByInt32) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        auto value1 = get_int32_random();
-//        auto value2 = get_int32_random();
-//        int64_t res = (int64_t)value1 * (int64_t)value2;
-//        float128 f1 = value1;
-//        float128 f3 = f1 * value2;
-//        EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
-//TEST(float128, MultiplyByUnsignedInt32) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        auto value1 = get_uint32_random();
-//        auto value2 = get_uint32_random();
-//        uint64_t res = (uint64_t)value1 * (uint64_t)value2;
-//        float128 f1 = value1;
-//        float128 f3 = f1 * value2;
-//        EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
-//TEST(float128, MultiplyByInt64) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        auto value1 = get_int64_random();
-//        auto value2 = get_int64_random();
-//        int64_t res = value1 * value2;
-//        float128 f1 = value1;
-//        float128 f3 = f1 * value2;
-//        EXPECT_EQ(static_cast<int64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
-//TEST(float128, MultiplyByUnsignedInt64) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        auto value1 = get_uint64_random();
-//        auto value2 = get_uint64_random();
-//        uint64_t res = value1 * value2;
-//        float128 f1 = value1;
-//        float128 f3 = f1 * value2;
-//        EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
+TEST(float128, MultiplyByFloat128 ) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        double res = value1 * value2;
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 f3 = f1 * f2;
+
+        double float128_res = static_cast<double>(f3);
+        // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        //if (is_similar_double(float128_res, res))
+        //    continue;
+
+        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, MultiplyByDouble) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        double res = value1 * value2;
+        float128 f1 = value1;
+        float128 f3 = f1 * value2;
+        double float128_res = static_cast<double>(f3);
+        // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        //if (is_similar_double(float128_res, res))
+        //    continue;
+
+        EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, MultiplyByFloat) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        float value1 = (float)get_double_random();
+        float value2 = (float)get_double_random();
+        float res = value1 * value2;
+        float128 f1 = value1;
+        float128 f3 = f1 * value2;
+        float float128_res = static_cast<float>(f3);
+        // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
+        //if (is_similar_double(float128_res, res))
+        //    continue;
+
+        EXPECT_FLOAT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, MultiplyByInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int32_random();
+        auto value2 = get_int32_random();
+        // check result overflow
+        if (log2(abs(value1)) + log2(abs(value2)) > 31)
+            continue;
+        int64_t res = (int64_t)value1 * (int64_t)value2;
+        float128 f1 = value1;
+        float128 f3 = f1 * value2;
+        auto float128_res = static_cast<int32_t>(f3);
+        EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, MultiplyByUnsignedInt32) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint32_random();
+        auto value2 = get_uint32_random();
+        // check result overflow
+        if (log2(value1) + log2(value2) > 31)
+            continue;
+        uint64_t res = (uint64_t)value1 * (uint64_t)value2;
+        float128 f1 = value1;
+        float128 f3 = f1 * value2;
+        auto float128_res = static_cast<uint32_t>(f3);
+        EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, MultiplyByInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_int64_random();
+        auto value2 = get_int64_random();
+        // check result overflow
+        if (log2(abs(value1)) + log2(abs(value2)) > 63)
+            continue;
+        int64_t res = value1 * value2;
+        float128 f1 = value1;
+        float128 f3 = f1 * value2;
+        auto float128_res = static_cast<int64_t>(f3);
+        EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, MultiplyByUnsignedInt64) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        auto value1 = get_uint64_random();
+        auto value2 = get_uint64_random();
+        // check result overflow
+        if (log2(value1) + log2(value2) > 63)
+            continue;
+        uint64_t res = value1 * value2;
+        float128 f1 = value1;
+        float128 f3 = f1 * value2;
+        auto float128_res = static_cast<uint64_t>(f3);
+        EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
 //TEST(float128, DivideByFloat128) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {

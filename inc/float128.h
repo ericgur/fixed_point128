@@ -1,7 +1,7 @@
 /***********************************************************************************
     MIT License
 
-    Copyright (c) 2022 Eric Gur (ericgur@iname.com)
+    Copyright (c) 2023 Eric Gur (ericgur@iname.com)
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -85,10 +85,10 @@ class __declspec(align(16)) float128
     static_assert(sizeof(void*) == 8, "float128 is supported in 64 bit builds only!");
     friend class fp128_gtest;
     
-    static constexpr uint64_t INF_EXPONENT = 0x7FFF;
-    static constexpr uint64_t EXPONENT_BIAS = 0x3FFF;
-    static constexpr uint64_t FRAC_BITS = 112;
-    static constexpr uint64_t EXP_BITS = 15;
+    static constexpr int32_t INF_EXPONENT = 0x7FFF;
+    static constexpr int32_t EXPONENT_BIAS = 0x3FFF;
+    static constexpr int32_t FRAC_BITS = 112;
+    static constexpr int32_t EXP_BITS = 15;
     static constexpr uint64_t FRAC_MASK = FP128_MAX_VALUE_64(FRAC_BITS - 64);
     static constexpr uint64_t FRAC_UNITY = FP128_ONE_SHIFT(FRAC_BITS - 64);
     static constexpr uint64_t EXP_MASK = INF_EXPONENT;
@@ -279,7 +279,7 @@ public:
             if (shift >= FRAC_BITS) {
                 return 0;
             }
-            // TODO: handle subnormal
+
             d.e = 0;
             // add the msb back
             uint64_t h = high_bits.f | (1ull << (FRAC_BITS - 64));
@@ -405,12 +405,11 @@ public:
             return *this;
         }
 
-        int32_t expo = get_exponent();
-        int32_t other_expo = other.get_exponent();
-        uint64_t l1 = low;
-        uint64_t h1 = high_bits.f | FRAC_UNITY;
-        uint64_t l2 = other.low;
-        uint64_t h2 = other.high_bits.f | FRAC_UNITY;
+        uint32_t sign, other_sign;
+        int32_t expo, other_expo;
+        uint64_t l1, h1, l2, h2;
+        get_components(l1, h1, expo, sign);
+        other.get_components(l2, h2, other_expo, other_sign);
         int32_t shift = expo - other_expo;
 
         if (shift > 0) {
@@ -462,7 +461,7 @@ public:
 
             // bit 63 is high - got a negative result
             // flip the bits and invert the sign
-            uint64_t sign = FP128_GET_BIT(h1, 63);
+            sign = FP128_GET_BIT(h1, 63);
             if (sign) {
                 twos_complement128(l1, h1);
             }
@@ -524,7 +523,92 @@ public:
      * @return This object.
     */
     FP128_INLINE float128& operator*=(const float128& other) noexcept {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // check trivial cases
+        if (high_bits.e == INF_EXPONENT || other.high_bits.e == INF_EXPONENT) {
+            if (isnan() || other.isnan())
+                *this = nan();
+            // return inf with the right sign
+            if (other.isinf())
+                *this = other;
+            return *this;
+        }
+        else if (is_zero() || other.is_zero()) {
+            *this = 0;
+            return *this;
+        }
+        
+        // extract fractions and exponents
+        uint32_t sign, other_sign;
+        int32_t expo, other_expo;
+        uint64_t l1, h1, l2, h2;
+        get_components(l1, h1, expo, sign);
+        other.get_components(l2, h2, other_expo, other_sign);
+
+        // add the exponents
+        expo += other_expo;
+
+        // multiply the fractions
+        // the fractions are in u16.112 precision
+        // the result will be u32.224 precision and will be shifted-right by 112 bit
+        uint64_t res[4]; // 256 bit of result
+        uint64_t temp1[2], temp2[2];
+
+        // multiply low QWORDs
+        res[0] = _mulx_u64(l1, l2, &res[1]);
+
+        // multiply high QWORDs (overflow can happen)
+        res[2] = _mulx_u64(h1, h2, &res[3]);
+
+        // multiply low this and high other
+        temp1[0] = _mulx_u64(l1, h2, &temp1[1]);
+        uint8_t carry = _addcarryx_u64(0, res[1], temp1[0], &res[1]);
+        res[3] += _addcarryx_u64(carry, res[2], temp1[1], &res[2]);
+
+        // multiply high this and low other
+        temp2[0] = _mulx_u64(h1, l2, &temp2[1]);
+        carry = _addcarryx_u64(0, res[1], temp2[0], &res[1]);
+        res[3] += _addcarryx_u64(carry, res[2], temp2[1], &res[2]);
+
+        // extract the bits from res[] keeping the precision the same as this object
+        // shift result by F
+        constexpr int32_t index = 1;
+        constexpr int32_t lsb = FRAC_BITS & 63;            // bit within the 64bit data pointed by res[index]
+        constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
+        const bool need_rounding = (res[index] & half) != 0;
+
+        // copy block #1 (lowest)
+        l1 = shift_right128(res[index], res[index + 1], lsb); // custom function is 20% faster in Mandelbrot than the intrinsic
+        h1 = shift_right128(res[index + 1], res[index + 2], lsb);
+
+        if (need_rounding) {
+            ++l1; // low will wrap around to zero if overflowed
+            h1 += l1 == 0;
+        }
+
+        // fix the exponent
+        auto msb = 127 - static_cast<int32_t>(lzcnt128(l1, h1));
+        // all zeros
+        if (msb < 0) {
+            low = high = 0;
+            return *this;
+        }
+
+        // if the msb is exactly msb == FRAC_BITS the exponent stays the same
+        auto shift = msb - FRAC_BITS;
+
+        expo += shift;
+        if (shift > 0) {
+            shift_right128_inplace(l1, h1, shift);
+        }
+        else if (shift < 0) {
+            shift_left128_inplace(l1, h1, -shift);
+        }
+        low = l1;
+        high_bits.f = h1;
+        set_exponent(expo);
+        
+        //set the sign
+        high_bits.s = sign ^ other_sign;
         return *this;
     }
     /**
@@ -541,7 +625,7 @@ public:
      * @param other Right hand side operand
      * @return This object.
     */
-    FP128_INLINE float128& operator/=(const float128& other) noexcept {
+    FP128_INLINE float128& operator/=(const float128& other) {
         FP128_NOT_IMPLEMENTED_EXCEPTION;
         return *this;
     }
@@ -611,6 +695,22 @@ public:
         return 0 == low && 0 == high;
     }
     /**
+     * @brief Tests if the value is subnormal
+     * @return True when the value is subnormal
+    */
+    __forceinline bool is_subnormal() const noexcept
+    {
+        return high_bits.e == 0;
+    }
+    /**
+     * @brief Tests if the value is normal
+     * @return True when the value is normal. Return false for subnormal, inf and nan
+    */
+    __forceinline bool is_normal() const noexcept
+    {
+        return high_bits.e != 0 && high_bits.e != INF_EXPONENT;
+    }
+    /**
      * @brief get a specific bit within the float128 data
      * @param bit bit to get [0,127]
      * @return 0 or 1. Undefined when bit > 127
@@ -639,7 +739,7 @@ public:
     /**
      * @brief Gets the sign
     */
-    __forceinline uint64_t get_sign() const noexcept
+    __forceinline uint32_t get_sign() const noexcept
     {
         return high_bits.s;
     }
@@ -652,11 +752,48 @@ public:
     {
         return static_cast<int32_t>(high_bits.e) - EXPONENT_BIAS;
     }
+    /**
+     * @brief Set the exponent
+     * @param e Exponent value
+    */
     __forceinline void set_exponent(int32_t e) noexcept
     {
-        assert(e + EXPONENT_BIAS > 0);
-        assert(e <= static_cast<int32_t>(INF_EXPONENT));
-        high_bits.e =  e + EXPONENT_BIAS;
+        e += EXPONENT_BIAS;
+        assert(e >= 0);
+        assert(e <= INF_EXPONENT);
+        high_bits.e =  static_cast<uint64_t>(e);
+    }
+    /**
+     * @brief break the float into its components.
+     * Normalizes subnormal values
+     * @param l Reference to receive the low fraction
+     * @param h Reference to receive the high fraction
+     * @param e Reference to receive the unbiased exponent
+     * @param s Reference to receive the sign
+    */
+    __forceinline void get_components(uint64_t& l, uint64_t& h, int32_t& e, uint32_t& s) const noexcept
+    {
+        l = low;
+        h = high_bits.f;
+        e = get_exponent();
+        s = get_sign();
+        
+        if (is_subnormal()) {
+            // shift the bits to the lft so the msb is on bit 112
+            auto shift = 127 - FRAC_BITS - static_cast<int32_t>(lzcnt128(l, h));
+            if (shift >= 64) {
+                h = l << (shift - 64);
+                l = 0;
+            }
+            else if (shift > 0){
+                shift_left128_inplace(l, h, shift);
+            }
+        }
+        // normal numbers
+        else if (is_normal()) {
+            // add the unity value
+            h |= FRAC_UNITY;
+        }
     }
     /**
      * @brief Tests if this value is a NaN
