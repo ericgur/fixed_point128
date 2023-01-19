@@ -1,7 +1,7 @@
 /***********************************************************************************
     MIT License
 
-    Copyright (c) 2022 Eric Gur (ericgur@iname.com)
+    Copyright (c) 2023 Eric Gur (ericgur@iname.com)
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -789,7 +789,7 @@ public:
 
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F
-        constexpr int32_t index = F >> 6; // / 64;
+        constexpr int32_t index = F / 64;
         constexpr int32_t lsb = F & FP128_MAX_VALUE_64(6); // bit within the 64bit data pointed by res[index]
         constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
         const bool need_rounding = (res[index] & half) != 0;
