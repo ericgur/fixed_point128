@@ -332,6 +332,24 @@ TEST(float128, MultiplyByFloat128 ) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(float128, MultiplyByExponentOf2) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = ::pow(2.0, get_int32_random() % 100);
+        double res = value1 * value2;
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 f3 = f1 * f2;
+        double float128_res = static_cast<double>(f3);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+
+        f3 = f2 * f1;
+        float128_res = static_cast<double>(f3);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+
+    }
+}
 TEST(float128, MultiplyByDouble) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -436,6 +454,25 @@ TEST(float128, DivideByFloat128) {
         float128 f2 = value2;
         float128 f3 = f1 / f2;
         double float128_res = static_cast<double>(f3);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, DivideByExponentOf2) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = ::pow(2.0, get_int32_random() % 100);
+        double res = value1 / value2;
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 f3 = f1 / f2;
+        double float128_res = static_cast<double>(f3);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+
+        // do this in reverse
+        res = value2 / value1;
+        f3 = f2 / f1;
+        float128_res = static_cast<double>(f3);
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -991,7 +1028,6 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value1 = fabs(get_double_random(-4, 4)); // lower exponent results in lost bits
 //        double value2 = get_double_random(-4, 4); // lower exponent results in lost bits
-//        value1 = 2.3505350060521568, value2 = 0.20224790564651351; //TODO: remove
 //        double res = pow(value1, value2);
 //        fixed_point128<16> f1 = value1;
 //        fixed_point128<16> f2 = value2;

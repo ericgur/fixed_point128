@@ -539,19 +539,29 @@ public:
             *this = 0;
             return *this;
         }
-        // TODO: optimize for exponent of 2
-        if (is_exponent_of_2() || other.is_exponent_of_2()) {
-        }
-
         // extract fractions and exponents
         uint32_t sign, other_sign;
         int32_t expo, other_expo;
         uint64_t l1, h1, l2, h2;
         get_components(l1, h1, expo, sign);
         other.get_components(l2, h2, other_expo, other_sign);
+        bool is_exp2 = is_exponent_of_2();
+        bool other_is_exp2 = other.is_exponent_of_2();
 
         // add the exponents
         expo += other_expo;
+
+        // optimize for exponents of 2
+        if (is_exp2 || other_is_exp2) {
+            // copy the fraction as needed
+            if (is_exp2) {
+                l1 = l2;
+                h1 = h2;
+            }
+
+            set_components(l1, h1, expo, sign ^ other_sign);
+            return *this;
+        }
 
         // multiply the fractions
         // the fractions are in u16.112 precision
@@ -621,38 +631,40 @@ public:
                 
             return *this;
         }
-        // TODO: optimize for exponent of 2
-        if (is_exponent_of_2() || other.is_exponent_of_2()) {
-            FP128_NOT_IMPLEMENTED_EXCEPTION;
-        }
-        else {
-            // extract fractions and exponents
-            uint32_t sign, other_sign;
-            int32_t expo, other_expo;
-            uint64_t l1, h1, l2, h2;
-            get_components(l1, h1, expo, sign);
-            other.get_components(l2, h2, other_expo, other_sign);
 
-            // divide the fractions
-            uint64_t q[4]{};
-            const uint64_t nom[4] = { 0, 0, l1, h1 };
-            const uint64_t denom[2] = { l2, h2 };
+        // extract fractions and exponents
+        uint32_t sign, other_sign;
+        int32_t expo, other_expo;
+        uint64_t l1, h1, l2, h2;
+        get_components(l1, h1, expo, sign);
+        other.get_components(l2, h2, other_expo, other_sign);
 
-            // subtract the exponents
-            expo -= other_expo;
-            if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
-                // 128 bit were added to the dividend, 112 were lost:
-                // need to shift right 16 bit (128 - 112)
-                l1 = shift_right128_round(q[0], q[1], 128 - FRAC_BITS);
-                h1 = __shiftright128(q[1], q[2], 128 - FRAC_BITS);
-            }
-            else { // error
-                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
-            }
+        // subtract the exponents
+        expo -= other_expo;
 
-            norm_fraction(l1, h1, expo);
+        // optimize for other value is an exponent of 2
+        if (other.is_exponent_of_2()) {
             set_components(l1, h1, expo, sign ^ other_sign);
+            return *this;
         }
+
+        // divide the fractions
+        uint64_t q[4]{};
+        const uint64_t nom[4] = { 0, 0, l1, h1 };
+        const uint64_t denom[2] = { l2, h2 };
+
+        if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+            // 128 bit were added to the dividend, 112 were lost:
+            // need to shift right 16 bit (128 - 112)
+            l1 = shift_right128_round(q[0], q[1], 128 - FRAC_BITS);
+            h1 = __shiftright128(q[1], q[2], 128 - FRAC_BITS);
+        }
+        else { // error
+            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+        }
+
+        norm_fraction(l1, h1, expo);
+        set_components(l1, h1, expo, sign ^ other_sign);
 
         return *this;
     }
