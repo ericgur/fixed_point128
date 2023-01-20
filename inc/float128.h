@@ -85,13 +85,18 @@ class __declspec(align(16)) float128
     static_assert(sizeof(void*) == 8, "float128 is supported in 64 bit builds only!");
     friend class fp128_gtest;
     
-    static constexpr int32_t INF_EXPONENT = 0x7FFF;
-    static constexpr int32_t EXPONENT_BIAS = 0x3FFF;
-    static constexpr int32_t FRAC_BITS = 112;
     static constexpr int32_t EXP_BITS = 15;
-    static constexpr uint64_t FRAC_MASK = FP128_MAX_VALUE_64(FRAC_BITS - 64);
+    static constexpr int32_t EXP_BIAS = 0x3FFF;
+    static constexpr int32_t ZERO_EXP_BIASED = EXP_BIAS;
+    static constexpr int32_t ZERO_EXP_UNBIASED = 0;
+    static constexpr int32_t SUBNORM_EXP_BIASED = 0;
+    static constexpr int32_t SUBNORM_EXP_UNBIASED = -EXP_BIAS;
+    static constexpr int32_t INF_EXP_BIASED = 0x7FFF;
+    static constexpr int32_t INF_EXP_UNBIASED = INF_EXP_BIASED - EXP_BIAS;
+    static constexpr uint64_t EXP_MASK = INF_EXP_BIASED;
+    static constexpr int32_t FRAC_BITS = 112;
+    static constexpr uint64_t UPPER_FRAC_MASK = FP128_MAX_VALUE_64(FRAC_BITS - 64);
     static constexpr uint64_t FRAC_UNITY = FP128_ONE_SHIFT(FRAC_BITS - 64);
-    static constexpr uint64_t EXP_MASK = INF_EXPONENT;
     static constexpr uint64_t SIGN_MASK = 1ull << 63;
 #pragma warning(push)
 #pragma warning(disable: 4201) // nameless union/structs
@@ -177,7 +182,7 @@ public:
         // NaN & INF
         else if (d.e == 0x7FF)
         {
-            high_bits.e = INF_EXPONENT;
+            high_bits.e = INF_EXP_BIASED;
             // zero for +- INF, non-zero for NaN 
             high_bits.f = (d.f) ? 1 : 0;
         }
@@ -262,7 +267,7 @@ public:
         Double d{};
 
         // nan and inf
-        if (high_bits.e == INF_EXPONENT) {
+        if (high_bits.e == INF_EXP_BIASED) {
             // zero fraction means inf, otherwise nan
             if (low == 0 && high_bits.f == 0) {
                 return (get_sign()) ? -HUGE_VAL : HUGE_VAL;
@@ -396,11 +401,11 @@ public:
     */
     FP128_INLINE float128& operator+=(const float128& other) noexcept {
         // check trivial cases
-        if (high_bits.e == INF_EXPONENT || other.high_bits.e == INF_EXPONENT) {
-            if (isnan() || other.isnan())
+        if (high_bits.e == INF_EXP_BIASED || other.high_bits.e == INF_EXP_BIASED) {
+            if (is_nan() || other.is_nan())
                 *this = nan();
             // return inf with the right sign
-            if (other.isinf())
+            if (other.is_inf())
                 *this = other;
             return *this;
         }
@@ -465,7 +470,6 @@ public:
             if (sign) {
                 twos_complement128(l1, h1);
             }
-            set_sign(sign);
         }
 
         // fix the exponent
@@ -486,9 +490,8 @@ public:
         else if (shift < 0) {
             shift_left128_inplace(l1, h1, -shift);
         }
-        low = l1;
-        high_bits.f = h1;
-        set_exponent(expo);
+        
+        set_components(l1, h1, expo, sign);
         return *this;
     }
     /**
@@ -524,11 +527,11 @@ public:
     */
     FP128_INLINE float128& operator*=(const float128& other) noexcept {
         // check trivial cases
-        if (high_bits.e == INF_EXPONENT || other.high_bits.e == INF_EXPONENT) {
-            if (isnan() || other.isnan())
+        if (is_special() || other.is_special()) {
+            if (is_nan() || other.is_nan())
                 *this = nan();
             // return inf with the right sign
-            if (other.isinf())
+            if (other.is_inf())
                 *this = other;
             return *this;
         }
@@ -536,7 +539,10 @@ public:
             *this = 0;
             return *this;
         }
-        
+        // TODO: optimize for exponent of 2
+        if (is_exponent_of_2() || other.is_exponent_of_2()) {
+        }
+
         // extract fractions and exponents
         uint32_t sign, other_sign;
         int32_t expo, other_expo;
@@ -573,42 +579,13 @@ public:
         // shift result by F
         constexpr int32_t index = 1;
         constexpr int32_t lsb = FRAC_BITS & 63;            // bit within the 64bit data pointed by res[index]
-        constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
-        const bool need_rounding = (res[index] & half) != 0;
 
         // copy block #1 (lowest)
-        l1 = shift_right128(res[index], res[index + 1], lsb); // custom function is 20% faster in Mandelbrot than the intrinsic
+        l1 = shift_right128_round(res[index], res[index + 1], lsb); // custom function is 20% faster in Mandelbrot than the intrinsic
         h1 = shift_right128(res[index + 1], res[index + 2], lsb);
 
-        if (need_rounding) {
-            ++l1; // low will wrap around to zero if overflowed
-            h1 += l1 == 0;
-        }
-
-        // fix the exponent
-        auto msb = 127 - static_cast<int32_t>(lzcnt128(l1, h1));
-        // all zeros
-        if (msb < 0) {
-            low = high = 0;
-            return *this;
-        }
-
-        // if the msb is exactly msb == FRAC_BITS the exponent stays the same
-        auto shift = msb - FRAC_BITS;
-
-        expo += shift;
-        if (shift > 0) {
-            shift_right128_inplace(l1, h1, shift);
-        }
-        else if (shift < 0) {
-            shift_left128_inplace(l1, h1, -shift);
-        }
-        low = l1;
-        high_bits.f = h1;
-        set_exponent(expo);
-        
-        //set the sign
-        high_bits.s = sign ^ other_sign;
+        norm_fraction(l1, h1, expo);
+        set_components(l1, h1, expo, sign ^ other_sign);
         return *this;
     }
     /**
@@ -626,7 +603,57 @@ public:
      * @return This object.
     */
     FP128_INLINE float128& operator/=(const float128& other) {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // check trivial cases
+        if (other.is_zero()) {
+            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+        }
+        else if (is_zero()) {
+            return *this;
+        }
+        if (is_special() || other.is_special()) {
+            if (is_nan() || other.is_nan())
+                *this = nan();
+            // return inf with the right sign
+            if (other.is_inf()) {
+                *this = other;
+                set_sign(get_sign() ^ other.get_sign());
+            }
+                
+            return *this;
+        }
+        // TODO: optimize for exponent of 2
+        if (is_exponent_of_2() || other.is_exponent_of_2()) {
+            FP128_NOT_IMPLEMENTED_EXCEPTION;
+        }
+        else {
+            // extract fractions and exponents
+            uint32_t sign, other_sign;
+            int32_t expo, other_expo;
+            uint64_t l1, h1, l2, h2;
+            get_components(l1, h1, expo, sign);
+            other.get_components(l2, h2, other_expo, other_sign);
+
+            // divide the fractions
+            uint64_t q[4]{};
+            const uint64_t nom[4] = { 0, 0, l1, h1 };
+            const uint64_t denom[2] = { l2, h2 };
+
+            // subtract the exponents
+            expo -= other_expo;
+            if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+                // 128 bit were added to the dividend, 112 were lost:
+                // need to shift right 16 bit (128 - 112)
+                l1 = shift_right128_round(q[0], q[1], 128 - FRAC_BITS);
+                h1 = __shiftright128(q[1], q[2], 128 - FRAC_BITS);
+            }
+            else { // error
+                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+            }
+
+            norm_fraction(l1, h1, expo);
+            set_components(l1, h1, expo, sign ^ other_sign);
+        }
+
         return *this;
     }
     /**
@@ -708,8 +735,41 @@ public:
     */
     __forceinline bool is_normal() const noexcept
     {
-        return high_bits.e != 0 && high_bits.e != INF_EXPONENT;
+        return high_bits.e != 0 && high_bits.e != INF_EXP_BIASED;
     }
+    /**
+     * @brief Tests if this value is a NaN
+     * @return True when the value is a NaN
+    */
+    __forceinline bool is_nan() const {
+        // fraction is zero for +- INF, non-zero for NaN 
+        return high_bits.e == INF_EXP_BIASED && high_bits.f != 0;
+    }
+    /**
+     * @brief Tests if this value is an Infinite (negative or positive)
+     * @return True when the value is an Infinite
+    */
+    __forceinline bool is_inf() const {
+        // fraction is zero for +- INF, non-zero for NaN 
+        return high_bits.e == INF_EXP_BIASED && high_bits.f == 0;
+    }
+    /**
+     * @brief Tests if the value is an exponent of 2 (fraction part is zero)
+     * @return True when the value is an exponent of 2
+    */
+    __forceinline bool is_exponent_of_2() const {
+        // fraction is zero for +- INF, non-zero for NaN 
+        return high_bits.f == 0 && low == 0;
+    }
+    /**
+     * @brief return true when the value is either an inf or nan
+     * @return true for inf and nan
+    */
+    __forceinline bool is_special() const {
+        // fraction is zero for +- INF, non-zero for NaN 
+        return high_bits.e == INF_EXP_BIASED;
+    }
+
     /**
      * @brief get a specific bit within the float128 data
      * @param bit bit to get [0,127]
@@ -750,7 +810,7 @@ public:
     */
     __forceinline int32_t get_exponent() const noexcept
     {
-        return static_cast<int32_t>(high_bits.e) - EXPONENT_BIAS;
+        return static_cast<int32_t>(high_bits.e) - EXP_BIAS;
     }
     /**
      * @brief Set the exponent
@@ -758,9 +818,9 @@ public:
     */
     __forceinline void set_exponent(int32_t e) noexcept
     {
-        e += EXPONENT_BIAS;
+        e += EXP_BIAS;
         assert(e >= 0);
-        assert(e <= INF_EXPONENT);
+        assert(e <= INF_EXP_BIASED);
         high_bits.e =  static_cast<uint64_t>(e);
     }
     /**
@@ -788,6 +848,9 @@ public:
             else if (shift > 0){
                 shift_left128_inplace(l, h, shift);
             }
+
+            // update the exponent
+            e += shift;
         }
         // normal numbers
         else if (is_normal()) {
@@ -796,27 +859,86 @@ public:
         }
     }
     /**
-     * @brief Tests if this value is a NaN
-     * @return True when the value is a NaN
+     * @brief Sets the internal components handling al special cases
+     * The fraction is expected to have 113 bits (includes the unity bit)
+     * It will store the float128 value taking into account infinity ands subnormals.
+     * @param l Low part of the fraction
+     * @param h High part of the fraction
+     * @param e Unbiased exponent, can be any value.
+     * @param s Sign (1 is negative)
     */
-    __forceinline bool isnan() const {
-        // fraction is zero for +- INF, non-zero for NaN 
-        return high_bits.e == INF_EXPONENT && high_bits.f != 0;
+    __forceinline void set_components(uint64_t l, uint64_t h, int32_t e, uint32_t s) noexcept
+    {
+        // overflow 
+        if (e >= INF_EXP_UNBIASED) {
+            e = INF_EXP_UNBIASED;
+        }
+        // sub normals
+        if (e <= SUBNORM_EXP_UNBIASED) {
+            // fix the fraction, remove the bits 112+ and shift to the right
+            int32_t shift = SUBNORM_EXP_UNBIASED + 1 - e;
+            if (shift >= FRAC_BITS) {
+                l = h = 0;
+            }
+            // some bits stay in the high QWORD
+            else if (shift < FRAC_BITS - 64) {
+                shift_right128_inplace(l, h, shift);
+            }
+            else {
+                l = shift_right128(l, h, shift);
+                h = 0;
+            }
+            // override the exponent to mark the value as subnormal
+            e = SUBNORM_EXP_UNBIASED;
+        }
+
+        low = l;
+        high_bits.f = h;
+        e += EXP_BIAS;
+        high_bits.e = static_cast<uint64_t>(e);
+        high_bits.s = s != 0;
     }
     /**
-     * @brief Tests if this value is an Infinite (negative or positive)
-     * @return True when the value is an Infinite
+     * @brief Normalize the fraction so the msb (unity bit) is on bit 112.
+     * The fraction value must contain the unity value
+     * The exponent component is adjusted based on the bit shift direction required.
+     * @param l Low part of the fraction
+     * @param h High part of the fraction
+     * @param e Unbiased exponent, can be any value.
     */
-    __forceinline bool isinf() const {
-        // fraction is zero for +- INF, non-zero for NaN 
-        return high_bits.e == INF_EXPONENT && high_bits.f == 0;
+    __forceinline void norm_fraction(uint64_t& l, uint64_t& h, int32_t& e) const noexcept
+    {
+        // fix the exponent
+        auto msb = 127 - static_cast<int32_t>(lzcnt128(l, h));
+        // l and h are both zero
+        if (msb < 0) {
+            e = ZERO_EXP_UNBIASED;
+            return;
+        }
+
+        // if the msb is exactly msb == FRAC_BITS the exponent stays the same
+        auto shift = msb - FRAC_BITS;
+
+        e += shift;
+        if (shift > 0) {
+            shift_right128_inplace(l, h, shift);
+        }
+        else if (shift < -63) {
+            h = l << (-shift);
+            l = 0;
+        }
+        else if (shift < 0) {
+            shift_left128_inplace(l, h, -shift);
+        }
+
+
     }
     /**
      * @brief Return the infinite constant
      * @return INF
     */
     static float128 inf() {
-        static const float128 _inf(0, 0, INF_EXPONENT, 0);
+        static const float128 _inf(0, 0, INF_EXP_BIASED, 0);
         return _inf;
     }
     /**
@@ -824,7 +946,7 @@ public:
      * @return NaN
     */
     static float128 nan() {
-        static const float128 _nan(1, 0, INF_EXPONENT, 0);
+        static const float128 _nan(1, 0, INF_EXP_BIASED, 0);
         return _nan;
     }
 
@@ -1021,7 +1143,7 @@ public:
     */
     friend bool isnan(const float128& x) {
         // zero for +- INF, non-zero for NaN 
-        return x.isnan();
+        return x.is_nan();
     }
     /**
      * @brief Tests if the value is an Infinite (negative or positive)
@@ -1029,7 +1151,7 @@ public:
      * @return True when the value is an Infinite
     */
     friend bool isinf(const float128& x) {
-        return x.isinf();
+        return x.is_inf();
     }
 };
 
