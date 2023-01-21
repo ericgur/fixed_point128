@@ -388,6 +388,9 @@ public:
             sign = 1;
             ++p;
         }
+        else if (*p == '+')
+            ++p;
+
         char* dec = strchr(p, '.');
         // number is an integer
         if (dec == nullptr) {
@@ -609,7 +612,7 @@ public:
      * @return object string representation
     */
     explicit FP128_INLINE operator char*() const noexcept {
-        static thread_local char str[128]; // need roughly a (meaningful) decimal digit per 3.2 bits
+        static thread_local char str[128]; // need roughly a (meaningful) decimal digits per 3.2 bits
 
         char* p = &str[0];
         fixed_point128 temp = *this;
