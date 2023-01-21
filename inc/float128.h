@@ -244,9 +244,14 @@ public:
         low = high = 0;
         if (x == nullptr) return;
 
+        constexpr uint64_t base16_max_digits = 35;            // maximum for 112 bit of manstissa/fraction is 34, read one extra to get maximum precision
+        constexpr uint64_t base10_max_digits = (112 + 4) / 4; // 29 hex digits. 28 for the fraction (112 bit) and another for the unity
         uint32_t sign = 0;
         uint32_t base = 10;
-        int32_t expo = 0;
+        int32_t expo2 = 0;         // base2 exponent
+        int32_t expo10 = 0;        // base10 exponent
+        int32_t expo10_adjust = 0; // base10 exponent adjustment
+        int32_t frac_msb = 0;      // the msb of the fraction within the 128 bit data structure
 
         // convert the input string to lowercase for simpler processing.
         const auto x_len = 1 + strlen(x);
@@ -282,37 +287,38 @@ public:
             *this = nan();
             return;
         }
-            
+        
+        int32_t max_digits = base10_max_digits;
         // check for a hex string
         if (0 == strncmp(p, "0x", 2)) {
             base = 16;
             p += 2;
+            max_digits = base16_max_digits;
         }
 
         // skip leading zeros
         while (*p == '0') ++p;
 
-        int32_t int_digits = 0, frac_digits = 0, exp_digits = 0;
-        bool exp_sign = 0;
+        int32_t int_digits = 0, frac_digits = 0;
         char* int_start = p;
         char* frac_start = nullptr;
-        char* exp_start = nullptr;
-
-        if (*p == '\0') {
-            set_sign(sign);
-            return;
-        }
 
         // count the integer digits
         while (isdigit(*p) || (base == 16 && *p >= 'a' && *p <= 'f')) {
             ++int_digits;
             ++p;
         }
+        expo10_adjust = int_digits;
         
         // got a hex unsigned int literal
         // every digit is 4 bits, need to keep at most 112 bits after the msb.
         if (base == 16) {
-            constexpr uint64_t max_digits = (112 + 4) / 4; // 29 hex digits. 28 for the fraction (112 bit) and another for the unity
+            // zero value
+            if (int_digits == 0) {
+                set_sign(sign);
+                return;
+            }
+
             uint64_t* frac_bits = &low; // fill the internal data structure directly
             // start at the leftmost digit and iterate right
 
@@ -320,10 +326,6 @@ public:
             char* cur_digit = int_start;
             char* const end_digit = int_start + digits_consumed;
 
-            if (int_digits == 0) {
-                set_sign(sign);
-                return;
-            }
             // fill the internal structure starting the the top bits of high
             while (cur_digit < end_digit) {
                 uint64_t d = *cur_digit;
@@ -333,34 +335,77 @@ public:
                     d = 10ull + d - 'a';
 
                 ++cur_digit;
-                auto index = 1 - (expo >> 6); // fill high part first
+                auto index = 1 - (expo2 >> 6); // fill high part first
                 assert(index >= 0 && index <= 1);
-                auto shift = 60 - (expo & 63);
+                auto shift = 60 - (expo2 & 63);
                 frac_bits[index] |= d << shift;
-                expo += 4;
+                expo2 += 4;
             }
             // shift the result into position and fix the exponent
             uint64_t left_digit = high >> 60;
             assert(left_digit != 0);
             static constexpr int32_t digit_msb_lut[16] = { 0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3 };
             const auto digit_msb = digit_msb_lut[left_digit];
-            expo -= 4 - digit_msb;
-            expo += 4 * (int_digits - digits_consumed); // account for digits which do not fit in the fraction.
-            shift_right128_inplace(low, high, 124 + digit_msb - FRAC_BITS); // move digit's 2nd  msb to bit 111
-            set_exponent(expo);
-            set_sign(sign);
+            expo2 -= 4 - digit_msb;
+            expo2 += 4 * (int_digits - digits_consumed); // account for digits which do not fit in the fraction.
+
+            // overflow
+            if (expo2 > INF_EXP_UNBIASED) {
+                *this = inf();
+            }
+            else {
+                shift_right128_inplace(low, high, 124 + digit_msb - FRAC_BITS); // move digit's 2nd  msb to bit 111
+                set_exponent(expo2);
+                set_sign(sign);
+            }
+            
+            // a hex input value has no exponent or fraction. see note below about exponent support for hex.
             return;
         }
+        uint128_t int_part, frac_part;
+        // compute the integer part
+        if (base == 10) {
+            int32_t digits_consumed = min(int_digits, max_digits);
+            char* const end_digit = int_start + digits_consumed;
+            *end_digit = '\0';
+            int_part = int_start;
+            int32_t shift_bits = 0;
 
-        // fraction and exponent are valid only with base 10
-        if (base == 10)
-        {
-            // check for the optional decimal point
-            if (*p == '.') {
-                *p = '\0';
-                ++p;
-                frac_start = (isdigit(*p)) ? p : nullptr;
+            // mark the extra exponent that may exist if we had enough bits to represent the entire value
+            auto extra_digits = int_digits - digits_consumed;
+            
+            // multiply by 10 for each digit
+            while (extra_digits > 0) {
+                --extra_digits;
+                uint64_t msb = log2(int_part);
+                if (msb >= 123) {
+                    int_part >>= 4;
+                    shift_bits += 4;
+                    assert(msb - log2(int_part) == 4);
+                }
+                int_part *= 10;
             }
+
+            int32_t msb = static_cast<int32_t>(log2(int_part));
+            expo2 = msb + shift_bits;
+
+            // shift the integer value into position - msb at bit 112
+            frac_msb = FRAC_BITS - msb;
+            if (frac_msb > 0)
+                int_part <<= frac_msb;
+            else
+                int_part >>= -frac_msb; //frac_msb is negative, no room for the fracion
+
+        }
+
+        // Note: fraction and exponent are valid only with base 10 until 'p' style strings are supported (base2 hex exponents). e.g. "1.EDp5F"
+        assert(base == 10);
+
+        // check for the optional decimal point
+        if (*p == '.') {
+            *p = '\0';
+            ++p;
+            frac_start = (isdigit(*p)) ? p : nullptr;
 
             // count the fraction digits if they exist
             if (frac_start) {
@@ -377,46 +422,68 @@ public:
                 }
             }
 
-            // check for the optional exponent
-            if (*p == 'e') {
-                *p = '\0'; // terminate the fraction string
-                ++p;
-                if (*p == '-') {
-                    exp_sign = 1;
-                    ++p;
+            // integer part is zero - skip the leading zeros in the fraction and ajust the exponent
+            // example 0.01 == 0.1E-1
+            if (int_digits == 0 && frac_start != nullptr) {
+                while (*frac_start == '0') {
+                    ++frac_start;
+                    --frac_digits;
+                    --expo10_adjust;
                 }
-                if (*p == '+')
-                    ++p;
-
-                exp_start = (isdigit(*p)) ? p : nullptr;
-            }
-
-            // count the fraction digits if they exist
-            if (exp_start) {
-                while (isdigit(*p)) {
-                    ++exp_digits;
-                    ++p;
-                }
-
-                // convert the exponent
-                expo = strtol(exp_start, nullptr, 10);
             }
         }
 
-        // under flow
-        if (exp_sign && exp_digits > 4965) {
+        // check for the optional exponent
+        if (*p == 'e') {
+            *p = '\0'; // terminate the fraction string
+            ++p;
+            // convert the exponent
+            expo10 = strtol(p, nullptr, 10);
+
+            // underflow
+            if (expo10 < -4965) {
+                return;
+            }
+
+            // overflow
+            if (expo10 > 4932) {
+                *this == inf();
+            }
+        }
+
+        // if both integer & fraction are zero, the result is zero regardless of the exponent e.g. 0E9999
+        if (int_digits == 0 && frac_digits == 0) {
+            set_sign(sign);
             return;
         }
 
-        // infinity
-        if (!exp_sign && exp_digits > 4932) {
-            //TODO: check overflow only when int and fraction are non zero to avoid 0E99999 become inf instead of zero
-            *this == inf();
+        if (frac_digits > 0) {
+            // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
+            // some of the bits may have been taken by the integer part so these digits are not consumed
+            // Note: frac_msb holds the msb location of the fraction, if < 0, there's no room for the fraction
+            int32_t digits_consumed = min(frac_digits, max_digits - int_digits);
+            if (digits_consumed > 0 && frac_msb > 0) {
+                char* const end_digit = frac_start + digits_consumed;
+                *end_digit = '\0';
+                frac_part = frac_start;
+
+            }
         }
 
+        //
+        // assemble the integer and fraction to a single value
+        //
 
-        //const uint64_t int_val = std::strtoull(p, nullptr, 10);
+        // integer only, no fraction or exponent
+        if (frac_digits == 0 && expo10 == 0) {
+            int_part.get_components(low, high);
+            set_exponent(expo2);
+            set_sign(sign);
+            return;
+        }
 
+        // TODO: support exponents and fraction
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
     /**
      * @brief Constructor from std::string.

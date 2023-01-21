@@ -980,6 +980,15 @@ public:
         return FP128_GET_BIT(high, bit-64);
     }
     /**
+     * @brief Extracts the low and high QWORD
+     * @param l Reference to the low QWORD
+     * @param h Reference to the high QWORD
+    */
+    UINT128_T_INLINE void get_components(uint64_t& l, uint64_t& h) const noexcept {
+        l = low;
+        h = high;
+    }
+    /**
      * @brief Return an instance of uint128_t with the value of 1
      * @return 1
     */
