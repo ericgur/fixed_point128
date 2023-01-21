@@ -33,7 +33,7 @@
       <Item Name="[frac high (hex)]" ExcludeView="simple">high_bits.f,h</Item>
       <Item Name="[frac low (hex)]"  ExcludeView="simple">low,h</Item>
       <Item Name="[exponent (dec)]"  ExcludeView="simple">(int)high_bits.e - (int)0x3FFF,d</Item>
-      <Item Name="[frac high (dec)]" ExcludeView="simple">high_bits.e,d</Item>
+      <Item Name="[frac high (dec)]" ExcludeView="simple">high_bits.f,d</Item>
       <Item Name="[frac low (dec)]"  ExcludeView="simple">low,d</Item>
 
     </Expand>
