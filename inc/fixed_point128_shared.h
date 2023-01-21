@@ -63,6 +63,15 @@ static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 /***********************************************************************************
 *                                  Macros
 ************************************************************************************/
+#ifndef max
+#define max(a,b)            (((a) > (b)) ? (a) : (b))
+#endif
+
+#ifndef min
+#define min(a,b)            (((a) < (b)) ? (a) : (b))
+#endif
+
+
 #define FP128_ONE_SHIFT(x)          (1ull << (x))
 #define FP128_MAX_VALUE_64(x)       (((uint64_t)-1ll) >> (64 - (x)))
 #define FP128_GET_BIT(x, n)         (((x) >> (n)) & 1)
