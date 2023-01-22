@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?> 
+<!-- local schema path: C:\Program Files\Microsoft Visual Studio\2022\Professional\Xml\Schemas\1033\natvis.xsd -->
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
 	<Type Name="fp128::fixed_point128&lt;*&gt;">
 		<DisplayString>{((sign) ? -1.0 : 1.0) * (double)high * upper_unity + (double)low * lower_unity}</DisplayString>
@@ -30,7 +31,7 @@
     <DisplayString Condition="special() &amp;&amp; has_fraction()">nan</DisplayString>
     <DisplayString Condition="special() &amp;&amp; !has_fraction() &amp;&amp; !sign()">inf</DisplayString>
     <DisplayString Condition="special() &amp;&amp; !has_fraction() &amp;&amp; sign()">-inf</DisplayString>
-    <DisplayString>{((sign()) ? -1.0 : 1.0) * fraction()}*2**{(int)high_bits.e - (int)0x3FFF,d}</DisplayString>
+    <DisplayString>{sign_float() * fraction()}*2**{(int)high_bits.e - (int)0x3FFF,d}</DisplayString>
     <Expand HideRawView="false" >
       <CustomListItems MaxItemsPerView="1" ExcludeView="Test">
         <Variable Name="exp_value" InitialValue="exp()" />
