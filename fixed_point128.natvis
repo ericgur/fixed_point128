@@ -6,8 +6,8 @@
       <Item Name="[sign]" ExcludeView="simple">sign,d</Item>
 			<Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
 			<Item Name="[high (hex)]" ExcludeView="simple">high,h</Item>
-			<Item Name="[low (dec)]"  ExcludeView="simple">low,d</Item>
-			<Item Name="[high (dec)]" ExcludeView="simple">high,d</Item>
+			<Item Name="[low]"  ExcludeView="simple">low,d</Item>
+			<Item Name="[high]" ExcludeView="simple">high,d</Item>
 		</Expand>
 	</Type>
   <Type Name="fp128::uint128_t">
@@ -15,27 +15,47 @@
     <Expand HideRawView="true" >
       <Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
       <Item Name="[high (hex)]" ExcludeView="simple">high,h</Item>
-      <Item Name="[low (dec)]"  ExcludeView="simple">low,d</Item>
-      <Item Name="[high (dec)]" ExcludeView="simple">high,d</Item>
+      <Item Name="[low]"  ExcludeView="simple">low,d</Item>
+      <Item Name="[high]" ExcludeView="simple">high,d</Item>
     </Expand>
   </Type>
   <Type Name="fp128::float128">
     <Intrinsic Name="special" Expression="high_bits.e == 0x7FFF" />
-    <Intrinsic Name="fraction" Expression="high_bits.f != 0 || low != 0" />
+    <Intrinsic Name="has_fraction" Expression="high_bits.f != 0 || low != 0" />
     <Intrinsic Name="sign" Expression="high_bits.s" />
-    <DisplayString Condition="special() &amp;&amp; fraction()">nan</DisplayString>
-    <DisplayString Condition="special() &amp;&amp; !fraction() &amp;&amp; !sign()">inf</DisplayString>
-    <DisplayString Condition="special() &amp;&amp; !fraction() &amp;&amp; sign()">-inf</DisplayString>
-    <DisplayString>{((sign()) ? -1.0 : 1.0) * (1.0 + ((double)high_bits.f / (double)0x1000000000000) + (((double)low / (double)0x1000000000000 / (double)0x100000000 / (double)0x100000000)))}*2**{(int)high_bits.e - (int)0x3FFF,d}</DisplayString>
+    <Intrinsic Name="sign_float" Expression="(sign()) ? -1.0 : 1.0" />
+    <Intrinsic Name="exp" Expression="(int)high_bits.e - (int)0x3FFF" />
+    <Intrinsic Name="exp_inc" Expression="(exp() &lt; 0 ) ? -1 : 1" />
+    <Intrinsic Name="fraction" Expression="(1.0 + ((double)high_bits.f  / (double)0x1000000000000) + ((double)low * 5.192296858534828e-33))" />
+    <DisplayString Condition="special() &amp;&amp; has_fraction()">nan</DisplayString>
+    <DisplayString Condition="special() &amp;&amp; !has_fraction() &amp;&amp; !sign()">inf</DisplayString>
+    <DisplayString Condition="special() &amp;&amp; !has_fraction() &amp;&amp; sign()">-inf</DisplayString>
+    <DisplayString>{((sign()) ? -1.0 : 1.0) * fraction()}*2**{(int)high_bits.e - (int)0x3FFF,d}</DisplayString>
     <Expand HideRawView="false" >
+      <CustomListItems MaxItemsPerView="1" ExcludeView="Test">
+        <Variable Name="exp_value" InitialValue="exp()" />
+        <Variable Name="res" InitialValue="fraction() * sign_float()" />
+        <!--  loop and mul/div the fraction by 2 until the exponent is zero. res has the final result -->
+        <Loop>
+          <If Condition="exp_value &gt; 0">
+            <Exec>exp_value--</Exec>
+            <Exec>res *= 2.0</Exec>
+          </If>
+          <If Condition="exp_value &lt; 0">
+            <Exec>exp_value++</Exec>
+            <Exec>res /= 2.0</Exec>
+          </If>
+          <Break Condition="exp_value == 0" />
+        </Loop>
+        <Item Name="[double value]">res,d</Item>
+      </CustomListItems>
       <Item Name="[sign]"            ExcludeView="simple">high_bits.s,d</Item>
       <Item Name="[exponent (hex)]"  ExcludeView="simple">high_bits.e,h</Item>
       <Item Name="[frac high (hex)]" ExcludeView="simple">high_bits.f,h</Item>
       <Item Name="[frac low (hex)]"  ExcludeView="simple">low,h</Item>
-      <Item Name="[exponent (dec)]"  ExcludeView="simple">(int)high_bits.e - (int)0x3FFF,d</Item>
-      <Item Name="[frac high (dec)]" ExcludeView="simple">high_bits.f,d</Item>
-      <Item Name="[frac low (dec)]"  ExcludeView="simple">low,d</Item>
-
+      <Item Name="[exponent]"  ExcludeView="simple">exp(),d</Item>
+      <Item Name="[frac high]" ExcludeView="simple">high_bits.f,d</Item>
+      <Item Name="[frac low]"  ExcludeView="simple">low,d</Item>
     </Expand>
   </Type>
 </AutoVisualizer>
