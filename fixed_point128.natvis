@@ -2,7 +2,8 @@
 <!-- local schema path: C:\Program Files\Microsoft Visual Studio\2022\Professional\Xml\Schemas\1033\natvis.xsd -->
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
 	<Type Name="fp128::fixed_point128&lt;*&gt;">
-		<DisplayString>{((sign) ? -1.0 : 1.0) * (double)high * upper_unity + (double)low * lower_unity}</DisplayString>
+    <Intrinsic Name="low_fraction" Expression="(double)(low &gt;&gt; 32) * lower_unity_h + (double)(low &amp; 0xFFFFFFFF) * lower_unity_l" />
+    <DisplayString>{((sign) ? -1.0 : 1.0) * (double)high * upper_unity + low_fraction()}</DisplayString>
     <Expand HideRawView="true" >
       <Item Name="[sign]" ExcludeView="simple">sign,d</Item>
 			<Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
@@ -27,10 +28,15 @@
     <Intrinsic Name="sign_float" Expression="(sign()) ? -1.0 : 1.0" />
     <Intrinsic Name="exp" Expression="(int)high_bits.e - (int)0x3FFF" />
     <Intrinsic Name="exp_inc" Expression="(exp() &lt; 0 ) ? -1 : 1" />
-    <Intrinsic Name="fraction" Expression="(1.0 + ((double)high_bits.f  / (double)0x1000000000000) + ((double)low * 5.192296858534828e-33))" />
+    <Intrinsic Name="low_fraction" Expression="(double)(low &gt;&gt; 32) * 8.271806125530277e-25 + (double)(low &amp; 0xFFFFFFFF) * 1.925929944387236e-34" />
+    <Intrinsic Name="fraction" Expression="1.0 + (double)high_bits.f * 3.552713678800501e-15 + low_fraction()" />
+    <Intrinsic Name="zero" Expression="low == 0 &amp;&amp; high == 0" />
+    <Intrinsic Name="neg_zero" Expression="low == 0 &amp;&amp; high_bits.f == 0  &amp;&amp; high_bits.e == 0 &amp;&amp; high_bits.s == 1" />
     <DisplayString Condition="special() &amp;&amp; has_fraction()">nan</DisplayString>
     <DisplayString Condition="special() &amp;&amp; !has_fraction() &amp;&amp; !sign()">inf</DisplayString>
     <DisplayString Condition="special() &amp;&amp; !has_fraction() &amp;&amp; sign()">-inf</DisplayString>
+    <DisplayString Condition="zero()">0</DisplayString>
+    <DisplayString Condition="neg_zero()">-0</DisplayString>
     <DisplayString>{sign_float() * fraction()}*2**{(int)high_bits.e - (int)0x3FFF,d}</DisplayString>
     <Expand HideRawView="false" >
       <CustomListItems MaxItemsPerView="1" ExcludeView="Test">

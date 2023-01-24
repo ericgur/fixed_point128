@@ -155,7 +155,8 @@ private:
     static constexpr int32_t upper_frac_bits = F - 64;                  // how many bits of the fraction exist in the upper QWORD
     static constexpr uint64_t unity = 1ull << upper_frac_bits;          // upper QWORD value equal to '1'
     static inline const double upper_unity = ::pow(2, 64 - F);     // convert upper QWORD to floating point
-    static inline const double lower_unity = ::pow(2, -F);         // convert lower QWORD to floating point
+    static inline const double lower_unity_l = ::pow(2, -F);         // convert lower QWORD to floating point
+    static inline const double lower_unity_h = ::pow(2, 32-F);         // convert lower QWORD to floating point
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits; // mask of the integer bits in the upper QWORD
     static constexpr int32_t max_frac_digits = (int)(F / 3.3);          // meaningful base 10 digits for the fraction
 public:
@@ -813,20 +814,6 @@ public:
         return *this;
     }
     /**
-     * @brief Multiplies a 64 bit value to this object
-     * @param x Right hand side operand
-     * @return This object.
-    */
-    FP128_INLINE fixed_point128& operator*=(uint64_t x) noexcept{
-        uint64_t temp;
-
-        // multiply low QWORDs
-        low = _mulx_u64(low, x, &temp);
-        high = high * x + temp;
-        reset_sign_for_zero();
-        return *this;
-    }
-    /**
      * @brief Multiplies a value to this object
      * @param x Right hand side operand
      * @return This object.
@@ -850,6 +837,21 @@ public:
         }
         
         return operator*=(static_cast<uint64_t>(x));
+    }
+    /**
+     * @brief Multiplies a 64 bit value to this object
+     * @param x Right hand side operand
+     * @return This object.
+    */
+    template<>
+    FP128_INLINE fixed_point128& operator*=<uint64_t>(uint64_t x) noexcept {
+        uint64_t temp;
+
+        // multiply low QWORDs
+        low = _mulx_u64(low, x, &temp);
+        high = high * x + temp;
+        reset_sign_for_zero();
+        return *this;
     }
     /**
      * @brief Divide this object by x.
@@ -932,14 +934,11 @@ public:
         }
         // integers: convert to uint64 for a simpler operation.
         if constexpr (std::is_signed_v<T>) {
-        #pragma warning(push) 
-        #pragma warning(disable: 4702) // static analysis bug in VS 2022 17.4. This code _is_ reachable.
             // alway do positive division
             if (x < 0) {
                 x = -x;
                 sign ^= 1;
             }
-        #pragma warning(pop) 
         }
 
         return operator/=(static_cast<uint64_t>(x));
