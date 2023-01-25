@@ -199,21 +199,18 @@ public:
         set_sign(d.s);
     }
     template<typename T>
-    FP128_INLINE float128(T x) noexcept {
+    __forceinline float128(T x) noexcept {
         if constexpr (std::is_floating_point_v<T>) {
             new(this) float128(static_cast<double>(x));
             return;
         }
         uint64_t sign = 0;
         if constexpr (std::is_signed_v<T>) {
-        #pragma warning(push) 
-        #pragma warning(disable: 4702) // static analysis bug in VS 2022 17.4. This code _is_ reachable.
             // alway do positive multiplication
             if (x < 0) {
                 x = -x;
                 sign = 1;
             }
-        #pragma warning(pop) 
         }
 
         // integers: convert to uint64 for a simpler operation.
@@ -250,8 +247,6 @@ public:
         uint32_t base = 10;
         int32_t expo2 = 0;         // base2 exponent
         int32_t expo10 = 0;        // base10 exponent
-        int32_t expo10_adjust = 0; // base10 exponent adjustment
-        int32_t frac_msb = 0;      // the msb of the fraction within the 128 bit data structure
 
         // convert the input string to lowercase for simpler processing.
         const auto x_len = 1 + strlen(x);
@@ -308,7 +303,6 @@ public:
             ++int_digits;
             ++p;
         }
-        expo10_adjust = int_digits;
         
         // got a hex unsigned int literal
         // every digit is 4 bits, need to keep at most 112 bits after the msb.
@@ -362,41 +356,6 @@ public:
             // a hex input value has no exponent or fraction. see note below about exponent support for hex.
             return;
         }
-        uint128_t int_part, frac_part;
-        // compute the integer part
-        if (base == 10) {
-            int32_t digits_consumed = min(int_digits, max_digits);
-            char* const end_digit = int_start + digits_consumed;
-            *end_digit = '\0';
-            int_part = int_start;
-            int32_t shift_bits = 0;
-
-            // mark the extra exponent that may exist if we had enough bits to represent the entire value
-            auto extra_digits = int_digits - digits_consumed;
-            
-            // multiply by 10 for each digit
-            while (extra_digits > 0) {
-                --extra_digits;
-                uint64_t msb = log2(int_part);
-                if (msb >= 123) {
-                    int_part >>= 4;
-                    shift_bits += 4;
-                    assert(msb - log2(int_part) == 4);
-                }
-                int_part *= 10;
-            }
-
-            int32_t msb = static_cast<int32_t>(log2(int_part));
-            expo2 = msb + shift_bits;
-
-            // shift the integer value into position - msb at bit 112
-            frac_msb = FRAC_BITS - msb;
-            if (frac_msb > 0)
-                int_part <<= frac_msb;
-            else
-                int_part >>= -frac_msb; //frac_msb is negative, no room for the fracion
-
-        }
 
         // Note: fraction and exponent are valid only with base 10 until 'p' style strings are supported (base2 hex exponents). e.g. "1.EDp5F"
         assert(base == 10);
@@ -424,13 +383,13 @@ public:
 
             // integer part is zero - skip the leading zeros in the fraction and ajust the exponent
             // example 0.01 == 0.1E-1
-            if (int_digits == 0 && frac_start != nullptr) {
-                while (*frac_start == '0') {
-                    ++frac_start;
-                    --frac_digits;
-                    --expo10_adjust;
-                }
-            }
+            //if (int_digits == 0 && frac_start != nullptr) {
+            //    while (*frac_start == '0') {
+            //        ++frac_start;
+            //        --frac_digits;
+            //        --expo10_adjust;
+            //    }
+            //}
         }
 
         // check for the optional exponent
@@ -451,39 +410,92 @@ public:
             }
         }
 
+        // compute the integer part
+        if (base == 10) {
+            uint128_t int_part;
+            int32_t digits_consumed = min(int_digits, max_digits);
+            char* const end_digit = int_start + digits_consumed;
+            *end_digit = '\0';
+            int_part = int_start;
+            int32_t shift_bits = 0;
+
+            // mark the extra exponent that may exist if we had enough bits to represent the entire value
+            auto extra_digits = int_digits - digits_consumed;
+
+            // multiply by 10 for each digit
+            while (extra_digits > 0) {
+                --extra_digits;
+                uint64_t msb = log2(int_part);
+                if (msb >= 123) {
+                    int_part >>= 4;
+                    shift_bits += 4;
+                    assert(msb - log2(int_part) == 4);
+                }
+                int_part *= 10;
+            }
+
+            int32_t msb = static_cast<int32_t>(log2(int_part));
+            expo2 = msb + shift_bits;
+
+            // shift the integer value into position: msb at bit 112
+            int32_t shift = 0;
+            shift = FRAC_BITS - msb;
+            if (shift > 0)
+                int_part <<= shift;
+            else
+                int_part >>= -shift;
+
+            // set the integer part
+            int_part.get_components(low, high); // unity bit is erased by set_exponent()
+            set_exponent(expo2);
+            set_sign(sign);
+        }
+
         // if both integer & fraction are zero, the result is zero regardless of the exponent e.g. 0E9999
         if (int_digits == 0 && frac_digits == 0) {
             set_sign(sign);
             return;
         }
 
+        // The fraction part is relevant if:
+        // 1) Adding more digits actually changes the value 
+        // 2) Fraction digits are exist and not all zero
+        float128 frac_part;
         if (frac_digits > 0) {
+            const float128 tenth = float128::tenth();
+
             // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
-            // some of the bits may have been taken by the integer part so these digits are not consumed
-            // Note: frac_msb holds the msb location of the fraction, if < 0, there's no room for the fraction
             int32_t digits_consumed = min(frac_digits, max_digits - int_digits);
-            if (digits_consumed > 0 && frac_msb > 0) {
+            if (digits_consumed > 0) {
+                float128 frac_base = 1; 
                 char* const end_digit = frac_start + digits_consumed;
                 *end_digit = '\0';
-                frac_part = frac_start;
+                for (char* pp = frac_start; *pp; ++pp) {
+                    uint32_t d = *pp - '0';
+                    frac_base *= tenth;
+                    frac_part += frac_base * d;
+                }
 
+                frac_part.set_sign(sign);
             }
+        }
+
+        // integer only, no fraction or exponent
+        if (frac_digits == 0 && expo10 == 0) {
+            return;
         }
 
         //
         // assemble the integer and fraction to a single value
         //
+        *this += frac_part;
 
-        // integer only, no fraction or exponent
-        if (frac_digits == 0 && expo10 == 0) {
-            int_part.get_components(low, high);
-            set_exponent(expo2);
-            set_sign(sign);
-            return;
+        // adjust the result based on the exponent
+        if (expo10 != 0) {
+            float128 e = exp10(expo10);
+            // let the below handle overflow/underflow
+            *this *= e;
         }
-
-        // TODO: support exponents and fraction
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
     }
     /**
      * @brief Constructor from std::string.
@@ -1205,25 +1217,71 @@ public:
         else if (shift < 0) {
             shift_left128_inplace(l, h, -shift);
         }
-
-
     }
     /**
      * @brief Return the infinite constant
      * @return INF
     */
     static float128 inf() {
-        static const float128 _inf(0, 0, INF_EXP_BIASED, 0);
-        return _inf;
+        return float128(0, 0, INF_EXP_BIASED, 0);
     }
     /**
      * @brief Return the quiet (non-signaling) NaN constant
      * @return NaN
     */
     static float128 nan() {
-        static const float128 _nan(1, 0, INF_EXP_BIASED, 0);
-        return _nan;
+        return float128(1, 0, INF_EXP_BIASED, 0);
     }
+    /**
+     * @brief Return 0.1 using maximum precision
+     * @return 
+    */
+    __forceinline static float128 tenth() noexcept
+    {
+        // 0.1 using maximum precision
+        return float128(0x9999999999999999, 0x999999999999, EXP_BIAS - 4, 0u);
+    }
+    /**
+     * @brief calculates 10^e
+     * @param e integer exponent, in the range
+     * @return 10^e
+    */
+    FP128_INLINE static float128 exp10(int32_t e) noexcept
+    {
+        // check the limits first
+        if (e < -4965) {
+            return 0;
+        } 
+        else if (e > 4932) {
+            return inf();
+        }
+
+        // calculate the exponent optimally
+        float128 res = 1;
+        float128 b;
+        if (e > 0)
+            b = 10; // 10^1
+        else if (e < 0) {
+            b = tenth(); 
+            e = -e;
+        }
+
+        while (e > 0) {
+            if (e & 1)
+                res *= b;
+            e >>= 1;
+            b *= b;
+        }
+        return res;
+    }
+
+
+
+
+
+
+
+
 
     //
     // End of class method implementation
