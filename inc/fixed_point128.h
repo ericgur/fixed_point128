@@ -1331,7 +1331,7 @@ public:
      * @return e
     */
     __forceinline static const fixed_point128& sqrt_2() noexcept {
-        static const fixed_point128 sqrt_2 = "1.41421356237309504880168872420969807856967187537"; // 50 first digits of e
+        static const fixed_point128 sqrt_2 = "1.41421356237309504880168872420969807856967187537"; // 50 first digits of sqrt(2)
         return sqrt_2;
     }
     /**
@@ -1344,7 +1344,7 @@ public:
     }
     /**
      * @brief Return an instance of fixed_point128 with the value of 0.5
-     * @return 1
+     * @return 0.5
     */
     __forceinline static const fixed_point128& half() noexcept
     {
