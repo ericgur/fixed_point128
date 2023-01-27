@@ -463,7 +463,9 @@ public:
         float128 frac_part;
         if (frac_digits > 0) {
             const float128 tenth = float128::tenth();
-
+        
+            // TODO: this is not accurate enough.
+        
             // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
             int32_t digits_consumed = min(frac_digits, max_digits - int_digits);
             if (digits_consumed > 0) {
@@ -662,10 +664,82 @@ public:
      * @return object string representation
     */
     explicit FP128_INLINE operator char* () const noexcept {
-        static thread_local char str[128]; // need roughly a (meaningful) decimals digit per 3.2 bits
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
-    }
+        constexpr int32_t buff_size = 128;
+        static thread_local char str[buff_size]; // need roughly a (meaningful) decimals digit per 3.2 bits
+        if (is_special()) {
+            if (is_nan()) {
+                strcpy(str, "nan");
+            }
+            else if (is_inf()) {
+                sprintf(str, "%sinf", (is_negative()) ? "-" : "");
+            }
+            return str;
+        }
+        if (is_zero()) {
+            strcpy(str, "0");
+            return str;
+        }
 
+        // TODO: find base 10 exponent via log10
+        auto expo = get_exponent();
+        constexpr int32_t max_exponent = 127;
+        constexpr int32_t min_exponent = -FRAC_BITS;
+        if (expo >= max_exponent || expo <= min_exponent) {
+            to_e_format(str, buff_size);
+            return str;
+        }
+        
+        char* p = str;
+        if (get_sign()) {
+            *p++ = '-';
+        }
+
+        // use uint128_t to produce the integer part
+        int32_t frac_bits = (expo >= FRAC_BITS) ? 0 : min(FRAC_BITS - expo, FRAC_BITS);
+        // copy all the fraction bits + the unity bit to a 128 bit integer
+        uint128_t int_part(low, high_bits.f | FRAC_UNITY);
+        uint128_t frac_part = int_part;
+        if (expo >= 0) {
+            int32_t shift = expo - FRAC_BITS;
+            if (shift >= 0)
+                int_part <<= shift;
+            else
+                int_part >>= -shift;
+            strcpy(p, (char*)int_part);
+            p += strlen(p);
+        }
+        else {
+            *p++ = '0';
+        }
+        // there are fraction bits left to print
+        if (frac_bits > 0) {
+            uint32_t digits = (uint32_t)((double)frac_bits / 3.29);
+            *p++ = '.';
+            uint128_t mask(UINT64_MAX, 0xFFFFFFFFFFFF); // keeps lower 112 bits
+            frac_part <<= (128 - frac_bits); // erase the remaining integer bits
+            frac_part >>= 16;
+            while (frac_part != 0 && digits-- > 0) {
+                frac_part *= 10;
+                int32_t digit = frac_part >> FRAC_BITS;
+                frac_part &= mask;
+                if (digit > 0 || frac_part != 0)
+                    *p++ = static_cast<char>(digit + '0');
+            }
+        }
+
+        //auto msb = 
+
+        *p = '\0';
+        return str;
+    }
+    /**
+     * @brief converts the stored value to a string with scientific notation
+     * @param str Output buffer
+     * @param buff_size Output buffer size in bytes
+    */
+    void to_e_format(char* str, int32_t buff_size) const {
+        strcpy(str, "e format not supported yet");
+    }
     //
     // math operators
     //
@@ -890,7 +964,8 @@ public:
     FP128_INLINE float128& operator/=(const float128& other) {
         // check trivial cases
         if (other.is_zero()) {
-            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+            *this = inf();
+            return *this;
         }
         else if (is_zero()) {
             return *this;
@@ -935,12 +1010,12 @@ public:
             h1 = __shiftright128(q[1], q[2], 128 - FRAC_BITS);
         }
         else { // error
-            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+            *this = inf();
+            return *this;
         }
 
         norm_fraction(l1, h1, expo);
         set_components(l1, h1, expo, sign ^ other_sign);
-
         return *this;
     }
     /**
@@ -1232,6 +1307,9 @@ public:
     static float128 nan() {
         return float128(1, 0, INF_EXP_BIASED, 0);
     }
+    static float128 pi() {
+        return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x4000, 0);
+    }
     /**
      * @brief Return 0.1 using maximum precision
      * @return 
@@ -1239,7 +1317,7 @@ public:
     __forceinline static float128 tenth() noexcept
     {
         // 0.1 using maximum precision
-        return float128(0x9999999999999999, 0x999999999999, EXP_BIAS - 4, 0u);
+        return float128(0x999999999999999A, 0x999999999999, EXP_BIAS - 4, 0u);
     }
     /**
      * @brief calculates 10^e
