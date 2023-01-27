@@ -1307,19 +1307,57 @@ public:
      * @brief Return the infinite constant
      * @return INF
     */
-    static float128 inf() {
+    __forceinline static float128 inf() {
         return float128(0, 0, INF_EXP_BIASED, 0);
     }
     /**
      * @brief Return the quiet (non-signaling) NaN constant
      * @return NaN
     */
-    static float128 nan() {
+    __forceinline static float128 nan() {
         return float128(1, 0, INF_EXP_BIASED, 0);
     }
-    static float128 pi() {
+    /**
+     * @brief Return the value of pi
+     * @return pi
+    */
+    __forceinline static float128 pi() {
         return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x4000, 0);
     }
+    /**
+     * @brief Return the value of e
+     * @return e
+    */
+    __forceinline static float128 e() {
+        static const float128 e = "2.71828182845904523536028747135266249775724709369"; // 50 first digits of e
+        return e;
+    }
+    /**
+     * @brief Returns a value of sqrt(2)
+     * @return
+    */
+    __forceinline static float128 sqrt_2() noexcept {
+        static const float128 sqrt_2 = "1.41421356237309504880168872420969807856967187537"; // 50 first digits of sqrt(2)
+        return sqrt_2;
+    }
+    /**
+     * @brief  Returns a value of 1
+     * @return 1
+    */
+    __forceinline static float128 one() noexcept {
+        static const float128 one = 1;
+        return one;
+    }
+    /**
+     * @brief  Returns a value of 0.5
+     * @return 0.5
+    */
+    __forceinline static float128 half() noexcept
+    {
+        static const float128 half = 0.5;
+        return half;
+    }
+
     /**
      * @brief Return 0.1 using maximum precision
      * @return 
@@ -1362,14 +1400,6 @@ public:
         }
         return res;
     }
-
-
-
-
-
-
-
-
 
     //
     // End of class method implementation
