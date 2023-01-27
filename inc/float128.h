@@ -241,8 +241,8 @@ public:
         low = high = 0;
         if (x == nullptr) return;
 
-        constexpr uint64_t base16_max_digits = 35;            // maximum for 112 bit of manstissa/fraction is 34, read one extra to get maximum precision
-        constexpr uint64_t base10_max_digits = (112 + 4) / 4; // 29 hex digits. 28 for the fraction (112 bit) and another for the unity
+        constexpr uint64_t base16_max_digits = (112 + 4) / 4;  // 29 hex digits. 28 for the fraction (112 bit) and another for the unity
+        constexpr uint64_t base10_max_digits = 35;             // maximum for 112 bit of manstissa/fraction is 34, read one extra to get maximum precision
         uint32_t sign = 0;
         uint32_t base = 10;
         int32_t expo2 = 0;         // base2 exponent
@@ -459,27 +459,37 @@ public:
 
         // The fraction part is relevant if:
         // 1) Adding more digits actually changes the value 
-        // 2) Fraction digits are exist and not all zero
+        // 2) Fraction digits exist and not all zero
         float128 frac_part;
         if (frac_digits > 0) {
-            const float128 tenth = float128::tenth();
-        
-            // TODO: this is not accurate enough.
-        
             // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
-            int32_t digits_consumed = min(frac_digits, max_digits - int_digits);
-            if (digits_consumed > 0) {
-                float128 frac_base = 1; 
-                char* const end_digit = frac_start + digits_consumed;
-                *end_digit = '\0';
-                for (char* pp = frac_start; *pp; ++pp) {
-                    uint32_t d = *pp - '0';
-                    frac_base *= tenth;
-                    frac_part += frac_base * d;
-                }
+            int32_t digits = min(frac_digits, max_digits - int_digits);
+            constexpr int32_t digit_group = 8;
+            static_assert(digit_group <= 9); // must fit in 32 bit
+            int32_t i = 0;
+            const float128 group_base = exp10(-digit_group);
+            float128 current_base = 1;
 
-                frac_part.set_sign(sign);
+            for (; i + digit_group <= digits; i += digit_group) {
+                // convert to an int
+                uint32_t val = 0;
+                for (auto j = 0; j < digit_group; ++j) {
+                    val *= 10;
+                    val += frac_start[i + j] - '0';
+                }
+                
+                current_base *= group_base;
+                frac_part += current_base * val;
             }
+            // handle the remaining digits one at a time
+            for (; i < digits; ++i) {
+                // convert to an int
+                uint32_t val = frac_start[i] - '0';
+                current_base *= tenth();
+                frac_part += current_base * val;
+            }
+
+            frac_part.set_sign(sign);
         }
 
         // integer only, no fraction or exponent
