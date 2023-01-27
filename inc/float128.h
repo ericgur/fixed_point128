@@ -57,6 +57,48 @@ namespace fp128 {
 *                                  Forward declarations
 ************************************************************************************/
 class fp128_gtest; // Google test class
+class float128;
+
+// CRT style functions
+float128 fabs(const float128& x) noexcept;
+float128 floor(const float128& x) noexcept;
+float128 ceil(const float128& x) noexcept;
+float128 trunc(const float128& x) noexcept;
+float128 round(const float128& x) noexcept;
+int32_t ilogb(const float128& x) noexcept;
+float128 copysign(const float128& x, const float128& y) noexcept;
+float128 fmod(const float128& x, const float128& y);
+float128 modf(const float128& x, float128* iptr) noexcept;
+float128 fdim(const float128& x, const float128& y) noexcept;
+float128 fmin(const float128& x, const float128& y) noexcept;
+float128 fmax(const float128& x, const float128& y) noexcept;
+float128 hypot(const float128& x, const float128& y) noexcept;
+float128 sqrt(const float128& x, uint32_t iterations = 3) noexcept;
+float128 sin(float128 x) noexcept;
+float128 asin(float128 x) noexcept;
+float128 cos(float128 x) noexcept;
+float128 acos(float128 x) noexcept;
+float128 tan(float128 x) noexcept;
+float128 atan(float128 x) noexcept;
+float128 atan2(float128 y, float128 x) noexcept;
+float128 sinh(float128 x) noexcept;
+float128 asinh(float128 x) noexcept;
+float128 cosh(float128 x) noexcept;
+float128 acosh(float128 x) noexcept;
+float128 tanh(float128 x) noexcept;
+float128 atanh(float128 x) noexcept;
+float128 exp(const float128& x) noexcept;
+float128 exp2(const float128& x) noexcept;
+float128 expm1(const float128& x) noexcept;
+float128 pow(const float128& x, const float128& y, int32_t f = 112) noexcept;
+float128 log(float128 x, int32_t f = 112) noexcept;
+float128 log2(float128 x, int32_t f = 112) noexcept;
+float128 log10(float128 x, int32_t f = 112) noexcept;
+float128 logb(float128 x, int32_t f = 112) noexcept;
+float128 log1p(float128 x, int32_t f = 112) noexcept;
+// non CRT function
+float128 reciprocal(const float128& x) noexcept;
+void fact_reciprocal(int x, float128& res) noexcept;
 
 /***********************************************************************************
 *                                  Main Code
@@ -1155,6 +1197,49 @@ public:
         return FP128_GET_BIT(high, bit - 64);
     }
     /**
+     * @brief Return the fraction part as a float128
+    */
+    FP128_INLINE float128 get_fraction() const {
+        auto expo = get_exponent();
+        int32_t frac_bits = static_cast<int32_t>(FRAC_BITS) - expo;
+        // all the bits are fraction
+        if (frac_bits > FRAC_BITS) 
+            return *this;
+        // the exponent is too large to hold a fraction
+        if (frac_bits <= 0)
+            return 0;
+
+        uint64_t l = low, h = high_bits.f;
+        if (frac_bits <= 64) {
+            h = 0;
+            l &= FP128_MAX_VALUE_64(frac_bits);
+        }
+        else {
+            h &= FP128_MAX_VALUE_64(frac_bits - 64);
+        }
+        
+        // no fraction bits are high
+        if (l == 0 and h == 0) {
+            return 0;
+        }
+
+        // find the msb and shift to bit 112
+        int32_t msb = static_cast<int32_t>(log2(l, h));
+        int32_t shift = FRAC_BITS - msb; // how many bits to shift left
+        if (shift != 0) {
+            if (shift >= 64) {
+                h = l << (shift - 64);
+                l = 0;
+            }
+            else if (shift < 63) {
+                shift_left128_inplace(l, h, shift);
+            }
+        }
+        expo -= shift;
+        float128 res(l, h, expo + EXP_BIAS, get_sign());
+        return res;
+    }
+    /**
      * @brief Inverts the sign
     */
     __forceinline void invert_sign() noexcept
@@ -1603,6 +1688,56 @@ public:
     */
     friend bool isinf(const float128& x) {
         return x.is_inf();
+    }
+
+    friend __forceinline float128 fabs(const float128& x) noexcept {
+        float128 temp = x;
+        temp.set_sign(0);
+        return temp;
+    }
+    /**
+     * @brief Performs the floor() function, similar to libc's floor(), rounds down towards -infinity.
+     * @param x Input value
+     * @return A float128 holding the integer value. Overflow is not reported.
+    */
+    friend __forceinline float128 floor(const float128& x) noexcept {
+        float128 fraction = x.get_fraction();
+        if (fraction.is_zero())
+            return x;
+
+        float128 res = x - fraction;
+        if (fraction.is_negative())
+            return res - 1;
+        return res;
+    }
+    /**
+     * @brief Performs the ceil() function, similar to libc's ceil(), rounds up towards infinity.
+     * @param x Input value
+     * @return A float128 holding the integer value. Overflow is not reported.
+    */
+    friend __forceinline float128 ceil(const float128& x) noexcept {
+        float128 fraction = x.get_fraction();
+        if (fraction.is_zero())
+            return x;
+
+        float128 res = x - fraction;
+        if (fraction.is_positive())
+            return res + 1;
+        return res;
+    }
+    friend __forceinline float128 trunc(const float128& x) noexcept {
+
+    }
+    friend __forceinline float128 round(const float128& x) noexcept {
+
+    }
+    friend __forceinline int32_t ilogb(const float128& x) noexcept {
+        return x.get_exponent();
+    }
+    friend __forceinline float128 copysign(const float128& x, const float128& y) noexcept {
+        float128 temp = x;
+        temp.high_bits.s = y.high_bits.s;
+        return temp;
     }
 };
 

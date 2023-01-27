@@ -460,6 +460,36 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
     return 0;
 }
 /**
+ * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
+ * @param x input value.
+ * @return Number of 1 bits in x.
+*/
+__forceinline uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
+{
+    return __popcnt64(l) + __popcnt64(h);
+}
+/**
+ * @brief Left zero count 128 bit
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @return Left zero count
+*/
+__forceinline uint64_t lzcnt128(uint64_t l, uint64_t h) noexcept
+{
+    return (h != 0) ? __lzcnt64(h) : 64 + __lzcnt64(l);
+}
+/**
+ * @brief Calculates the Log base 2 of x: log2(x)
+ * Rounding is always towards zero so the maximum error is close to 1.
+ * @param l Lower QWORD of the value
+ * @param h Jigh QWORD of the value
+ * @return log2(x). Returns zero when x is zero.
+*/
+__forceinline uint64_t log2(uint64_t l, uint64_t h) noexcept
+{
+    return (h != 0 || l != 0) ? 127 - lzcnt128(l, h) : 0;
+}
+/**
  * @brief Calculates the Log base 2 of x: log2(x)
  * Rounding is always towards zero so the maximum error is close to 1.
  * @param x The number to perform log2 on.
@@ -478,26 +508,6 @@ __forceinline uint64_t log2(uint64_t x) noexcept
 __forceinline uint32_t log2(uint32_t x) noexcept
 {
     return (x) ? 31ull - __lzcnt(x) : 0;
-}
-
-/**
- * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
- * @param x input value.
- * @return Number of 1 bits in x.
-*/
-__forceinline uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
-{
-    return __popcnt64(l) + __popcnt64(h);
-}
-/**
- * @brief Left zero count 128 bit
- * @param l Low QWORD
- * @param h High QWORD
- * @return Left zero count
-*/
-__forceinline uint64_t lzcnt128(uint64_t l, uint64_t h) noexcept
-{
-    return (h != 0) ? __lzcnt64(h) : 64 + __lzcnt64(l);
 }
 
 } //namespace fp128 {
