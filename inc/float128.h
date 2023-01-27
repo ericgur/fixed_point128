@@ -1725,15 +1725,42 @@ public:
             return res + 1;
         return res;
     }
+    /**
+     * @brief Rounds towards zero
+     * @param x Value to truncate
+     * @return Integer value, rounded towards zero.
+    */
     friend __forceinline float128 trunc(const float128& x) noexcept {
+        float128 fraction = x.get_fraction();
+        if (fraction.is_zero())
+            return x;
 
+        return x - fraction;
     }
+    /**
+     * @brief Rounds towards the nearest integer.
+     * The halfway value (0.5) is rounded away from zero.
+     * @param x Value to round
+     * @return Integer value, rounded towards the nearest integer.
+    */
     friend __forceinline float128 round(const float128& x) noexcept {
-
+        float128 h = (x.is_positive()) ? half() : -half();
+        return trunc(x + h);
     }
+    /**
+     * @brief Retrieves an integer that represents the base-2 exponent of the specified value.
+     * @param x The specified value.
+     * @return Integer value, rounded towards the nearest integer.
+    */
     friend __forceinline int32_t ilogb(const float128& x) noexcept {
         return x.get_exponent();
     }
+    /**
+     * @brief returns the value of x with the sign of y.
+     * @param x The value that's returned as the magnitude of the result.
+     * @param y The sign of the result.
+     * @return The copysign functions return a floating-point value that combines the magnitude of x and the sign of y.
+    */
     friend __forceinline float128 copysign(const float128& x, const float128& y) noexcept {
         float128 temp = x;
         temp.high_bits.s = y.high_bits.s;
