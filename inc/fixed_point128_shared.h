@@ -196,7 +196,7 @@ __forceinline void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) n
 {
     assert(shift > 0 && shift < 64);
     l = (l >> shift) | (h << (64 - shift));
-   h >>= shift;
+    h >>= shift;
 }
 /**
     * @brief Left shift a 128 bit integer (inplace).

@@ -475,10 +475,12 @@ public:
             else
                 int_part >>= -shift;
 
-            // set the integer part
-            int_part.get_components(low, high); // unity bit is erased by set_exponent()
-            set_exponent(expo2);
-            set_sign(sign);
+            // set the integer part if non-zero
+            if (int_part) {
+                int_part.get_components(low, high); // unity bit is erased by set_exponent()
+                set_exponent(expo2);
+                set_sign(sign);
+            }
         }
 
         // if both integer & fraction are zero, the result is zero regardless of the exponent e.g. 0E9999
@@ -968,10 +970,16 @@ public:
         // shift result by F
         constexpr int32_t index = 1;
         constexpr int32_t lsb = FRAC_BITS & 63;            // bit within the 64bit data pointed by res[index]
+        constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
+        const bool need_rounding = (res[index] & half) != 0;
 
-        // copy block #1 (lowest)
-        l1 = shift_right128_round(res[index], res[index + 1], lsb); // custom function is 20% faster in Mandelbrot than the intrinsic
+        l1 = shift_right128(res[index], res[index + 1], lsb); // custom function is 20% faster in Mandelbrot than the intrinsic
         h1 = shift_right128(res[index + 1], res[index + 2], lsb);
+
+        if (need_rounding) {
+            ++l1; // low will wrap around to zero if overflowed
+            h1 += l1 == 0;
+        }
 
         norm_fraction(l1, h1, expo);
         set_components(l1, h1, expo, sign ^ other_sign);
@@ -1802,7 +1810,128 @@ public:
     friend __forceinline float128 fmax(const float128& x, const float128& y) noexcept {
         return (x > y) ? x : y;
     }
+    /**
+     * @brief Calculates the hypotenuse. i.e. sqrt(x^2 + y^2)
+     * @param x First value
+     * @param y Second value
+     * @return sqrt(x^2 + y^2).
+    */
+    friend FP128_INLINE float128 hypot(const float128& x, const float128& y) noexcept
+    {
+        return sqrt(x * x + y * y);
+    }
 
+    /**
+     * @brief Calculates the square root using Newton's method.
+     * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw
+     * @param x Value to calculate the root of
+     * @param iterations how many iterations to perform (more is more accurate). Sensible values are 0-5.
+     * @return Square root of (x), zero when x <= 0.
+    */
+    friend float128 sqrt(const float128& x, uint32_t iterations) noexcept {
+        static const float128 factor = "0.70710678118654752440084436210484903928483593768847403658833981"; // sqrt(2) / 2
+        if (x.is_negative() || x.is_zero())
+            return 0;
+
+        // normalize the input to the range [0.5, 1)
+        int32_t expo = x.get_exponent() + 1;
+        float128 norm_x = x;
+        norm_x.set_exponent(-1);
+
+        // use existing HW to provide an excellent first estimate.
+        // regardless of what x was, norm_x is within double's precision range
+        double temp = static_cast<double>(norm_x);
+        float128 root = ::sqrt(temp);
+
+        // iterate several times via Newton's method
+        //                  X
+        //   Xn+1 = 0.5 * (---- + Xn )
+        //                  Xn
+        for (auto i = iterations; i != 0; --i) {
+            root = (norm_x / root + root);
+            root.set_exponent(root.get_exponent() - 1);
+        }
+
+        if (expo & 1) {
+            root *= factor;
+            ++expo;
+        }
+
+        // Denormalize the result
+        int32_t root_expo = root.get_exponent();
+        root_expo += (expo > 0) ? (expo + 1) / 2 : expo / 2;
+        root.set_exponent(root_expo);
+        return root;
+    }
+    /**
+     * @brief Factorial reciprocal (inverse). Calculates 1 / x!
+     * Maximum supported value of x is 50.
+     * @param x Input value
+     * @param res Result of the function
+    */
+    friend FP128_INLINE void fact_reciprocal(int x, float128& res) noexcept
+    {
+        static const float128 c[] = {
+            "1.0", // 1 / 0!
+            "1.0", // 1 / 1!
+            "0.5", // 1 / 2!
+            "1.6666666666666666666666666666666667e-1", // 1 / 3!
+            "4.1666666666666666666666666666666667e-2", // 1 / 4!
+            "8.3333333333333333333333333333333333e-3", // 1 / 5!
+            "1.9841269841269841269841269841269841e-4", // 1 / 7!
+            "2.4801587301587301587301587301587302e-5", // 1 / 8!
+            "2.7557319223985890652557319223985891e-6", // 1 / 9!
+            "2.7557319223985890652557319223985891e-7", // 1 / 10!
+            "2.5052108385441718775052108385441719e-8", // 1 / 11!
+            "2.0876756987868098979210090321201432e-9", // 1 / 12!
+            "1.6059043836821614599392377170154948e-10", // 1 / 13!
+            "1.1470745597729724713851697978682106e-11", // 1 / 14!
+            "7.6471637318198164759011319857880704e-13", // 1 / 15!
+            "4.7794773323873852974382074911175440e-14", // 1 / 16!
+            "2.8114572543455207631989455830103200e-15", // 1 / 17!
+            "1.5619206968586226462216364350057333e-16", // 1 / 18!
+            "8.2206352466243297169559812368722807e-18", // 1 / 19!
+            "4.1103176233121648584779906184361404e-19", // 1 / 20!
+            "1.9572941063391261230847574373505430e-20", // 1 / 21!
+            "8.8967913924505732867488974425024683e-22", // 1 / 22!
+            "3.8681701706306840377169119315228123e-23", // 1 / 23!
+            "1.6117375710961183490487133048011718e-24", // 1 / 24!
+            "6.4469502843844733961948532192046872e-26", // 1 / 25!
+            "2.4795962632247974600749435458479566e-27", // 1 / 26!
+            "9.1836898637955461484257168364739134e-29", // 1 / 27!
+            "3.2798892370698379101520417273121119e-30", // 1 / 28!
+            "1.1309962886447716931558764576938317e-31", // 1 / 29!
+            "3.7699876288159056438529215256461057e-33", // 1 / 30!
+            "1.2161250415535179496299746856922921e-34", // 1 / 31!
+            "3.8003907548547435925936708927884130e-36", // 1 / 32!
+            "1.1516335620771950280586881493298221e-37", // 1 / 33!
+            "3.3871575355211618472314357333230062e-39", // 1 / 34!
+            "9.6775929586318909920898163809228749e-41", // 1 / 35!
+            "2.6882202662866363866916156613674652e-42", // 1 / 36!
+            "7.2654601791530713153827450307228790e-44", // 1 / 37!
+            "1.9119632050402819251007223765060208e-45", // 1 / 38!
+            "4.9024697565135433976941599397590277e-47", // 1 / 39!
+            "1.2256174391283858494235399849397569e-48", // 1 / 40!
+            "2.9893108271424045107891219144872120e-50", // 1 / 41!
+            "7.1174067312914393114026712249695524e-52", // 1 / 42!
+            "1.6552108677421951886982956337138494e-53", // 1 / 43!
+            "3.7618428812322617924961264402587486e-55", // 1 / 44!
+            "8.3596508471828039833247254227972192e-57", // 1 / 45!
+            "1.8173154015614791268097229179993955e-58", // 1 / 46!
+            "3.8666285139605938868291976978710542e-60", // 1 / 47!
+            "8.0554760707512372642274952038980296e-62", // 1 / 48!
+            "1.6439747083165790335158153477342917e-63", // 1 / 49!
+            "3.2879494166331580670316306954685835e-65", // 1 / 50!
+        };
+        constexpr int series_len = array_length(c);
+
+        if (x >= 0 && x < series_len) {
+            res = c[x];
+        }
+        else {
+            res = 0;
+        }
+    }
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);

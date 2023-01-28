@@ -355,6 +355,7 @@ TEST(float128, MultiplyByDouble) {
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
         double value2 = get_double_random();
+        value1 = 0.80270613357871456, value2 = 0.70710678118654757;
         double res = value1 * value2;
         float128 f1 = value1;
         float128 f3 = f1 * value2;
@@ -869,6 +870,16 @@ TEST(float128, modf) {
         EXPECT_DOUBLE_EQ(float128_res_int, res_int) << "modf integer: " << "value=" << value;
     }
 }
+TEST(float128, sqrt) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random()); // can't exceed this range to avoid overflow
+        double res = ::sqrt(value);
+        float128 f1 = value;
+        float128 float128_res = sqrt(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "sqrt: " << "value=" << value;
+    }
+}
 //TEST(float128, reciprocal) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -879,28 +890,21 @@ TEST(float128, modf) {
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "reciprocal: " << "value=" << value;
 //    }
 //}
-//TEST(float128, sqrt) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = fabs(get_double_random(-30, 15)); // can't exceed this range to avoid overflow
-//        double res = ::sqrt(value);
-//        float128 f1 = value;
-//        float128 float128_res = sqrt(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "sqrt: " << "value=" << value;
-//    }
-//}
-//TEST(float128, hypot) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value1 = get_double_random(-15, 3);
-//        double value2 = get_double_random(-15, 3);
-//        double res = hypot(value1, value2);
-//        float128 f1 = value1;
-//        float128 f2 = value2;
-//        float128 float128_res = hypot(f1, f2);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "hypot: " << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
+TEST(float128, hypot) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        double res = hypot(value1, value2);
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 t = f1 * f1;
+        float128 t2 = sqrt(t);
+
+        float128 float128_res = hypot(f1, f2);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "hypot: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
 //TEST(float128, ilogb) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
