@@ -856,6 +856,19 @@ TEST(float128, fmod_integer) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "fmod: " << "value1=" << value1 << ", value2=" << value2;
     }
 }
+TEST(float128, modf) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        double res_int = 0;
+        double res = ::modf(value, &res_int);
+        float128 f1 = value;
+        float128 float128_res_int;
+        float128 float128_res_frac = modf(f1, &float128_res_int);
+        EXPECT_DOUBLE_EQ(float128_res_frac, res) << "modf fraction: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res_int, res_int) << "modf integer: " << "value=" << value;
+    }
+}
 //TEST(float128, reciprocal) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {

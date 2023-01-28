@@ -1758,7 +1758,23 @@ public:
         float128 res = x - y * trunc(x_div_y);
         return res;
     }
-
+    /**
+     * @brief Split into integer and fraction parts.
+     * Both results carry the sign of the input variable.
+     * @param x Input value
+     * @param iptr Pointer to float128 holding the integer part of x.
+     * @return The fraction part of x. Undefined when iptr is nullptr.
+    */
+    friend float128 modf(const float128& x, float128* iptr) noexcept {
+        if (iptr == nullptr)
+            return 0;
+        
+        // fraction
+        float128 res = x.get_fraction();
+        // integer
+        *iptr = x - res;
+        return res;
+    }
     /**
      * @brief Determines the positive difference between the first and second values.
      * @param x First value
