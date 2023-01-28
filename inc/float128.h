@@ -67,7 +67,7 @@ float128 trunc(const float128& x) noexcept;
 float128 round(const float128& x) noexcept;
 int32_t ilogb(const float128& x) noexcept;
 float128 copysign(const float128& x, const float128& y) noexcept;
-float128 fmod(const float128& x, const float128& y);
+float128 fmod(const float128& x, const float128& y) noexcept;
 float128 modf(const float128& x, float128* iptr) noexcept;
 float128 fdim(const float128& x, const float128& y) noexcept;
 float128 fmin(const float128& x, const float128& y) noexcept;
@@ -213,14 +213,7 @@ public:
             //fraction
             low = d.f & ~(1ull << (msb - 1)); // clear the msb
             auto shift = static_cast<int32_t>(FRAC_BITS - msb + 1);
-            if (shift < 64)
-                // Note shift cannot be zero
-                shift_left128_inplace(low, high, shift);
-            else {
-                high = low << (shift - 64);
-                low = 0;
-            }
-            
+            shift_left128_inplace_safe(low, high, shift);
             set_exponent(expo);
         }
         // NaN & INF
@@ -263,12 +256,7 @@ public:
         
         auto expo = log2(low); // this is the index of the msb as well
         auto shift = static_cast<int32_t>(FRAC_BITS - expo);
-        if (shift < 64)
-            shift_left128_inplace(low, high, shift);
-        else {
-            high = low << (shift - 64);
-            low = 0;
-        }
+        shift_left128_inplace_safe(low, high, shift);
         set_sign(sign);
         set_exponent(static_cast<int32_t>(expo));
     }
@@ -390,7 +378,7 @@ public:
                 *this = inf();
             }
             else {
-                shift_right128_inplace(low, high, 124 + digit_msb - FRAC_BITS); // move digit's 2nd  msb to bit 111
+                shift_right128_inplace_safe(low, high, 124 + digit_msb - FRAC_BITS); // move digit's 2nd  msb to bit 111
                 set_exponent(expo2);
                 set_sign(sign);
             }
@@ -822,12 +810,7 @@ public:
             // exponents are too far apart, result will stay the same
             if (shift >= FRAC_BITS)
                 return *this;
-            if (shift <  64)
-                shift_right128_inplace(l2, h2 , shift);
-            else {
-                l2 = h2 >> (shift - 64);
-                h2 = 0;
-            }
+            shift_right128_inplace_safe(l2, h2, shift);
         }
         else if (shift < 0) {
             shift = -shift;
@@ -836,12 +819,7 @@ public:
                 *this = other;
                 return *this;
             }
-            if (shift < 64)
-                shift_right128_inplace(l1, h1, shift);
-            else {
-                l1 = h1 >> (shift - 64);
-                h1 = 0;
-            }
+            shift_right128_inplace_safe(l1, h1, shift);
             // result base exponent comes from the other value
             expo = other_expo;
         }
@@ -886,10 +864,10 @@ public:
 
         expo += shift;
         if (shift > 0) {
-            shift_right128_inplace(l1, h1, shift);
+            shift_right128_inplace_safe(l1, h1, shift);
         }
         else if (shift < 0) {
-            shift_left128_inplace(l1, h1, -shift);
+            shift_left128_inplace_safe(l1, h1, -shift);
         }
         
         set_components(l1, h1, expo, sign);
@@ -1183,7 +1161,18 @@ public:
         // fraction is zero for +- INF, non-zero for NaN 
         return high_bits.e == INF_EXP_BIASED;
     }
-
+    /**
+     * @brief Returns if the value is an integer (fraction is zero).
+     * @return True when the value is an integer.
+    */
+    __forceinline bool is_int() const {
+        int32_t expo = get_exponent();
+        if (expo < 0)
+            return false;
+        if (expo >= FRAC_BITS)
+            return true;
+        return get_fraction().is_zero();
+    }
     /**
      * @brief get a specific bit within the float128 data
      * @param bit bit to get [0,127]
@@ -1219,22 +1208,14 @@ public:
         }
         
         // no fraction bits are high
-        if (l == 0 and h == 0) {
+        if (l == 0 && h == 0) {
             return 0;
         }
 
         // find the msb and shift to bit 112
         int32_t msb = static_cast<int32_t>(log2(l, h));
         int32_t shift = FRAC_BITS - msb; // how many bits to shift left
-        if (shift != 0) {
-            if (shift >= 64) {
-                h = l << (shift - 64);
-                l = 0;
-            }
-            else if (shift < 63) {
-                shift_left128_inplace(l, h, shift);
-            }
-        }
+        shift_left128_inplace_safe(l, h, shift);
         expo -= shift;
         float128 res(l, h, expo + EXP_BIAS, get_sign());
         return res;
@@ -1297,14 +1278,8 @@ public:
         
         if (is_subnormal()) {
             // shift the bits to the lft so the msb is on bit 112
-            auto shift = 127 - FRAC_BITS - static_cast<int32_t>(lzcnt128(l, h));
-            if (shift >= 64) {
-                h = l << (shift - 64);
-                l = 0;
-            }
-            else if (shift > 0){
-                shift_left128_inplace(l, h, shift);
-            }
+            auto shift = FRAC_BITS - static_cast<int32_t>(log2(l, h));
+            shift_left128_inplace_safe(l, h, shift);
 
             // update the exponent
             e += shift;
@@ -1337,14 +1312,9 @@ public:
             if (shift >= FRAC_BITS) {
                 l = h = 0;
             }
-            // some bits stay in the high QWORD
-            else if (shift < FRAC_BITS - 64) {
-                shift_right128_inplace(l, h, shift);
-            }
-            else {
-                l = shift_right128(l, h, shift);
-                h = 0;
-            }
+            // some bits stay in the low or high QWORD
+            else 
+                shift_right128_inplace_safe(l, h, shift);
             // override the exponent to mark the value as subnormal
             e = SUBNORM_EXP_UNBIASED;
         }
@@ -1366,7 +1336,7 @@ public:
     __forceinline void norm_fraction(uint64_t& l, uint64_t& h, int32_t& e) const noexcept
     {
         // fix the exponent
-        auto msb = 127 - static_cast<int32_t>(lzcnt128(l, h));
+        auto msb = static_cast<int32_t>(log2(l, h));
         // l and h are both zero
         if (msb < 0) {
             e = ZERO_EXP_UNBIASED;
@@ -1380,13 +1350,9 @@ public:
         if (shift > 0) {
             shift_right128_inplace(l, h, shift);
         }
-        else if (shift < -63) {
-            h = l << (-shift);
-            l = 0;
-        }
-        else if (shift < 0) {
-            shift_left128_inplace(l, h, -shift);
-        }
+        else
+            shift_left128_inplace_safe(l, h, -shift);
+
     }
     /**
      * @brief Return the infinite constant
@@ -1766,6 +1732,61 @@ public:
         temp.high_bits.s = y.high_bits.s;
         return temp;
     }
+    /**
+     * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/root.
+     * @param x Numerator
+     * @param y Denominator
+     * @return The modulo value.
+    */
+    friend float128 fmod(const float128& x, const float128& y) noexcept {
+        // trivial case, x is zero
+        if (x.is_zero())
+            return x;
+
+        if (y.is_zero())
+            return copysign(inf(), y);
+
+        // do the division in with positive numbers
+        float128 x_div_y = x / y;
+
+        // Integer result - remainder is zero. 
+        // Avoid the extra computation and precision loss with the standard equation.
+        if (x_div_y.is_int()) {
+            return 0;
+        }
+        // Fraction result - remainder is non zero.
+        float128 res = x - y * trunc(x_div_y);
+        return res;
+    }
+
+    /**
+     * @brief Determines the positive difference between the first and second values.
+     * @param x First value
+     * @param y Second value
+     * @return If x > y returns x - y. Otherwise zero.
+    */
+    friend __forceinline float128 fdim(const float128& x, const float128& y) noexcept {
+        return (x > y) ? x - y : float128();
+    }
+    /**
+     * @brief Returns the mimimun between x and y.
+     * @param x First value
+     * @param y Second value
+     * @return If x < y returns x. Otherwise y.
+    */
+    friend __forceinline float128 fmin(const float128& x, const float128& y) noexcept {
+        return (x < y) ? x : y;
+    }
+    /**
+     * @brief Returns the maximum between x and y.
+     * @param x First value
+     * @param y Second value
+     * @return If x > y returns x. Otherwise y.
+    */
+    friend __forceinline float128 fmax(const float128& x, const float128& y) noexcept {
+        return (x > y) ? x : y;
+    }
+
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);

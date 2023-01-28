@@ -985,64 +985,31 @@ public:
      * @return This object.
     */
     FP128_INLINE fixed_point128& operator%=(const fixed_point128& other) {
-        // trivial case, this object is zero
+        // trivial cases, this object is zero or the other is zero
         if (!*this)
             return *this;
+        if (!other)
+            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
 
         // simple case, both are integers (fractions is zero)
         if (is_int() && other.is_int()) {
-            if (!other)
-                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
             return operator=(static_cast<int64_t>(*this) % static_cast<int64_t>(other));
         }
         // num or denom are fractions
-        // x mod y =  x - y * floor(x/y)
-        // do the division in with positive numbers
-        const uint64_t nom[4] = { 0, 0, low, high };
-        const uint64_t denom[2] = { other.low, other.high };
-        uint64_t q[4]{};
-        uint64_t r[2]{}; // same size as the denominator
-        if (0 == div_32bit((uint32_t*)q, (uint32_t*)r, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
-            fixed_point128 x_div_y; // x/root. 
-            x_div_y.high = (q[2] << upper_frac_bits) | (q[1] >> I);
-            x_div_y.low = (q[1] << upper_frac_bits) | (q[0] >> I);
-            x_div_y.sign = sign ^ other.sign;
-            // Integer result - remainder is zero.
-            if (x_div_y.is_int()) {
-                *this = 0;
-            }
-            // Fraction result - remainder is non zero.
-            else {
-                if constexpr (FP128_CPP_STYLE_MODULO) {
-                    const bool this_was_positive = is_positive();
-                    *this -= other * floor(x_div_y);
-                    // this was positive, return positive modulo
-                    if (this_was_positive) {
-                        if (is_negative())
-                            *this += other.is_positive() ? other : -other;
-                    }
-                    // this was negative, return negative modulo
-                    else {
-                        if (is_positive())
-                            *this += other.is_positive() ? -other : other;
-                    }
-                }
-                else {
-                    *this -= other * floor(x_div_y);
-                    // common case (fractions and integers) where one of the values is negative
-                    if (sign != other.sign) {
-                        // the remainder + denominator
-                        *this += other;
-                    }
-                }
-            }
+        // x mod y =  x - y * trunc(x/y)
+        fixed_point128 x_div_y = *this / other;
+        // Integer result - remainder is zero.
+        // Avoid the extra computation and precision loss with the standard equation.
+        if (x_div_y.is_int()) {
+            *this = 0;
+        }
+        // Fraction result - remainder is non zero.
+        else {
+            *this -= other * trunc(x_div_y);
+        }
 
-            // Note if signs are the same, for nom/denom, the result keeps the sign.
-            reset_sign_for_zero();
-        }
-        else { // error
-            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
-        }
+        // Note if signs are the same, for nom/denom, the result keeps the sign.
+        reset_sign_for_zero();
         return *this;
     }
     template<typename T>
@@ -1589,7 +1556,7 @@ private:
 
     /**
      * @brief Returns the absolute value
-     * @param x Input valu
+     * @param x Input value
      * @return A copy of x with sign removed
     */
     friend __forceinline fixed_point128 fabs(const fixed_point128& x) noexcept

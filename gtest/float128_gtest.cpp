@@ -777,65 +777,92 @@ TEST(float128, TemplateOperatorNotEqual) {
         EXPECT_TRUE(float128_res == false) << "operator!=<int32_t>: " << "value1=" << value1;
     }
 }
-//TEST(float128, floor) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
-//        double res = floor(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = floor(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "floor: " << "value=" << value;
-//    }
-//}
-//TEST(float128, ceil) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
-//        double res = ceil(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = ceil(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "ceil: " << "value=" << value;
-//    }
-//}
-//TEST(float128, trunc) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
-//        double res = trunc(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = trunc(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "trunc: " << "value=" << value;
-//    }
-//}
-//TEST(float128, round) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
-//        double res = round(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = round(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "round: " << "value=" << value;
-//    }
-//}
-//TEST(float128, copysign) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value1 = get_double_random(-15, 15);
-//        double value2 = get_double_random(-15, 15);
-//        double res = copysign(value1, value2);
-//        fixed_point128<16> f1 = value1;
-//        fixed_point128<16> f2 = value2;
-//        fixed_point128<16> float128_res = copysign(f1, f2);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "copysign: " << "value1=" << value1 << ", value2=" << value2;
-//    }
-//}
+TEST(float128, floor) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        double res = ::floor(value);
+        float128 f1 = value;
+        float128 float128_res = floor(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "floor: " << "value=" << value;
+    }
+}
+TEST(float128, ceil) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        double res = ::ceil(value);
+        float128 f1 = value;
+        float128 float128_res = ceil(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "ceil: " << "value=" << value;
+    }
+}
+TEST(float128, trunc) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        double res = trunc(value);
+        float128 f1 = value;
+        float128 float128_res = trunc(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "trunc: " << "value=" << value;
+    }
+}
+TEST(float128, round) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        double res = round(value);
+        float128 f1 = value;
+        float128 float128_res = round(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "round: " << "value=" << value;
+    }
+}
+TEST(float128, copysign) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        double res = copysign(value1, value2);
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 float128_res = copysign(f1, f2);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "copysign: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, fmod_fraction) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random();
+        double value2 = get_double_random();
+        // check if double precision can produce accurate results
+        if (abs(ilogb(value1) - ilogb(value2)) > 52)
+            continue;
+        double res = ::fmod(value1, value2);
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 float128_res = fmod(f1, f2);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "fmod: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
+TEST(float128, fmod_integer) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_int32_random();
+        double value2 = get_int32_random();
+        double res = ::fmod(value1, value2);
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 float128_res = fmod(f1, f2);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "fmod: " << "value1=" << value1 << ", value2=" << value2;
+    }
+}
 //TEST(float128, reciprocal) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
 //        double res = 1.0 / value;
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = reciprocal(f1);
+//        float128 f1 = value;
+//        float128 float128_res = reciprocal(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "reciprocal: " << "value=" << value;
 //    }
 //}
@@ -844,8 +871,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = fabs(get_double_random(-30, 15)); // can't exceed this range to avoid overflow
 //        double res = ::sqrt(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = sqrt(f1);
+//        float128 f1 = value;
+//        float128 float128_res = sqrt(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "sqrt: " << "value=" << value;
 //    }
 //}
@@ -855,9 +882,9 @@ TEST(float128, TemplateOperatorNotEqual) {
 //        double value1 = get_double_random(-15, 3);
 //        double value2 = get_double_random(-15, 3);
 //        double res = hypot(value1, value2);
-//        fixed_point128<16> f1 = value1;
-//        fixed_point128<16> f2 = value2;
-//        fixed_point128<16> float128_res = hypot(f1, f2);
+//        float128 f1 = value1;
+//        float128 f2 = value2;
+//        float128 float128_res = hypot(f1, f2);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "hypot: " << "value1=" << value1 << ", value2=" << value2;
 //    }
 //}
@@ -866,7 +893,7 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 15); // lower exponent results in lost bits
 //        int32_t res = ::ilogb(value);
-//        fixed_point128<16> f1 = value;
+//        float128 f1 = value;
 //        int32_t float128_res = ilogb(f1);
 //        EXPECT_EQ(float128_res, res) << "ilogb: " << "value=" << value;
 //    }
@@ -876,8 +903,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
 //        double res = log(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = log(f1);
+//        float128 f1 = value;
+//        float128 float128_res = log(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "log: " << "value=" << value;
 //    }
 //}
@@ -886,8 +913,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
 //        double res = log2(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = log2(f1);
+//        float128 f1 = value;
+//        float128 float128_res = log2(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "log2: " << "value=" << value;
 //    }
 //}
@@ -896,8 +923,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
 //        double res = log10(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = log10(f1);
+//        float128 f1 = value;
+//        float128 float128_res = log10(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "log10: " << "value=" << value;
 //    }
 //}
@@ -906,8 +933,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
 //        double res = log1p(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = log1p(f1);
+//        float128 f1 = value;
+//        float128 float128_res = log1p(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "log1p: " << "value=" << value;
 //    }
 //}
@@ -916,8 +943,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
 //        double res = logb(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = logb(f1);
+//        float128 f1 = value;
+//        float128 float128_res = logb(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "logb: " << "value=" << value;
 //    }
 //}
@@ -926,8 +953,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 2);
 //        double res = ::sin(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = sin(f1);
+//        float128 f1 = value;
+//        float128 float128_res = sin(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "sin: " << "value=" << value;
 //    }
 //}
@@ -936,8 +963,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 2);
 //        double res = ::cos(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = cos(f1);
+//        float128 f1 = value;
+//        float128 float128_res = cos(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "cos: " << "value=" << value;
 //    }
 //}
@@ -946,8 +973,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 2);
 //        double res = ::tan(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = tan(f1);
+//        float128 f1 = value;
+//        float128 float128_res = tan(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "tan: " << "value=" << value;
 //    }
 //}
@@ -956,8 +983,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, -1);
 //        double res = ::asin(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = asin(f1);
+//        float128 f1 = value;
+//        float128 float128_res = asin(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "asin: " << "value=" << value;
 //    }
 //}
@@ -966,8 +993,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, -1);
 //        double res = acos(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = acos(f1);
+//        float128 f1 = value;
+//        float128 float128_res = acos(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "acos: " << "value=" << value;
 //    }
 //}
@@ -976,8 +1003,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 14); //lower exponent results in lost bits
 //        double res = atan(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = atan(f1);
+//        float128 f1 = value;
+//        float128 float128_res = atan(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "atan: " << "value=" << value;
 //    }
 //}
@@ -987,9 +1014,9 @@ TEST(float128, TemplateOperatorNotEqual) {
 //        double value1 = get_double_random(-10, 14); //lower exponent results in lost bits
 //        double value2 = get_double_random(-10, 14); //lower exponent results in lost bits
 //        double res = atan2(value1, value2);
-//        fixed_point128<16> f1 = value1;
-//        fixed_point128<16> f2 = value2;
-//        fixed_point128<16> float128_res = atan2(f1, f2);
+//        float128 f1 = value1;
+//        float128 f2 = value2;
+//        float128 float128_res = atan2(f1, f2);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "atan2: " << " value1=" << value1 << ", value2=" << value2;
 //    }
 //}
@@ -998,8 +1025,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-3, 3); // lower exponent results in lost bits
 //        double res = exp(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = exp(f1);
+//        float128 f1 = value;
+//        float128 float128_res = exp(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "exp: " << "value=" << value;
 //    }
 //}
@@ -1008,8 +1035,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-4, 4); // lower exponent results in lost bits
 //        double res = exp2(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = exp2(f1);
+//        float128 f1 = value;
+//        float128 float128_res = exp2(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "exp2: " << "value=" << value;
 //    }
 //}
@@ -1018,8 +1045,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-3, 3); // lower exponent results in lost bits
 //        double res = expm1(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = expm1(f1);
+//        float128 f1 = value;
+//        float128 float128_res = expm1(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "expm1: " << "value=" << value;
 //    }
 //}
@@ -1029,9 +1056,9 @@ TEST(float128, TemplateOperatorNotEqual) {
 //        double value1 = fabs(get_double_random(-4, 4)); // lower exponent results in lost bits
 //        double value2 = get_double_random(-4, 4); // lower exponent results in lost bits
 //        double res = pow(value1, value2);
-//        fixed_point128<16> f1 = value1;
-//        fixed_point128<16> f2 = value2;
-//        fixed_point128<16> float128_res = pow(f1, f2);
+//        float128 f1 = value1;
+//        float128 f2 = value2;
+//        float128 float128_res = pow(f1, f2);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "pow: " << " value1=" << value1 << ", value2=" << value2;
 //    }
 //}
@@ -1040,8 +1067,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 2);
 //        double res = ::sinh(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = sinh(f1);
+//        float128 f1 = value;
+//        float128 float128_res = sinh(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "sinh: " << "value=" << value;
 //    }
 //}
@@ -1050,8 +1077,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 2);
 //        double res = ::asinh(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = asinh(f1);
+//        float128 f1 = value;
+//        float128 float128_res = asinh(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "asinh: " << "value=" << value;
 //    }
 //}
@@ -1060,8 +1087,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 2);
 //        double res = ::cosh(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = cosh(f1);
+//        float128 f1 = value;
+//        float128 float128_res = cosh(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "cosh: " << "value=" << value;
 //    }
 //}
@@ -1070,8 +1097,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = 1.0 + fabs(get_double_random(-60, 2)); // must be >= 1
 //        double res = ::acosh(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = acosh(f1);
+//        float128 f1 = value;
+//        float128 float128_res = acosh(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "acosh: " << "value=" << value;
 //    }
 //}
@@ -1080,8 +1107,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, 2);
 //        double res = ::tanh(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = tanh(f1);
+//        float128 f1 = value;
+//        float128 float128_res = tanh(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "tanh: " << "value=" << value;
 //    }
 //}
@@ -1091,8 +1118,8 @@ TEST(float128, TemplateOperatorNotEqual) {
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
 //        double value = get_double_random(-60, -1); // must be: -1 < value < 1
 //        double res = ::atanh(value);
-//        fixed_point128<16> f1 = value;
-//        fixed_point128<16> float128_res = atanh(f1);
+//        float128 f1 = value;
+//        float128 float128_res = atanh(f1);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "atanh: " << "value=" << value;
 //    }
 //}

@@ -200,7 +200,7 @@ __forceinline void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) n
 }
 /**
     * @brief Left shift a 128 bit integer (inplace).
-    * Limited range, inplace and no paramter checks.
+    * Limited range, inplace and no parameter checks.
     * @param l Low QWORD
     * @param h High QWORD
     * @param shift Bits to shift, between 1-63
@@ -211,6 +211,59 @@ __forceinline void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) no
     assert(shift > 0 && shift < 64);
     h = (h << shift) | (l >> (64 - shift));
     l <<= shift;
+}
+/**
+    * @brief Right shift a 128 bit integer (inplace).
+    * Handles any positive shift value.
+    * @param l Low QWORD
+    * @param h High QWORD
+    * @param shift Bits to shift, between 1-inf
+    * @return void
+*/
+__forceinline void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
+{
+    assert(shift >= 0);
+    if (shift == 0) return;
+
+    switch (shift >> 6) {
+    case 0: // 1-63 bit
+        l = (l >> shift) | (h << (64 - shift));
+        h >>= shift;
+        break;
+    case 1: // 64-127 bit
+        l = h >> (shift - 64);
+        h = 0;
+        break;
+    default: // >127 bit or negative
+        h = l = 0;
+    }
+}
+/**
+    * @brief Left shift a 128 bit integer (inplace).
+    * Handles any positive shift value.
+    * @param l Low QWORD
+    * @param h High QWORD
+    * @param shift Bits to shift, between 1-inf
+    * @return void
+*/
+__forceinline void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
+{
+    assert(shift >= 0);
+    if (shift == 0) return;
+
+    switch (shift >> 6) {
+
+    case 0: // 1-63 bit
+        h = (h << shift) | (l >> (64 - shift));
+        l <<= shift;
+        break;
+    case 1: // 64-127 bit
+        h = l << (shift - 64);
+        l = 0;
+        break;
+    default: // >127 bit or negative
+        h = l = 0;
+    }
 }
 
 /**
