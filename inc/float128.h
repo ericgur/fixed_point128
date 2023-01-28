@@ -1864,6 +1864,48 @@ public:
         return root;
     }
     /**
+     * @brief Calculates the reciprocal of a value. y = 1 / x
+     * Using newton iterations: Yn+1 = Yn(2 - x * Yn)
+     * @param x Input value
+     * @return 1 / x. Returns zero on overflow or division by zero
+    */
+    friend FP128_INLINE float128 reciprocal(const float128& x) noexcept {
+        static const float128 one = 1, two = 2;
+        constexpr int max_iterations = 3;
+        constexpr int debug = false;
+        float128 norm_x = x;
+        const int32_t expo = 1 + x.get_exponent();
+        norm_x.set_exponent(0);
+        norm_x.set_sign(0);
+
+        float128 y = 1.0 / static_cast<double>(norm_x);
+
+        if (!y)
+            return y;
+
+        float128 xy, y_prev;
+        // Newton iterations:
+        int i = 0;
+        for (; i < max_iterations && (y_prev != y); ++i) {
+            y_prev = y;
+            xy = norm_x * y;
+            //y = y * (two - xy);
+            y *= two - xy;
+        }
+
+        if constexpr (debug) {
+            static int debug_max_iter = 0;
+            if (i > debug_max_iter || i == max_iterations) {
+                debug_max_iter = i;
+                printf("reciprocal took %i iterations for %.10lf\n", i, static_cast<double>(x));
+            }
+        }
+
+        y.set_exponent(-expo);
+        y.set_sign(x.get_sign());
+        return y;
+    }
+    /**
      * @brief Factorial reciprocal (inverse). Calculates 1 / x!
      * Maximum supported value of x is 50.
      * @param x Input value

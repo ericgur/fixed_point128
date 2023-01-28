@@ -873,23 +873,23 @@ TEST(float128, modf) {
 TEST(float128, sqrt) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = fabs(get_double_random()); // can't exceed this range to avoid overflow
+        double value = fabs(get_double_random());
         double res = ::sqrt(value);
         float128 f1 = value;
         float128 float128_res = sqrt(f1);
         EXPECT_DOUBLE_EQ(float128_res, res) << "sqrt: " << "value=" << value;
     }
 }
-//TEST(float128, reciprocal) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-15, 15); // can't exceed this range to avoid overflow
-//        double res = 1.0 / value;
-//        float128 f1 = value;
-//        float128 float128_res = reciprocal(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "reciprocal: " << "value=" << value;
-//    }
-//}
+TEST(float128, reciprocal) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        double res = 1.0 / value;
+        float128 f1 = value;
+        float128 float128_res = reciprocal(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "reciprocal: " << "value=" << value;
+    }
+}
 TEST(float128, hypot) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
