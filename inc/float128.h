@@ -239,26 +239,35 @@ public:
             new(this) float128(static_cast<double>(x));
             return;
         }
-        uint64_t sign = 0;
-        if constexpr (std::is_signed_v<T>) {
-            // alway do positive multiplication
-            if (x < 0) {
-                x = -x;
-                sign = 1;
-            }
-        }
-
-        // integers: convert to uint64 for a simpler operation.
-        high = 0;
-        low = static_cast<uint64_t>(x);
-        if (low == 0)
+        else if constexpr (std::is_same_v<char*, T> ||
+                           std::is_same_v<unsigned char*, T> ||
+                           std::is_same_v<const unsigned char*, T>) {
+            new(this) float128(static_cast<const char*>(x));
             return;
-        
-        auto expo = log2(low); // this is the index of the msb as well
-        auto shift = static_cast<int32_t>(FRAC_BITS - expo);
-        shift_left128_inplace_safe(low, high, shift);
-        set_sign(sign);
-        set_exponent(static_cast<int32_t>(expo));
+        }
+        else if constexpr (std::is_integral_v<T>) {
+            uint64_t sign = 0;
+            if constexpr (std::is_signed_v<T>) {
+                // alway do positive multiplication
+                if (x < 0) {
+                    x = -x;
+                    sign = 1;
+                }
+            }
+
+            // integers: convert to uint64 for a simpler operation.
+            high = 0;
+            low = static_cast<uint64_t>(x);
+            if (low == 0)
+                return;
+
+            auto expo = log2(low); // this is the index of the msb as well
+            auto shift = static_cast<int32_t>(FRAC_BITS - expo);
+            shift_left128_inplace_safe(low, high, shift);
+            set_sign(sign);
+            set_exponent(static_cast<int32_t>(expo));
+            return;
+        }
     }
 
     /**
@@ -411,6 +420,7 @@ public:
                 }
             }
 
+            // TODO: optimize small numbers
             // integer part is zero - skip the leading zeros in the fraction and ajust the exponent
             // example 0.01 == 0.1E-1
             //if (int_digits == 0 && frac_start != nullptr) {
@@ -496,30 +506,35 @@ public:
         if (frac_digits > 0) {
             // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
             int32_t digits = min(frac_digits, max_digits - int_digits);
-            constexpr int32_t digit_group = 8;
+            constexpr int32_t digit_group = 9;
             static_assert(digit_group <= 9); // must fit in 32 bit
             int32_t i = 0;
-            const float128 group_base = exp10(-digit_group);
+            //const float128 group_base = exp10(-digit_group);
+            const float128 group_base = float128(0x4b2e62d01511f12a, 0x12e0be826d69, EXP_BIAS - 30, 0); // 10^-9
             float128 current_base = 1;
 
-            for (; i + digit_group <= digits; i += digit_group) {
+            for (; i < digits; i += digit_group) {
                 // convert to an int
                 uint32_t val = 0;
                 for (auto j = 0; j < digit_group; ++j) {
                     val *= 10;
-                    val += frac_start[i + j] - '0';
+                    if (i + j < digits)
+                        val += frac_start[i + j] - '0';
                 }
                 
                 current_base *= group_base;
                 frac_part += current_base * val;
             }
-            // handle the remaining digits one at a time
-            for (; i < digits; ++i) {
-                // convert to an int
-                uint32_t val = frac_start[i] - '0';
-                current_base *= tenth();
-                frac_part += current_base * val;
-            }
+
+            //// handle the remaining digits one at a time
+            //for (; i < digits; ++i) {
+            //    // convert to an int
+            //    uint32_t val = frac_start[i] - '0';
+            //    current_base *= tenth();
+            //    if (val == 0)
+            //        continue;
+            //    frac_part += current_base * val;
+            //}
 
             frac_part.set_sign(sign);
         }
@@ -708,6 +723,8 @@ public:
     explicit FP128_INLINE operator char* () const noexcept {
         constexpr int32_t buff_size = 128;
         static thread_local char str[buff_size]; // need roughly a (meaningful) decimals digit per 3.2 bits
+        char* s = str; // needed for debugging
+
         if (is_special()) {
             if (is_nan()) {
                 strcpy(str, "nan");
@@ -737,42 +754,61 @@ public:
         }
 
         // use uint128_t to produce the integer part
-        int32_t frac_bits = (expo >= FRAC_BITS) ? 0 : min(FRAC_BITS - expo, FRAC_BITS);
-        // copy all the fraction bits + the unity bit to a 128 bit integer
-        uint128_t int_part(low, high_bits.f | FRAC_UNITY);
-        uint128_t frac_part = int_part;
+        size_t int_digits = 1;
         if (expo >= 0) {
+            // copy all the fraction bits + the unity bit to a 128 bit integer
+            uint128_t int_part(low, high_bits.f | FRAC_UNITY);
             int32_t shift = expo - FRAC_BITS;
             if (shift >= 0)
                 int_part <<= shift;
             else
                 int_part >>= -shift;
             strcpy(p, (char*)int_part);
-            p += strlen(p);
+            int_digits = strlen(p);
+            p += int_digits;
         }
         else {
             *p++ = '0';
         }
-        // there are fraction bits left to print
-        if (frac_bits > 0) {
-            uint32_t digits = (uint32_t)((double)frac_bits / 3.29);
+        float128 frac_part = fabs(get_fraction());
+
+        if (!frac_part.is_zero()) {
+            float128 int_part;
+            ++int_digits;
             *p++ = '.';
-            uint128_t mask(UINT64_MAX, 0xFFFFFFFFFFFF); // keeps lower 112 bits
-            frac_part <<= (128 - frac_bits); // erase the remaining integer bits
-            frac_part >>= 16;
-            while (frac_part != 0 && digits-- > 0) {
+            for (auto i = 0; i < 35; ++i) {
                 frac_part *= 10;
-                int32_t digit = frac_part >> FRAC_BITS;
-                frac_part &= mask;
-                if (digit > 0 || frac_part != 0)
-                    *p++ = static_cast<char>(digit + '0');
+                frac_part = modf(frac_part, &int_part);
+                uint32_t digit = static_cast<uint32_t>(int_part);
+                *p++ = static_cast<char>(digit + '0');
             }
+
+            // back track and remove trailing zero
+            while (p[-1] == '0') 
+                --p;
+
         }
+
+        //// there are fraction bits left to print
+        //if (frac_bits > 0) {
+        //    uint32_t digits = (uint32_t)((double)frac_bits / 3.29);
+        //    *p++ = '.';
+        //    uint128_t mask(UINT64_MAX, 0xFFFFFFFFFFFF); // keeps lower 112 bits
+        //    frac_part <<= (128 - frac_bits); // erase the remaining integer bits
+        //    frac_part >>= 16;
+        //    while (frac_part != 0 && digits-- > 0) {
+        //        frac_part *= 10;
+        //        int32_t digit = frac_part >> FRAC_BITS;
+        //        frac_part &= mask;
+        //        if (digit > 0 || frac_part != 0)
+        //            *p++ = static_cast<char>(digit + '0');
+        //    }
+        //}
 
         //auto msb = 
 
         *p = '\0';
-        return str;
+        return s;
     }
     /**
      * @brief converts the stored value to a string with scientific notation
@@ -780,11 +816,68 @@ public:
      * @param buff_size Output buffer size in bytes
     */
     void to_e_format(char* str, int32_t buff_size) const {
+        UNREFERENCED_PARAMETER(buff_size);
         strcpy(str, "e format not supported yet");
     }
+
     //
     // math operators
     //
+    /**
+     * @brief Shift right this object.
+     * @param shift Bits to shift. Values less than 1 do nothing, high values can cause the value to reach zero.
+     * @return This object.
+    */
+    FP128_INLINE float128& operator>>=(int32_t shift) noexcept {
+        if (shift < 1)
+            return *this;
+        
+        uint64_t l, h;
+        int32_t e;
+        uint32_t s;
+        get_components(l, h, e, s);
+        e -= shift;
+        set_components(l, h, e, s);
+        return *this;
+    }
+    /**
+     * @brief Shift left this object.
+     * @param shift Bits to shift. Values less than 1 do nothing, high values can cause the value to reach infinity.
+     * @return This object.
+    */
+    FP128_INLINE float128& operator<<=(int32_t shift) noexcept {
+        if (shift < 1)
+            return *this;
+
+        uint64_t l, h;
+        int32_t e;
+        uint32_t s;
+        get_components(l, h, e, s);
+        e += shift;
+        set_components(l, h, e, s);
+        return *this;
+    }
+    /**
+     * @brief Performs right shift operation.
+     * @param shift bits to shift
+     * @return Temporary object with the result of the operation
+    */
+    template<typename T>
+    __forceinline float128 operator>>(T shift) const noexcept {
+        float128 temp(*this);
+        return temp >>= static_cast<int32_t>(shift);
+    }
+    /**
+     * @brief Performs left shift operation.
+     * @param shift bits to shift
+     * @return Temporary object with the result of the operation
+    */
+    template<typename T>
+    __forceinline float128 operator<<(T shift) const noexcept {
+        float128 temp(*this);
+        return temp <<= static_cast<int32_t>(shift);
+    }
+
     /**
      * @brief Add a value to this object
      * @param other Right hand side operand
@@ -810,14 +903,14 @@ public:
 
         if (shift > 0) {
             // exponents are too far apart, result will stay the same
-            if (shift >= FRAC_BITS)
+            if (shift > FRAC_BITS)
                 return *this;
             shift_right128_inplace_safe(l2, h2, shift);
         }
         else if (shift < 0) {
             shift = -shift;
             // exponents are too far apart, use the other value
-            if (shift >= FRAC_BITS) {
+            if (shift > FRAC_BITS) {
                 *this = other;
                 return *this;
             }
@@ -1045,7 +1138,7 @@ public:
             // 128 bit were added to the dividend, 112 were lost:
             // need to shift right 16 bit (128 - 112)
             l1 = shift_right128_round(q[0], q[1], 128 - FRAC_BITS);
-            h1 = __shiftright128(q[1], q[2], 128 - FRAC_BITS);
+            h1 = shift_right128(q[1], q[2], 128 - FRAC_BITS);
         }
         else { // error
             *this = inf();
@@ -1356,7 +1449,7 @@ public:
 
         e += shift;
         if (shift > 0) {
-            shift_right128_inplace(l, h, shift);
+            shift_right128_inplace_safe(l, h, shift);
         }
         else
             shift_left128_inplace_safe(l, h, -shift);
@@ -1848,8 +1941,7 @@ public:
         //   Xn+1 = 0.5 * (---- + Xn )
         //                  Xn
         for (auto i = iterations; i != 0; --i) {
-            root = (norm_x / root + root);
-            root.set_exponent(root.get_exponent() - 1);
+            root = (norm_x / root + root) >> 1;
         }
 
         if (expo & 1) {
@@ -1973,6 +2065,76 @@ public:
         else {
             res = 0;
         }
+    }
+    /**
+     *                                       x
+     * @brief Calculates the exponent of x: e
+     * Using the Maclaurin series expansion, the formula is:
+     *                  1       2       3
+     *                 x       x       x
+     * exp(x) = 1  +  ---  +  ---  +  --- + ...
+     *                 1!      2!      3!
+     *
+     * The Maclaurin series will quickly overflow as x's power increases rapidly.
+     *                     x   ix   fx
+     * Using the equality e = e  * e
+     * Where ix is the integer part of x and fx is the fraction part.
+     * ix is computed via multiplications which won't overflow if the result value can be held.
+     * fx is computed via Maclaurin series expansion, but since fx < 1, it won't overflow.
+     * @param x A number specifying a power.
+     * @return Exponent of x
+    */
+    friend FP128_INLINE float128 exp(const float128& x) noexcept {
+        static const float128 e = float128::e();
+        static const float128 max_exponent = 11355; // log(16382) / log2
+        // check the value isn't too large
+        if (x > max_exponent)
+            return inf();
+
+        float128 _ix, exp_ix; // integer part of x
+        float128 fx = modf(fabs(x), &_ix);
+        uint64_t ix = static_cast<uint64_t>(_ix); // 64 bit is an overkill to hold the exponent
+        float128 res;
+
+        // compute e^ix (integer part of x)
+        if (ix > 0) {
+            exp_ix = 1;     // result
+            float128 b = e; // value of e^1
+            while (ix > 0) {
+                if (ix & 1)
+                    exp_ix *= b;
+                ix >>= 1;
+                b *= b;
+            }
+        }
+        else {
+            exp_ix = 1;
+        }
+
+        // compute e^fx (fraction part of x)
+        // first and second elements of the series
+        if (fx) {
+            float128 exp_fx = float128::one() + fx;
+            float128 elem_denom, elem_nom = fx;
+
+            for (int i = 2; ; ++i) {
+                elem_nom *= fx;
+                fact_reciprocal(i, elem_denom);
+                float128 elem = elem_nom * elem_denom;
+                // value is too small to add any bits as the result's exponent is either 0 or 1. exp_fx = [1, e)
+                if (elem.get_exponent() <= -FRAC_BITS)
+                    break;
+                exp_fx += elem; // next element in the series
+            }
+
+            res = exp_ix * exp_fx;
+        }
+        else {
+            res = exp_ix;
+        }
+
+        return (x.is_positive()) ? res : reciprocal(res);
+
     }
 };
 

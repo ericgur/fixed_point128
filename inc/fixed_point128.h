@@ -2412,18 +2412,21 @@ private:
         return log((one + x) / (one - x)) >> 1;
     }
     /**
-     * @brief Calculates the exponent of x: e^x
+     *                                       x
+     * @brief Calculates the exponent of x: e
      * Using the Maclaurin series expansion, the formula is:
-     *                x^1     x^2     x^3
+     *                  1       2       3
+     *                 x       x       x
      * exp(x) = 1  +  ---  +  ---  +  --- + ...
      *                 1!      2!      3!
      *
      * The Maclaurin series will quickly overflow as x's power increases rapidly.
-     * Using the equality e^x = e^ix * e^fx
+     *                     x   ix   fx
+     * Using the equality e = e  * e
      * Where ix is the integer part of x and fx is the fraction part.
      * ix is computed via multiplications which won't overflow if the result value can be held.
      * fx is computed via Maclaurin series expansion, but since fx < 1, it won't overflow.
-     * @param x A number specifying a power. 
+     * @param x A number specifying a power.
      * @return Exponent of x
     */
     friend FP128_INLINE fixed_point128 exp(const fixed_point128& x) noexcept

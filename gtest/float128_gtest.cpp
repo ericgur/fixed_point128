@@ -66,15 +66,29 @@ TEST(float128, ConstructorFromUnsignedInt64) {
         EXPECT_EQ(static_cast<uint64_t>(f), value);
     }
 }
-//TEST(float128, ConstructorFromString) {
-//    const char* values[] = { "0", "12.34", "-3.1435", "12345.6789"};
-//    for (auto i = 0u; i < array_length(values); ++i) {
-//        float128 f = values[i];
-//        double d1 = strtod(values[i], nullptr);
-//        double d2 = strtod(static_cast<char*>(f), nullptr);
-//        EXPECT_DOUBLE_EQ(d1, d2) << "value=" << values[i];
-//    }
-//}
+TEST(float128, ConstructorFromString) {
+    char str[128];
+    char str2[128];
+    srand(RANDOM_SEED);
+    int j; 0;
+    constexpr auto char_to_check = 33;
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        // construct random number string
+        str[0] = get_digit_random();
+        str[1] = '.';
+        for (j = 2; j < 37; ++j) {
+            str[j] = get_digit_random();
+        }
+        str[j] = '\0';
+        strcpy(str2, str);
+        float128 f = str;
+        char* res = static_cast<char*>(f);
+
+        str[char_to_check] = '\0';
+        res[char_to_check] = '\0';
+        EXPECT_STREQ(str, res) << "string=" << str2;
+    }
+}
 TEST(float128, CopyConstructor) {
     srand(RANDOM_SEED); 
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -905,16 +919,16 @@ TEST(float128, hypot) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "hypot: " << "value1=" << value1 << ", value2=" << value2;
     }
 }
-//TEST(float128, ilogb) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 15); // lower exponent results in lost bits
-//        int32_t res = ::ilogb(value);
-//        float128 f1 = value;
-//        int32_t float128_res = ilogb(f1);
-//        EXPECT_EQ(float128_res, res) << "ilogb: " << "value=" << value;
-//    }
-//}
+TEST(float128, ilogb) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        int32_t res = ::ilogb(value);
+        float128 f1 = value;
+        int32_t float128_res = ilogb(f1);
+        EXPECT_EQ(float128_res, res) << "ilogb: " << "value=" << value;
+    }
+}
 //TEST(float128, log) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -1037,16 +1051,16 @@ TEST(float128, hypot) {
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "atan2: " << " value1=" << value1 << ", value2=" << value2;
 //    }
 //}
-//TEST(float128, exp) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-3, 3); // lower exponent results in lost bits
-//        double res = exp(value);
-//        float128 f1 = value;
-//        float128 float128_res = exp(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "exp: " << "value=" << value;
-//    }
-//}
+TEST(float128, exp) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-16, 16);
+        double res = exp(value);
+        float128 f1 = value;
+        float128 float128_res = exp(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "exp: " << "value=" << value;
+    }
+}
 //TEST(float128, exp2) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {

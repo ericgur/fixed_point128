@@ -1,3 +1,7 @@
+#ifndef UNREFERENCED_PARAMETER
+#define UNREFERENCED_PARAMETER(P)          (P)
+#endif 
+
 #include "..\inc\fixed_point128.h"
 #include "..\inc\uint128_t.h"
 #include "..\inc\float128.h"
@@ -7,6 +11,7 @@
 /*************************************************
 * Fixed point 128 tests
 **************************************************/
+
 using namespace fp128;
 
 static constexpr int RANDOM_TEST_COUNT = 1 << 16;
@@ -75,6 +80,10 @@ int32_t static get_int32_random()
     return (int32_t)get_uint32_random() * get_random_sign();
 }
 
+char static get_digit_random()
+{
+    return (char)(rand() % 10) + '0';
+}
 // return true on overflow
 template<typename T, int I>
 bool check_overflow(T value, const fixed_point128<I>& d)

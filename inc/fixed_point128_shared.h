@@ -213,7 +213,7 @@ __forceinline void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) no
     l <<= shift;
 }
 /**
-    * @brief Right shift a 128 bit integer (inplace).
+    * @brief Right shift a 128 bit integer (inplace) with rounding.
     * Handles any positive shift value.
     * @param l Low QWORD
     * @param h High QWORD
@@ -225,17 +225,26 @@ __forceinline void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shi
     assert(shift >= 0);
     if (shift == 0) return;
 
+    bool need_rounding = false;
     switch (shift >> 6) {
     case 0: // 1-63 bit
+        need_rounding = l & FP128_ONE_SHIFT(shift - 1);
         l = (l >> shift) | (h << (64 - shift));
         h >>= shift;
         break;
     case 1: // 64-127 bit
+        shift -= 64;
+        need_rounding = l & FP128_ONE_SHIFT(shift - 1);
         l = h >> (shift - 64);
         h = 0;
         break;
     default: // >127 bit or negative
         h = l = 0;
+    }
+
+    if (need_rounding) {
+        ++l; // low will wrap around to zero if overflowed
+        h += l == 0;
     }
 }
 /**
