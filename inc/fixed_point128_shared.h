@@ -224,17 +224,16 @@ __forceinline void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shi
 {
     assert(shift >= 0);
     if (shift == 0) return;
-
-    bool need_rounding = false;
+    uint64_t lsb = 0;
     switch (shift >> 6) {
     case 0: // 1-63 bit
-        need_rounding = l & FP128_ONE_SHIFT(shift - 1);
+        lsb = (shift == 1)  ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
         l = (l >> shift) | (h << (64 - shift));
         h >>= shift;
         break;
     case 1: // 64-127 bit
         shift -= 64;
-        need_rounding = l & FP128_ONE_SHIFT(shift - 1);
+        lsb = (shift == 1) ? (h & 3) << 1 : (h >> (shift - 2)) & 7;
         l = h >> (shift - 64);
         h = 0;
         break;
@@ -242,7 +241,12 @@ __forceinline void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shi
         h = l = 0;
     }
 
-    if (need_rounding) {
+    // Use rounding half to even
+    // Middle bit is the bit that got shifted away.
+    // It get rounded up in 2 cases:
+    //   1) The 2 rightmost bits are b11 (lsb == 3 or 7), this equal to 0.75
+    //   2) The value's msb is 1 (odd number) and the right bits are b10 (0.5) so the result will be an even number
+    if (lsb > 6 || lsb == 3) {
         ++l; // low will wrap around to zero if overflowed
         h += l == 0;
     }
@@ -301,16 +305,31 @@ __forceinline uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) n
 {
     assert(shift >= 0 && shift < 128);
     if (shift == 0) return l;
+
+    uint64_t lsb = 0;
+
     if (shift < 64) {
-        const bool need_rounding = (l & 1ull << (shift - 1)) != 0;
-        return need_rounding + ((l >> shift) | (h << (64 - shift)));
+        lsb = (shift == 1) ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
+        l = ((l >> shift) | (h << (64 - shift)));
     }
-    if (shift < 128) {
+    else if (shift < 128) {
         shift ^= 64;
-        const bool need_rounding = (h & 1ull << (shift - 1)) != 0;
-        return need_rounding + (h >> shift);
+        lsb = (shift == 1) ? (h & 3) << 1 : (h >> (shift - 2)) & 7;
+        l = h >> shift;
     }
-    return 0;
+    else
+        return 0;
+
+
+    // Use rounding half to even
+    // Middle bit is the bit that got shifted away.
+    // It get rounded up in 2 cases:
+    //   1) The 2 rightmost bits are b11 (lsb == 3 or 7), this equal to 0.75
+    //   2) The value's msb is 1 (odd number) and the right bits are b10 (0.5) so the result will be an even number
+    if (lsb > 6 || lsb == 3) {
+        ++l; // low will wrap around to zero if overflowed
+    }
+    return l;
 }
 /**
     * @brief Left shift a 128 bit integer.

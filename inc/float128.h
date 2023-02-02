@@ -131,7 +131,7 @@ class __declspec(align(16)) float128
     
     static constexpr int32_t EXP_BITS = 15;
     static constexpr int32_t EXP_BIAS = 0x3FFF;
-    static constexpr int32_t ZERO_EXP_BIASED = EXP_BIAS;
+    static constexpr int32_t ZERO_EXP_BIASED = -EXP_BIAS;
     static constexpr int32_t ZERO_EXP_UNBIASED = 0;
     static constexpr int32_t SUBNORM_EXP_BIASED = 0;
     static constexpr int32_t SUBNORM_EXP_UNBIASED = -EXP_BIAS;
@@ -723,6 +723,7 @@ public:
     explicit FP128_INLINE operator char* () const noexcept {
         constexpr int32_t buff_size = 128;
         static thread_local char str[buff_size]; // need roughly a (meaningful) decimals digit per 3.2 bits
+        char tmp_buf[buff_size]; // used to write the integer part
         char* s = str; // needed for debugging
 
         if (is_special()) {
@@ -748,46 +749,73 @@ public:
             return str;
         }
         
-        char* p = str;
+        char* p = str; 
         if (get_sign()) {
             *p++ = '-';
         }
-
-        // use uint128_t to produce the integer part
-        size_t int_digits = 1;
-        if (expo >= 0) {
-            // copy all the fraction bits + the unity bit to a 128 bit integer
-            uint128_t int_part(low, high_bits.f | FRAC_UNITY);
-            int32_t shift = expo - FRAC_BITS;
-            if (shift >= 0)
-                int_part <<= shift;
-            else
-                int_part >>= -shift;
-            strcpy(p, (char*)int_part);
-            int_digits = strlen(p);
-            p += int_digits;
-        }
-        else {
-            *p++ = '0';
-        }
-        float128 frac_part = fabs(get_fraction());
-
-        if (!frac_part.is_zero()) {
-            float128 int_part;
+        // convert the integer part
+        float128 int_part, frac_part, ten = 10;
+        frac_part = modf(fabs(*this), &int_part);
+        int32_t int_digits = 0;
+        char* pp = tmp_buf;
+        do {
+            auto digit = static_cast<uint32_t>(fmod(int_part, ten));
+            *pp++ = static_cast<char>(digit + '0');
+            int_part /= 10;
             ++int_digits;
+        } while (int_digits < buff_size && int_part >= 1);
+        *pp = '\0';
+        for (auto i = int_digits; i != 0; --i) {
+            *p++ = *--pp;
+        }
+
+        // not enough digits.
+        if (buff_size == int_digits) {
+            str[buff_size - 4] = str[buff_size - 3] = str[buff_size - 2] = '.';
+            str[buff_size - 1] = '\0';
+            return str;
+        }
+
+        // convert the fraction part
+        if (!frac_part.is_zero()) {
             *p++ = '.';
-            for (auto i = 0; i < 35; ++i) {
-                frac_part *= 10;
+            ++int_digits;
+            constexpr int32_t digit_group = 5, max_frac_digits = 35;
+            static_assert(digit_group <= 9); // must fit in 32 bit
+            //float128 base = exp10(digit_group);
+            float128 base = 100000;
+            char fmt[10];
+            sprintf(fmt, "%%0%ii", digit_group);
+            int32_t groups = min(max_frac_digits, (buff_size - int_digits - 1)) / digit_group;
+            while (groups-- > 0) {
+                frac_part *= base;
                 frac_part = modf(frac_part, &int_part);
-                uint32_t digit = static_cast<uint32_t>(int_part);
-                *p++ = static_cast<char>(digit + '0');
+                uint32_t val = static_cast<uint32_t>(int_part);
+                p += sprintf(p, fmt, val);
             }
 
             // back track and remove trailing zero
-            while (p[-1] == '0') 
+            while (p[-1] == '0')
                 --p;
 
         }
+
+        // convert the fraction part
+        //if (!frac_part.is_zero()) {
+        //    *p++ = '.';
+        //    ++int_digits;
+        //    for (auto i = 0; i < 35; ++i) {
+        //        frac_part *= 10;
+        //        frac_part = modf(frac_part, &int_part);
+        //        uint32_t digit = static_cast<uint32_t>(int_part);
+        //        *p++ = static_cast<char>(digit + '0');
+        //    }
+
+        //    // back track and remove trailing zero
+        //    while (p[-1] == '0') 
+        //        --p;
+
+        //}
 
         //// there are fraction bits left to print
         //if (frac_bits > 0) {
@@ -946,25 +974,7 @@ public:
             }
         }
 
-        // fix the exponent
-        auto msb = 127 - static_cast<int32_t>(lzcnt128(l1, h1));
-        // all zeros
-        if (msb < 0) {
-            low = high = 0;
-            return *this;
-        }
-
-        // if the msb is exactly msb == FRAC_BITS the exponent stays the same
-        shift = msb - FRAC_BITS;
-
-        expo += shift;
-        if (shift > 0) {
-            shift_right128_inplace_safe(l1, h1, shift);
-        }
-        else if (shift < 0) {
-            shift_left128_inplace_safe(l1, h1, -shift);
-        }
-        
+        norm_fraction(l1, h1, expo);
         set_components(l1, h1, expo, sign);
         return *this;
     }
@@ -1062,17 +1072,19 @@ public:
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F
         constexpr int32_t index = 1;
-        constexpr int32_t lsb = FRAC_BITS & 63;            // bit within the 64bit data pointed by res[index]
-        constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
-        const bool need_rounding = (res[index] & half) != 0;
+        //constexpr int32_t lsb = FRAC_BITS & 63;            // bit within the 64bit data pointed by res[index]
+        constexpr int32_t lsb = (FRAC_BITS & 63) - 1;            // bit within the 64bit data pointed by res[index] minus 1 to improve rounding
+        //constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
+        //const bool need_rounding = (res[index] & half) != 0;
 
         l1 = shift_right128(res[index], res[index + 1], lsb); // custom function is 20% faster in Mandelbrot than the intrinsic
         h1 = shift_right128(res[index + 1], res[index + 2], lsb);
+        --expo;
 
-        if (need_rounding) {
-            ++l1; // low will wrap around to zero if overflowed
-            h1 += l1 == 0;
-        }
+        //if (need_rounding) {
+        //    ++l1; // low will wrap around to zero if overflowed
+        //    h1 += l1 == 0;
+        //}
 
         norm_fraction(l1, h1, expo);
         set_components(l1, h1, expo, sign ^ other_sign);
@@ -1136,9 +1148,11 @@ public:
 
         if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
             // 128 bit were added to the dividend, 112 were lost:
-            // need to shift right 16 bit (128 - 112)
-            l1 = shift_right128_round(q[0], q[1], 128 - FRAC_BITS);
-            h1 = shift_right128(q[1], q[2], 128 - FRAC_BITS);
+            // need to shift right 16 bit (128 - 112) but we don't go all the way so norm_fraction() 
+            //  can produce accurate rounding
+            l1 = shift_right128(q[0], q[1], 127 - FRAC_BITS);
+            h1 = shift_right128(q[1], q[2], 127 - FRAC_BITS);
+            --expo;
         }
         else { // error
             *this = inf();
@@ -1436,13 +1450,14 @@ public:
     */
     __forceinline void norm_fraction(uint64_t& l, uint64_t& h, int32_t& e) const noexcept
     {
-        // fix the exponent
-        auto msb = static_cast<int32_t>(log2(l, h));
         // l and h are both zero
-        if (msb < 0) {
-            e = ZERO_EXP_UNBIASED;
+        if (l == 0 && h == 0) {
+            e = ZERO_EXP_BIASED;
             return;
         }
+
+        // fix the exponent
+        auto msb = static_cast<int32_t>(log2(l, h));
 
         // if the msb is exactly msb == FRAC_BITS the exponent stays the same
         auto shift = msb - FRAC_BITS;
@@ -1451,8 +1466,10 @@ public:
         if (shift > 0) {
             shift_right128_inplace_safe(l, h, shift);
         }
-        else
+        else {
+            //assert(shift == 0);
             shift_left128_inplace_safe(l, h, -shift);
+        }
 
     }
     /**

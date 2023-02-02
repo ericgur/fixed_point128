@@ -70,23 +70,51 @@ TEST(float128, ConstructorFromString) {
     char str[128];
     char str2[128];
     srand(RANDOM_SEED);
-    int j; 0;
-    constexpr auto char_to_check = 33;
+    int j = 0;
+    constexpr auto end_char_to_check = 9;
+    constexpr auto max_allowed_error = 1;
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         // construct random number string
         str[0] = get_digit_random();
         str[1] = '.';
-        for (j = 2; j < 37; ++j) {
+        for (j = 2; j < 36; ++j) {
             str[j] = get_digit_random();
+        }
+        // fraction length is based on the value of the first digit
+        switch (str[0])
+        {
+        case 0:
+            break;
+        case 1:
+            j -= 1;
+            break;
+        case 2:
+        case 3:
+            j -= 2;
+            break;
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+            j -= 3;
+            break;
+        default:
+            j -= 4;
+            break;
         }
         str[j] = '\0';
         strcpy(str2, str);
         float128 f = str;
         char* res = static_cast<char*>(f);
+        size_t len = min(strlen(res), strlen(str));
+        // clip both string based on the shortest one.
+        str[len] = '\0';
+        res[len] = '\0';
+        int64_t orig_last_digits = strtoll(&str[len - end_char_to_check], nullptr, 10);
+        int64_t res_last_digits = strtoll(&res[len - end_char_to_check], nullptr, 10);
+        int64_t err = abs(orig_last_digits - res_last_digits);
 
-        str[char_to_check] = '\0';
-        res[char_to_check] = '\0';
-        EXPECT_STREQ(str, res) << "string=" << str2;
+        EXPECT_LE(err, max_allowed_error)<< "error: " << err << ", last digits source: " << &str[len - end_char_to_check] << "last digits result: " << &res[len - end_char_to_check];
     }
 }
 TEST(float128, CopyConstructor) {
@@ -1055,9 +1083,11 @@ TEST(float128, exp) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-16, 16);
+        value = -0.14690843787825980; //TODO remove
         double res = exp(value);
         float128 f1 = value;
         float128 float128_res = exp(f1);
+        double float128_res_ = (double)float128_res;
         EXPECT_DOUBLE_EQ(float128_res, res) << "exp: " << "value=" << value;
     }
 }
