@@ -940,8 +940,8 @@ TEST(float128, hypot) {
         double res = hypot(value1, value2);
         float128 f1 = value1;
         float128 f2 = value2;
-        float128 t = f1 * f1;
-        float128 t2 = sqrt(t);
+        //float128 t = f1 * f1;
+        //float128 t2 = sqrt(t);
 
         float128 float128_res = hypot(f1, f2);
         EXPECT_DOUBLE_EQ(float128_res, res) << "hypot: " << "value1=" << value1 << ", value2=" << value2;
@@ -1083,7 +1083,6 @@ TEST(float128, exp) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-16, 16);
-        value = -0.14690843787825980; //TODO remove
         double res = exp(value);
         float128 f1 = value;
         float128 float128_res = exp(f1);

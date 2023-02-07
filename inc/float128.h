@@ -1,4 +1,4 @@
-/***********************************************************************************
+﻿/***********************************************************************************
     MIT License
 
     Copyright (c) 2023 Eric Gur (ericgur@iname.com)
@@ -121,6 +121,19 @@ struct _float128_bits {
     uint64_t f : 48;
     uint64_t e : 15;
     uint64_t s : 1;
+};
+
+enum float128_class_t {
+    signalingNaN,
+    quietNaN,
+    negativeInfinity,
+    negativeNormal,
+    negativeSubnormal,
+    negativeZero,
+    positiveZero,
+    positiveSubnormal,
+    positiveNormal,
+    positiveInfinity
 };
 
 class __declspec(align(16)) float128
@@ -655,7 +668,7 @@ public:
         if (expo < 0) return 0;
         
         auto shift = static_cast<int>(FRAC_BITS) - expo;
-        uint64_t res = shift_right128(low, high_bits.f, shift);
+        uint64_t res = shift_right128_round(low, high_bits.f, shift);
         // Add msb
         res |= FP128_ONE_SHIFT(expo);
         return res;
@@ -669,7 +682,7 @@ public:
         if (expo < 0) return 0;
 
         auto shift = static_cast<int>(FRAC_BITS) - expo;
-        int64_t res = static_cast<int64_t>(shift_right128(low, high_bits.f, shift));
+        int64_t res = static_cast<int64_t>(shift_right128_round(low, high_bits.f, shift));
         // Add msb
         res |= FP128_ONE_SHIFT(expo);
         return  (get_sign()) ? -res : res;
@@ -683,7 +696,8 @@ public:
         if (expo < 0) return 0;
 
         auto shift = static_cast<int>(FRAC_BITS) - expo;
-        uint64_t res = high_bits.f >> shift;
+        uint64_t res = shift_right128_round(low, high_bits.f, shift);
+
         // Add msb
         res |= FP128_ONE_SHIFT(expo);
         return static_cast<uint32_t>(res);
@@ -696,11 +710,13 @@ public:
         if (expo > 30) return (get_sign()) ? INT32_MIN : INT32_MAX;
         if (expo < 0) return 0;
 
-        auto shift = static_cast<int>(FRAC_BITS) - expo;
-        int32_t res = static_cast<int32_t>(high_bits.f >> shift);
+        auto shift = static_cast<int32_t>(FRAC_BITS) - expo;
+        uint64_t res = shift_right128_round(low, high_bits.f, shift);
+
         // Add msb
         res |= FP128_ONE_SHIFT(expo);
-        return  (get_sign()) ? -res : res;
+        int32_t r = static_cast<int32_t>(res);
+        return  (get_sign()) ? -r : r;
     }
     /**
       * @brief operator long double - converts to a long double
@@ -927,24 +943,39 @@ public:
         uint64_t l1, h1, l2, h2;
         get_components(l1, h1, expo, sign);
         other.get_components(l2, h2, other_expo, other_sign);
-        int32_t shift = expo - other_expo;
-
-        if (shift > 0) {
+        constexpr int32_t shift_left_bits = 127 - 2 - FRAC_BITS; // move bit 112 left, keep 1 bit for additional exponent and one for the sign
+        
+        if (expo > other_expo) {
+            int32_t shift = expo - other_expo - shift_left_bits; // how many bits to shift right
             // exponents are too far apart, result will stay the same
             if (shift > FRAC_BITS)
                 return *this;
-            shift_right128_inplace_safe(l2, h2, shift);
+
+            shift_left128_inplace_safe(l1, h1, shift_left_bits);
+            if (shift >= 0)
+                shift_right128_inplace_safe(l2, h2, shift);
+            else
+                shift_left128_inplace_safe(l2, h2, -shift);
+            
+            // fix the exponent
+            expo -= shift_left_bits;
         }
-        else if (shift < 0) {
-            shift = -shift;
+        else if (expo < other_expo) {
+            int32_t shift = other_expo - expo - shift_left_bits; // how many bits to shift right
             // exponents are too far apart, use the other value
             if (shift > FRAC_BITS) {
                 *this = other;
                 return *this;
             }
-            shift_right128_inplace_safe(l1, h1, shift);
+            shift_left128_inplace_safe(l2, h2, shift_left_bits);
+
+            if (shift >= 0)
+                shift_right128_inplace_safe(l1, h1, shift);
+            else
+                shift_left128_inplace_safe(l1, h1, -shift);
+
             // result base exponent comes from the other value
-            expo = other_expo;
+            expo = other_expo - shift_left_bits;
         }
 
         // same sign: the simple case
@@ -1205,43 +1236,45 @@ public:
     // useful public functions
     //
     /**
-     * @brief Returns true if the value positive (incuding zero)
-     * @return True when the the value positive
+     * @brief Returns true if the value is positive (including zero and NaN)
+     * @return True when the sign is 0
     */
-    __forceinline bool is_positive() const noexcept
-    {
+    __forceinline bool is_positive() const noexcept {
         return high_bits.s == 0;
     }
     /**
-     * @brief Returns true if the value negative (smaller than zero)
-     * @return True when the the value negative
+     * @brief Returns true if the value is negative (including zero and NaN).
+     * @return True when the sign is 1
     */
-    __forceinline bool is_negative() const noexcept
-    {
+    __forceinline bool is_negative() const noexcept {
         return high_bits.s == 1;
     }
     /**
-     * @brief Returns true if the value is zero
+     * @brief Returns true if and only if the value is ±0.
      * @return Returns true if the value is zero
     */
-    __forceinline bool is_zero() const noexcept
-    {
-        return 0 == low && 0 == high;
+    __forceinline bool is_zero() const noexcept {
+        return 0 == low && 0 == (high & ~SIGN_MASK);
+    }
+    /**
+     * @brief Returns true if and only if x is zero, subnormal or normal (not infinite or NaN).
+     * @return True if and only if x is zero, subnormal or normal (not infinite or NaN).
+    */
+    __forceinline bool is_finite() const noexcept {
+        return !is_special();
     }
     /**
      * @brief Tests if the value is subnormal
      * @return True when the value is subnormal
     */
-    __forceinline bool is_subnormal() const noexcept
-    {
+    __forceinline bool is_subnormal() const noexcept {
         return high_bits.e == 0;
     }
     /**
-     * @brief Tests if the value is normal
-     * @return True when the value is normal. Return false for subnormal, inf and nan
+     * @brief Tests if the value is normal (not zero, subnormal, infinite, or NaN)
+     * @return True if and only if the value is normal
     */
-    __forceinline bool is_normal() const noexcept
-    {
+    __forceinline bool is_normal() const noexcept {
         return high_bits.e != 0 && high_bits.e != INF_EXP_BIASED;
     }
     /**
@@ -1251,6 +1284,14 @@ public:
     __forceinline bool is_nan() const {
         // fraction is zero for +- INF, non-zero for NaN 
         return high_bits.e == INF_EXP_BIASED && high_bits.f != 0;
+    }
+    /**
+     * @brief Tests if this value is a signaling NaN
+     * @return True if this value is a signaling NaN
+    */
+    __forceinline bool is_signaling() const {
+        // TODO: supprot sNaN
+        return false;
     }
     /**
      * @brief Tests if this value is an Infinite (negative or positive)
@@ -1356,6 +1397,23 @@ public:
     {
         return high_bits.s;
     }
+    __forceinline float128_class_t get_class() const noexcept {
+        // inf and Nan
+        if (high_bits.e == INF_EXP_BIASED) {
+            if (is_nan())
+                // TODO: support signalling NaN
+                return quietNaN;
+            return (high_bits.s == 0) ? positiveInfinity : negativeInfinity;
+        }
+        if (is_zero()) {
+            return (high_bits.s == 0) ? positiveZero : negativeZero;
+        }
+        if (is_subnormal()) {
+            return (high_bits.s == 0) ? positiveSubnormal : negativeSubnormal;
+        }
+
+        return (high_bits.s == 0) ? positiveNormal : negativeNormal;
+    }
     /**
      * @brief Returns the exponent of the object - like the base 2 exponent of a floating point
      * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
@@ -1414,8 +1472,7 @@ public:
      * @param e Unbiased exponent, can be any value.
      * @param s Sign (1 is negative)
     */
-    __forceinline void set_components(uint64_t l, uint64_t h, int32_t e, uint32_t s) noexcept
-    {
+    __forceinline void set_components(uint64_t l, uint64_t h, int32_t e, uint32_t s) noexcept {
         // overflow 
         if (e >= INF_EXP_UNBIASED) {
             e = INF_EXP_UNBIASED;
@@ -1448,8 +1505,7 @@ public:
      * @param h High part of the fraction
      * @param e Unbiased exponent, can be any value.
     */
-    __forceinline void norm_fraction(uint64_t& l, uint64_t& h, int32_t& e) const noexcept
-    {
+    __forceinline void norm_fraction(uint64_t& l, uint64_t& h, int32_t& e) const noexcept {
         // l and h are both zero
         if (l == 0 && h == 0) {
             e = ZERO_EXP_BIASED;
@@ -1470,8 +1526,29 @@ public:
             //assert(shift == 0);
             shift_left128_inplace_safe(l, h, -shift);
         }
-
     }
+    /**
+     * @brief Produces the closest value larger than x
+     * nextUp(x) is the least floating-point number in the format of x that compares greater than x. 
+     * If x is the negative number of least magnitude in x’s format, nextUp(x) is −0. 
+     * nextUp(±0) is the positive number of least magnitude in x’s format.
+     * nextUp(+∞) is +∞, and nextUp(−∞) is the finite negative number largest in magnitude.
+     * When x is NaN, then the result is according to 6.2. nextUp(x) is quiet except for sNaNs.
+     * @param x Source value
+     * @return Higher value closest to x
+    */
+    __forceinline static float128 nextUp(float128 x) {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
+    /**
+     * @brief Produces the closest value smaller than x
+     * @param x Source value
+     * @return Lower value closest to x
+    */
+    __forceinline static float128 nextDown(float128 x) {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
+
     /**
      * @brief Return the infinite constant
      * @return INF
@@ -1526,7 +1603,6 @@ public:
         static const float128 half = 0.5;
         return half;
     }
-
     /**
      * @brief Return 0.1 using maximum precision
      * @return 
@@ -1570,6 +1646,8 @@ public:
         return res;
     }
 
+    static constexpr bool is754version1985(void) { return false; }
+    static constexpr bool is754version2008(void) { return true; }
     //
     // End of class method implementation
     //
@@ -1982,6 +2060,9 @@ public:
         static const float128 one = 1, two = 2;
         constexpr int max_iterations = 3;
         constexpr int debug = false;
+        auto x_sign = x.get_sign();
+        if (x.is_subnormal() || x.is_zero()) return (x_sign) ? -inf() : inf();
+        
         float128 norm_x = x;
         const int32_t expo = 1 + x.get_exponent();
         norm_x.set_exponent(0);
@@ -2011,7 +2092,7 @@ public:
         }
 
         y.set_exponent(-expo);
-        y.set_sign(x.get_sign());
+        y.set_sign(x_sign);
         return y;
     }
     /**
@@ -2029,6 +2110,7 @@ public:
             "1.6666666666666666666666666666666667e-1", // 1 / 3!
             "4.1666666666666666666666666666666667e-2", // 1 / 4!
             "8.3333333333333333333333333333333333e-3", // 1 / 5!
+            "1.3888888888888889418943284326246612e-3", // 1 / 6!
             "1.9841269841269841269841269841269841e-4", // 1 / 7!
             "2.4801587301587301587301587301587302e-5", // 1 / 8!
             "2.7557319223985890652557319223985891e-6", // 1 / 9!
@@ -2075,6 +2157,7 @@ public:
             "3.2879494166331580670316306954685835e-65", // 1 / 50!
         };
         constexpr int series_len = array_length(c);
+        static_assert(series_len == 51);
 
         if (x >= 0 && x < series_len) {
             res = c[x];
@@ -2102,11 +2185,24 @@ public:
      * @return Exponent of x
     */
     friend FP128_INLINE float128 exp(const float128& x) noexcept {
+        //static const float128 P[] = {
+        //     1,
+        //     0.5,
+        //     "1.66666666666666666666666666666666683E-01",
+        //     "4.16666666666666666666654902320001674E-02",
+        //     "8.33333333333333333333314659767198461E-03",
+        //     "1.38888888889899438565058018857254025E-03",
+        //     "1.98412698413981650382436541785404286E-04",
+        //};
+
         static const float128 e = float128::e();
         static const float128 max_exponent = 11355; // log(16382) / log2
-        // check the value isn't too large
+        // check if the value isn't too large
         if (x > max_exponent)
             return inf();
+        // check if the value isn't too small
+        if (x <  -max_exponent)
+            return 0;
 
         float128 _ix, exp_ix; // integer part of x
         float128 fx = modf(fabs(x), &_ix);
@@ -2128,16 +2224,26 @@ public:
             exp_ix = 1;
         }
 
-        // compute e^fx (fraction part of x)
-        // first and second elements of the series
-        if (fx) {
+
+        //if (!fx.is_zero()) {
+        //    float128 exp_fx = fx + fx * fx * (P[1] + fx * (P[2] + fx * (P[3] + fx * (P[4] + fx * (P[5] + fx * P[6]))))) + 1;
+        //    res = exp_ix * exp_fx;
+        //}
+        //else {
+        //    res = exp_ix;
+        //}
+
+
+         //compute e^fx (fraction part of x)
+         //first and second elements of the series
+        if (fx.get_exponent() > -FRAC_BITS) {
             float128 exp_fx = float128::one() + fx;
-            float128 elem_denom, elem_nom = fx;
+            float128 elem, elem_denom, elem_nom = fx;
 
             for (int i = 2; ; ++i) {
                 elem_nom *= fx;
                 fact_reciprocal(i, elem_denom);
-                float128 elem = elem_nom * elem_denom;
+                elem = elem_nom * elem_denom;
                 // value is too small to add any bits as the result's exponent is either 0 or 1. exp_fx = [1, e)
                 if (elem.get_exponent() <= -FRAC_BITS)
                     break;
