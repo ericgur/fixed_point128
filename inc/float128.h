@@ -2185,18 +2185,9 @@ public:
      * @return Exponent of x
     */
     friend FP128_INLINE float128 exp(const float128& x) noexcept {
-        //static const float128 P[] = {
-        //     1,
-        //     0.5,
-        //     "1.66666666666666666666666666666666683E-01",
-        //     "4.16666666666666666666654902320001674E-02",
-        //     "8.33333333333333333333314659767198461E-03",
-        //     "1.38888888889899438565058018857254025E-03",
-        //     "1.98412698413981650382436541785404286E-04",
-        //};
-
         static const float128 e = float128::e();
         static const float128 max_exponent = 11355; // log(16382) / log2
+
         // check if the value isn't too large
         if (x > max_exponent)
             return inf();
@@ -2224,30 +2215,23 @@ public:
             exp_ix = 1;
         }
 
+        float128 exp_fx;
+        if (!fx.is_zero()) {
+            // compute e^fx (fraction part of x)
+            // first and second elements of the series
+            if (!fx.is_zero()) {
+                exp_fx = float128::one() + fx;
+                float128 elem, elem_denom, elem_nom = fx;
 
-        //if (!fx.is_zero()) {
-        //    float128 exp_fx = fx + fx * fx * (P[1] + fx * (P[2] + fx * (P[3] + fx * (P[4] + fx * (P[5] + fx * P[6]))))) + 1;
-        //    res = exp_ix * exp_fx;
-        //}
-        //else {
-        //    res = exp_ix;
-        //}
-
-
-         //compute e^fx (fraction part of x)
-         //first and second elements of the series
-        if (fx.get_exponent() > -FRAC_BITS) {
-            float128 exp_fx = float128::one() + fx;
-            float128 elem, elem_denom, elem_nom = fx;
-
-            for (int i = 2; ; ++i) {
-                elem_nom *= fx;
-                fact_reciprocal(i, elem_denom);
-                elem = elem_nom * elem_denom;
-                // value is too small to add any bits as the result's exponent is either 0 or 1. exp_fx = [1, e)
-                if (elem.get_exponent() <= -FRAC_BITS)
-                    break;
-                exp_fx += elem; // next element in the series
+                for (int i = 2; ; ++i) {
+                    elem_nom *= fx;
+                    fact_reciprocal(i, elem_denom);
+                    elem = elem_nom * elem_denom;
+                    // value is too small to add any bits as the result's exponent is either 0 or 1. exp_fx = [1, e)
+                    if (elem.get_exponent() <= -FRAC_BITS)
+                        break;
+                    exp_fx += elem; // next element in the series
+                }
             }
 
             res = exp_ix * exp_fx;
@@ -2257,7 +2241,6 @@ public:
         }
 
         return (x.is_positive()) ? res : reciprocal(res);
-
     }
 };
 
