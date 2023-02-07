@@ -2275,7 +2275,91 @@ public:
     friend FP128_INLINE float128 expm1(const float128& x) noexcept {
         return exp(x) - float128::one();
     }
+    /**
+     * @brief Calculates the natural Log (base e) of x: log(x)
+     * @param x The number to perform log on.
+     * @param f Optional: how many fraction bits in the result. Default to all.
+     * @return log(x)
+    */
+    friend FP128_INLINE float128 log(float128 x, int32_t f) noexcept {
+        static const float128 lan2 = "0.693147180559945309417232121458176575";
+        float128 y = log2(x, f);
+        return y * lan2;
+    }
+    /**
+     * @brief Calculates the Log base 2 of x: y = log2(x)
+     * @param x The number to perform log2 on.
+     * @param f Optional: how many fraction bits in the result. Default to all.
+     * @return log2(x)
+    */
+    friend FP128_INLINE float128 log2(float128 x, int32_t f) noexcept {
+        if (x.is_negative() || x.is_zero()) {
+            return -inf();
+        }
 
+        // Calculate the log in 2 steps:
+        // - The integer part (iy) is simple and fast via the get_exponent() function.
+        // - The fraction part (fy) is trickier. Uses Binary Logarithm
+        // The result is the sum of the two. Based on the identity:
+        // log(x + y) = log(x) + log(y)
+
+        // bring x to the range [1,2)
+        auto expo = x.get_exponent();
+        float128 iy = expo; // integer part of the result
+        // x is an exponent of 2.
+        if (x.is_exponent_of_2())
+            return iy;
+
+        x.set_exponent(0);
+
+        static const float128 two(2);
+        float128 b = float128::half(); // 0.5
+        float128 fy; // fraction part of the result
+        for (size_t i = 0; i < f; ++i) {
+            // x = x * x
+            x *= x;
+            // if x is greater than 2, we have another bit in the result
+            if (x  >= two) {
+                // divide x by 2 using shifts
+                x >>= 1;
+                fy += b;
+            }
+            // divide 2 using shifts
+            b >>= 1;
+        }
+
+        return iy + fy;
+    }
+    /**
+     * @brief Calculates Log base 10 of x: log10(x)
+     * @param x The number to perform log on.
+     * @param f Optional: how many fraction bits in the result. Default to all.
+     * @return log10(x)
+    */
+    friend FP128_INLINE float128 log10(float128 x, int32_t f) noexcept {
+        static const float128 log10_2 = "0.301029995663981195213738894724493068";  // log10(2)
+        float128 y = log2(x, f);
+        return y * log10_2;
+    }
+    /**
+     * @brief Calculates Log base 2 of x as an integer ignoring the sign of x.
+     * Similar to: floor(log2(fabs(x)))
+     * @param x The number to perform log on.
+     * @return logb(x)
+    */
+    friend FP128_INLINE float128 logb(float128 x, int32_t) noexcept {
+        return x.get_exponent();
+    }
+    /**
+     * @brief Calculates the natural Log (base e) of 1 + x: log(1 + x)
+     * @param x The number to perform log on.
+     * @param f Optional: how many fraction bits in the result. Default to all.
+     * @return log1p(x)
+    */
+    friend FP128_INLINE float128 log1p(float128 x, int32_t f) noexcept {
+        return log(float128::one() + x, f);
+
+    }
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);

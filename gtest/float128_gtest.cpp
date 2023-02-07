@@ -957,56 +957,56 @@ TEST(float128, ilogb) {
         EXPECT_EQ(float128_res, res) << "ilogb: " << "value=" << value;
     }
 }
-//TEST(float128, log) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
-//        double res = log(value);
-//        float128 f1 = value;
-//        float128 float128_res = log(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "log: " << "value=" << value;
-//    }
-//}
-//TEST(float128, log2) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
-//        double res = log2(value);
-//        float128 f1 = value;
-//        float128 float128_res = log2(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "log2: " << "value=" << value;
-//    }
-//}
-//TEST(float128, log10) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
-//        double res = log10(value);
-//        float128 f1 = value;
-//        float128 float128_res = log10(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "log10: " << "value=" << value;
-//    }
-//}
-//TEST(float128, log1p) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
-//        double res = log1p(value);
-//        float128 f1 = value;
-//        float128 float128_res = log1p(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "log1p: " << "value=" << value;
-//    }
-//}
-//TEST(float128, logb) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
-//        double res = logb(value);
-//        float128 f1 = value;
-//        float128 float128_res = logb(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "logb: " << "value=" << value;
-//    }
-//}
+TEST(float128, log) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random()); 
+        double res = log(value);
+        float128 f1 = value;
+        float128 float128_res = log(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "log: " << "value=" << value;
+    }
+}
+TEST(float128, log2) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random());
+        double res = log2(value);
+        float128 f1 = value;
+        float128 float128_res = log2(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "log2: " << "value=" << value;
+    }
+}
+TEST(float128, log10) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random());
+        double res = log10(value);
+        float128 f1 = value;
+        float128 float128_res = log10(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "log10: " << "value=" << value;
+    }
+}
+TEST(float128, log1p) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random());
+        double res = log1p(value);
+        float128 f1 = value;
+        float128 float128_res = log1p(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "log1p: " << "value=" << value;
+    }
+}
+TEST(float128, logb) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
+        double res = logb(value);
+        float128 f1 = value;
+        float128 float128_res = logb(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "logb: " << "value=" << value;
+    }
+}
 //TEST(float128, sin) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
