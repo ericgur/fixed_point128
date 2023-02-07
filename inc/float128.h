@@ -648,6 +648,11 @@ public:
             d.e = 1023ull + expo;
             d.f = shift_right128_round(low, high_bits.f, FRAC_BITS - dbl_frac_bits);
             d.s = high_bits.s;
+            
+            // fraction caused a round up
+            if (d.f == 0 && high_bits.f != 0)
+                d.e += 1;
+
             return d.val;
         }
     }
@@ -1521,6 +1526,11 @@ public:
         e += shift;
         if (shift > 0) {
             shift_right128_inplace_safe(l, h, shift);
+            // rounding up may have happended, expect the the upper 16 bit to be exactly 1
+            if ((h >> 48) != 1) {
+                ++e;
+            }
+
         }
         else {
             //assert(shift == 0);
@@ -2242,6 +2252,30 @@ public:
 
         return (x.is_positive()) ? res : reciprocal(res);
     }
+    /**
+     * @brief Computes 2 to the power of x
+     * @param x Exponent value
+     * @return 2^x
+    */
+    friend FP128_INLINE float128 exp2(const float128& x) noexcept {
+        //
+        // Based on exponent law: (x^n)^m = x^(m*n)
+        // Convert the exponent x (function parameter) to produce an exponent that will work with exp()
+        // y = log(2) 
+        // 2^x = e^(y*x) = exp(y*x)
+        //
+        static const float128 lan2 = "0.693147180559945309417232121458176575";
+        return exp(x * lan2);
+    }
+    /**
+     * @brief Calculates the exponent of x and reduces 1 from the result: (e^x) - 1
+     * @param x A number specifying a power.
+     * @return Exponent of x
+    */
+    friend FP128_INLINE float128 expm1(const float128& x) noexcept {
+        return exp(x) - float128::one();
+    }
+
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);

@@ -1090,26 +1090,27 @@ TEST(float128, exp) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "exp: " << "value=" << value;
     }
 }
-//TEST(float128, exp2) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-4, 4); // lower exponent results in lost bits
-//        double res = exp2(value);
-//        float128 f1 = value;
-//        float128 float128_res = exp2(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "exp2: " << "value=" << value;
-//    }
-//}
-//TEST(float128, expm1) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-3, 3); // lower exponent results in lost bits
-//        double res = expm1(value);
-//        float128 f1 = value;
-//        float128 float128_res = expm1(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "expm1: " << "value=" << value;
-//    }
-//}
+TEST(float128, exp2) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-16, 16); // lower exponent results in lost bits
+        double res = exp2(value);
+        float128 f1 = value;
+        float128 float128_res = exp2(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "exp2: " << "value=" << value;
+    }
+}
+TEST(float128, expm1) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-16, 16); // lower exponent results in lost bits
+        double res = expm1(value);
+        float128 f1 = value;
+        float128 float128_res_ = expm1(f1);
+        double float128_res = (double)float128_res_;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "expm1: " << "value=" << value;
+    }
+}
 //TEST(float128, pow) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
