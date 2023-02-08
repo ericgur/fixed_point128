@@ -1079,16 +1079,16 @@ TEST(float128, pow) {
     }
 }
 
-//TEST(float128, sin) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 2);
-//        double res = ::sin(value);
-//        float128 f1 = value;
-//        float128 float128_res = sin(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "sin: " << "value=" << value;
-//    }
-//}
+TEST(float128, sin) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 4);
+        double res = ::sin(value);
+        float128 f1 = value;
+        float128 float128_res = sin(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "sin: " << "value=" << value;
+    }
+}
 //TEST(float128, cos) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {

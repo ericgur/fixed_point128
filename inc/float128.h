@@ -47,7 +47,7 @@
 #pragma warning(disable: 26482) // Only index into arrays using constant expressions
 #pragma warning(disable: 26408) // Avoid malloc() and free(), prefer the nothrow version of new with delete
 #pragma warning(disable: 6255)  // _alloca indicates failure by raising a stack overflow exception.  Consider using _malloca instead
-#pragma warning(disable: 4996)  // This function or variable may be unsafe.Consider using strncpy_s instead.To disable deprecation, use _CRT_SECURE_NO_WARNINGS.See online help for details.fixed_point128	C : \GitHub\fixed_point128\inc\float128.h	255
+#pragma warning(disable: 4996)  // This function or variable may be unsafe.Consider using strncpy_s instead.To disable deprecation, use _CRT_SECURE_NO_WARNINGS.See online help for details.
 
 
 #include "fixed_point128_shared.h"
@@ -669,60 +669,67 @@ public:
      * @brief operator uint64_t converts to a uint64_t
     */
     FP128_INLINE operator uint64_t() const noexcept {
-        auto expo = get_exponent();
-        if (expo > 63) return (get_sign()) ? static_cast<uint64_t>(INT64_MIN) : UINT64_MAX;
-        if (expo < 0) return 0;
+        uint64_t l, h;
+        int32_t e;
+        uint32_t s;
+        get_components(l, h, e, s);
+
+        if (e > 63) return (s) ? static_cast<uint64_t>(INT64_MIN) : UINT64_MAX;
+        if (e < 0) return 0;
         
-        auto shift = static_cast<int>(FRAC_BITS) - expo;
-        uint64_t res = shift_right128_round(low, high_bits.f, shift);
-        // Add msb
-        res |= FP128_ONE_SHIFT(expo);
-        return res;
+        auto shift = static_cast<int>(FRAC_BITS) - e;
+        shift_right128_inplace_safe(l, h, shift);
+        return l;
     }
     /**
      * @brief operator int64_t converts to a int64_t
     */
     FP128_INLINE operator int64_t() const noexcept {
-        auto expo = get_exponent();
-        if (expo > 62) return (get_sign()) ? INT64_MIN : INT64_MAX;
-        if (expo < 0) return 0;
+        uint64_t l, h;
+        int32_t e;
+        uint32_t s;
+        get_components(l, h, e, s);
 
-        auto shift = static_cast<int>(FRAC_BITS) - expo;
-        int64_t res = static_cast<int64_t>(shift_right128_round(low, high_bits.f, shift));
-        // Add msb
-        res |= FP128_ONE_SHIFT(expo);
-        return  (get_sign()) ? -res : res;
+        if (e > 62) return (s) ? INT64_MIN : INT64_MAX;
+        if (e < 0) return 0;
+
+        auto shift = static_cast<int>(FRAC_BITS) - e;
+        shift_right128_inplace_safe(l, h, shift);
+        int64_t res = static_cast<int64_t>(l);
+        return  (s) ? -res : res;
     }
     /**
      * @brief operator uint32_t converts to a uint32_t
     */
     FP128_INLINE operator uint32_t() const noexcept {
-        auto expo = get_exponent();
-        if (expo > 31) return (get_sign()) ? static_cast<uint32_t>(INT32_MIN) : UINT32_MAX;
-        if (expo < 0) return 0;
+        uint64_t l, h;
+        int32_t e;
+        uint32_t s;
+        get_components(l, h, e, s);
 
-        auto shift = static_cast<int>(FRAC_BITS) - expo;
-        uint64_t res = shift_right128_round(low, high_bits.f, shift);
+        if (e > 31) return (s) ? static_cast<uint32_t>(INT32_MIN) : UINT32_MAX;
+        if (e < 0) return 0;
 
-        // Add msb
-        res |= FP128_ONE_SHIFT(expo);
-        return static_cast<uint32_t>(res);
+        auto shift = static_cast<int>(FRAC_BITS) - e;
+        shift_right128_inplace_safe(l, h, shift);
+        return static_cast<uint32_t>(l);
     }
     /**
      * @brief operator int32_t converts to a int32_t
     */
     FP128_INLINE operator int32_t() const noexcept {
-        auto expo = get_exponent();
-        if (expo > 30) return (get_sign()) ? INT32_MIN : INT32_MAX;
-        if (expo < 0) return 0;
+        uint64_t l, h;
+        int32_t e;
+        uint32_t s;
+        get_components(l, h, e, s);
 
-        auto shift = static_cast<int32_t>(FRAC_BITS) - expo;
-        uint64_t res = shift_right128_round(low, high_bits.f, shift);
+        if (e > 30) return (s) ? INT32_MIN : INT32_MAX;
+        if (e < 0) return 0;
 
-        // Add msb
-        res |= FP128_ONE_SHIFT(expo);
-        int32_t r = static_cast<int32_t>(res);
-        return  (get_sign()) ? -r : r;
+        auto shift = static_cast<int>(FRAC_BITS) - e;
+        shift_right128_inplace_safe(l, h, shift);
+        int32_t res = static_cast<int32_t>(l);
+        return  (s) ? -res : res;
     }
     /**
       * @brief operator long double - converts to a long double
@@ -1582,6 +1589,20 @@ public:
         return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x4000, 0);
     }
     /**
+     * @brief Return the value of pi / 2
+     * @return pi / 2
+    */
+    __forceinline static float128 half_pi() {
+        return pi() >> 1;
+    }
+    /**
+     * @brief Return the value of pi / 4
+     * @return pi / 4
+    */
+    __forceinline static float128 quarter_pi() {
+        return pi() >> 2;
+    }
+    /**
      * @brief Return the value of e
      * @return e
     */
@@ -2427,7 +2448,81 @@ public:
     */
     friend FP128_INLINE float128 log1p(float128 x, int32_t f) noexcept {
         return log(float128::one() + x, f);
+    }
 
+    //
+    // Trigonometric functions
+    //
+
+    /**
+         * @brief Calculate the sine function over a limited range [-0.5pi, 0.5pi]
+         * Using the Maclaurin series expansion, the formula is:
+         *              x^3   x^5   x^7
+         * sin(x) = x - --- + --- - --- + ...
+         *               3!    5!    7!
+         * @param x value in Radians in the range [-0.5pi, 0.5pi]
+         * @return Sine of x
+        */
+    friend FP128_INLINE float128 sin1(float128 x) noexcept
+    {
+        assert(fabs(x) <= float128::half_pi());
+
+        // first part of the series is just 'x'
+        const float128 xx = x * x;
+        float128 elem_denom, elem_nom = x;
+
+        // compute the rest of the series, starting with: -(x^3 / 3!)
+        for (int i = 3, sign = 1; ; i += 2, sign = 1 - sign) {
+            elem_nom *= xx;
+            fact_reciprocal(i, elem_denom);
+            float128 elem = elem_nom * elem_denom; // next element in the series
+            // precision limit has been hit
+            if (!elem)
+                break;
+            x += (sign) ? -elem : elem;
+        }
+
+        return x;
+    }
+    /**
+         * @brief Calculate the cosine function over a limited range [-0.5pi, 0.5pi]
+         * Since the sin1 function converges faster, call it with the modifed angle.
+         * @param x value in Radians in the range [-0.5pi, 0.5pi]
+         * @return Cosine of x
+        */
+    friend __forceinline float128 cos1(const float128& x) noexcept
+    {
+        const float128 half_pi = float128::half_pi();
+        assert(fabs(x) <= half_pi);
+        return (x.is_positive()) ?
+            sin1(half_pi - x) :
+            -sin1(-half_pi - x);
+    }
+    /**
+     * @brief Calculate the Sine function
+     * Ultimately uses sin() with a reduced range of [-pi/4, pi/4]
+     * @param x value in Radians
+     * @return Sine of x
+    */
+    friend float128 sin(float128 x) noexcept
+    {
+        const float128 half_pi = float128::half_pi();
+        double round = (x.is_positive()) ? 0.5 : -0.5;
+
+        int64_t n = static_cast<int64_t>((x / half_pi) + round);
+        x -= half_pi * n;
+        n = n & 3ull; // n mod 4
+        switch (n) {
+        case 0:  // [-45-45) degrees
+            return sin1(x);
+        case 1:  // [45-135) degrees
+            return cos1(x);
+        case 2:  // [135-225) degrees
+            return -sin1(x);
+        case 3:  // [225-315) degrees
+        default:
+            return -cos1(x);
+        }
     }
 };
 
