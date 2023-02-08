@@ -91,6 +91,7 @@ float128 exp(const float128& x) noexcept;
 float128 exp2(const float128& x) noexcept;
 float128 expm1(const float128& x) noexcept;
 float128 pow(const float128& x, const float128& y, int32_t f = 112) noexcept;
+float128 pow(const float128& x, int32_t y) noexcept;
 float128 log(float128 x, int32_t f = 112) noexcept;
 float128 log2(float128 x, int32_t f = 112) noexcept;
 float128 log10(float128 x, int32_t f = 112) noexcept;
@@ -1288,7 +1289,7 @@ public:
     */
     __forceinline bool is_nan() const {
         // fraction is zero for +- INF, non-zero for NaN 
-        return high_bits.e == INF_EXP_BIASED && high_bits.f != 0;
+        return high_bits.e == INF_EXP_BIASED && (high_bits.f != 0 || low != 0);
     }
     /**
      * @brief Tests if this value is a signaling NaN
@@ -2274,6 +2275,74 @@ public:
     */
     friend FP128_INLINE float128 expm1(const float128& x) noexcept {
         return exp(x) - float128::one();
+    }
+    /**
+     * @brief Computes x to the power of y
+     * @param x Base value
+     * @param y Exponent value (integer)
+     * @return x^y
+    */
+    friend FP128_INLINE float128 pow(const float128& x, int32_t y) noexcept {
+        static const float128 max_exponent = 11355; // log(16382) / log2
+        float128 res = 1;
+        // check the trivial cases
+        if (y == 1) {
+            return x;
+        }
+        else if (y == 0) {
+            return 1;
+        }
+        else if (x == 1) {
+            return x;
+        }
+        auto expo = abs(y);
+        // check if the value isn't too large
+        if (y > max_exponent) {
+            res = inf();
+        }
+        // check if the value isn't too small
+        else if (y < -max_exponent)
+            res = 0;
+        // compute x^y 
+        else if (expo > 0) {
+            float128 b = x; // value of e^1
+            while (expo > 0) {
+                if (expo & 1)
+                    res *= b;
+                expo >>= 1;
+                b *= b;
+            }
+        }
+
+        return (y >= 0) ? res : reciprocal(res);
+    }
+    /**
+     * @brief Computes x to the power of y
+     * @param x Base value
+     * @param y Exponent value
+     * @param f Optional: how many fraction bits in the result. Default to all.
+     * @return x^y
+    */
+    friend FP128_INLINE float128 pow(const float128& x, const float128& y, int32_t f) noexcept
+    {
+        //
+        // Based on exponent law: (x^n)^m = x^(m * n)
+        // Convert the exponent y (function parameter) to produce an exponent that will work with exp()
+        // z = log(x) 
+        // pow(x, y) = x^y = e^(y * z) = exp(y * z)
+        //
+        if (y.is_int()) {
+            return pow(x, static_cast<int32_t>(y));
+        }
+        else if (x.is_negative()) {
+            return -nan();
+        }
+
+        float128 lan_x = log(x, f);
+        if (!lan_x)
+            return lan_x;
+
+        return exp(y * lan_x);
     }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)

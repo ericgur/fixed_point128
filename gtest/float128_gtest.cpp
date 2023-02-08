@@ -1007,6 +1007,78 @@ TEST(float128, logb) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "logb: " << "value=" << value;
     }
 }
+TEST(float128, exp) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-16, 16);
+        double res = exp(value);
+        float128 f1 = value;
+        float128 float128_res = exp(f1);
+        double float128_res_ = (double)float128_res;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "exp: " << "value=" << value;
+    }
+}
+TEST(float128, exp2) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-16, 16); // lower exponent results in lost bits
+        double res = exp2(value);
+        float128 f1 = value;
+        float128 float128_res = exp2(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "exp2: " << "value=" << value;
+    }
+}
+TEST(float128, expm1) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-16, 16); // lower exponent results in lost bits
+        double res = expm1(value);
+        float128 f1 = value;
+        float128 float128_res_ = expm1(f1);
+        double float128_res = (double)float128_res_;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "expm1: " << "value=" << value;
+    }
+}
+TEST(float128, pow) {
+    // test special values
+    double values[][2] = {
+        {0, 1},
+        {1, INFINITY},
+        {1.1, INFINITY},
+        {INFINITY, 1},
+        {NAN, 1},
+        {1, NAN},
+        {-2, 5},
+        {-2, 5.5}
+    };
+    constexpr auto value_count = array_length(values);
+    for (auto i = 0u; i < value_count; ++i) {
+        double value1 = values[i][0];
+        double value2 = values[i][1];
+        double res = pow(value1, value2);
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 float128_res = pow(f1, f2);
+        // since NaNs fail to compare, skip the exception
+        if (isnan(res) && isnan(float128_res))
+            continue;
+
+        EXPECT_DOUBLE_EQ(float128_res, res) << "pow: " << " value1=" << value1 << ", value2=" << value2;
+    }
+
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        //double value1 = fabs(get_double_random());
+        double value1 = fabs(get_double_random());
+        double value2 = get_double_random(-16, 16); // lower exponent results in lost bits
+        double res = pow(value1, value2);
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 float128_res = pow(f1, f2);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "pow: " << " value1=" << value1 << ", value2=" << value2;
+    }
+}
+
 //TEST(float128, sin) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -1077,50 +1149,6 @@ TEST(float128, logb) {
 //        float128 f2 = value2;
 //        float128 float128_res = atan2(f1, f2);
 //        EXPECT_DOUBLE_EQ(float128_res, res) << "atan2: " << " value1=" << value1 << ", value2=" << value2;
-//    }
-//}
-TEST(float128, exp) {
-    srand(RANDOM_SEED);
-    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-16, 16);
-        double res = exp(value);
-        float128 f1 = value;
-        float128 float128_res = exp(f1);
-        double float128_res_ = (double)float128_res;
-        EXPECT_DOUBLE_EQ(float128_res, res) << "exp: " << "value=" << value;
-    }
-}
-TEST(float128, exp2) {
-    srand(RANDOM_SEED);
-    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-16, 16); // lower exponent results in lost bits
-        double res = exp2(value);
-        float128 f1 = value;
-        float128 float128_res = exp2(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "exp2: " << "value=" << value;
-    }
-}
-TEST(float128, expm1) {
-    srand(RANDOM_SEED);
-    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-16, 16); // lower exponent results in lost bits
-        double res = expm1(value);
-        float128 f1 = value;
-        float128 float128_res_ = expm1(f1);
-        double float128_res = (double)float128_res_;
-        EXPECT_DOUBLE_EQ(float128_res, res) << "expm1: " << "value=" << value;
-    }
-}
-//TEST(float128, pow) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value1 = fabs(get_double_random(-4, 4)); // lower exponent results in lost bits
-//        double value2 = get_double_random(-4, 4); // lower exponent results in lost bits
-//        double res = pow(value1, value2);
-//        float128 f1 = value1;
-//        float128 f2 = value2;
-//        float128 float128_res = pow(f1, f2);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "pow: " << " value1=" << value1 << ", value2=" << value2;
 //    }
 //}
 //TEST(float128, sinh) {

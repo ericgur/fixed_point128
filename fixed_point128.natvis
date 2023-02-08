@@ -24,6 +24,8 @@
   <Type Name="fp128::float128">
     <Intrinsic Name="special" Expression="high_bits.e == 0x7FFF" />
     <Intrinsic Name="has_fraction" Expression="high_bits.f != 0 || low != 0" />
+    <Intrinsic Name="inf" Expression="special() &amp;&amp; !has_fraction()" />
+    <Intrinsic Name="nan" Expression="special() &amp;&amp; has_fraction()" />
     <Intrinsic Name="sign" Expression="high_bits.s" />
     <Intrinsic Name="sign_float" Expression="(sign()) ? -1.0 : 1.0" />
     <Intrinsic Name="exp" Expression="(int)high_bits.e - (int)0x3FFF" />
@@ -32,9 +34,10 @@
     <Intrinsic Name="fraction" Expression="1.0 + (double)high_bits.f * 3.552713678800501e-15 + low_fraction()" />
     <Intrinsic Name="zero" Expression="low == 0 &amp;&amp; high == 0" />
     <Intrinsic Name="neg_zero" Expression="low == 0 &amp;&amp; high_bits.f == 0  &amp;&amp; high_bits.e == 0 &amp;&amp; high_bits.s == 1" />
-    <DisplayString Condition="special() &amp;&amp; has_fraction()">nan</DisplayString>
-    <DisplayString Condition="special() &amp;&amp; !has_fraction() &amp;&amp; !sign()">inf</DisplayString>
-    <DisplayString Condition="special() &amp;&amp; !has_fraction() &amp;&amp; sign()">-inf</DisplayString>
+    <DisplayString Condition="nan() &amp;&amp; !sign()">nan</DisplayString>
+    <DisplayString Condition="nan() &amp;&amp; sign()">-nan</DisplayString>
+    <DisplayString Condition="inf() &amp;&amp; !sign()">inf</DisplayString>
+    <DisplayString Condition="inf() &amp;&amp; sign()">-inf</DisplayString>
     <DisplayString Condition="zero()">0</DisplayString>
     <DisplayString Condition="neg_zero()">-0</DisplayString>
     <DisplayString>{sign_float() * fraction()}*2**{(int)high_bits.e - (int)0x3FFF,d}</DisplayString>
@@ -54,7 +57,11 @@
           </If>
           <Break Condition="exp_value == 0" />
         </Loop>
-        <Item Name="[double value]">res,d</Item>
+        <Item Name="[double value]" Condition="!special()">res,d</Item>
+        <Item Name="[double value]" Condition="nan() &amp;&amp; !sign()">"nan", sb</Item>
+        <Item Name="[double value]" Condition="nan() &amp;&amp; sign()">"-nan", sb</Item>
+        <Item Name="[double value]" Condition="inf() &amp;&amp; !sign()">"inf", sb</Item>
+        <Item Name="[double value]" Condition="inf() &amp;&amp; sign()">"-inf", sb</Item>
       </CustomListItems>
       <Item Name="[sign]"            ExcludeView="simple">high_bits.s,d</Item>
       <Item Name="[exponent (hex)]"  ExcludeView="simple">high_bits.e,h</Item>
