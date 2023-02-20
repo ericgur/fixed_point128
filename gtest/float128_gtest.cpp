@@ -1151,64 +1151,63 @@ TEST(float128, atan2) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "atan2: " << " value1=" << value1 << ", value2=" << value2;
     }
 }
-//TEST(float128, sinh) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 2);
-//        double res = ::sinh(value);
-//        float128 f1 = value;
-//        float128 float128_res = sinh(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "sinh: " << "value=" << value;
-//    }
-//}
-//TEST(float128, asinh) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 2);
-//        double res = ::asinh(value);
-//        float128 f1 = value;
-//        float128 float128_res = asinh(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "asinh: " << "value=" << value;
-//    }
-//}
-//TEST(float128, cosh) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 2);
-//        double res = ::cosh(value);
-//        float128 f1 = value;
-//        float128 float128_res = cosh(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "cosh: " << "value=" << value;
-//    }
-//}
-//TEST(float128, acosh) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = 1.0 + fabs(get_double_random(-60, 2)); // must be >= 1
-//        double res = ::acosh(value);
-//        float128 f1 = value;
-//        float128 float128_res = acosh(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "acosh: " << "value=" << value;
-//    }
-//}
-//TEST(float128, tanh) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 2);
-//        double res = ::tanh(value);
-//        float128 f1 = value;
-//        float128 float128_res = tanh(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "tanh: " << "value=" << value;
-//    }
-//}
-//
-//TEST(float128, atanh) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, -1); // must be: -1 < value < 1
-//        double res = ::atanh(value);
-//        float128 f1 = value;
-//        float128 float128_res = atanh(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "atanh: " << "value=" << value;
-//    }
-//}
+TEST(float128, sinh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::sinh(value);
+        float128 f1 = value;
+        float128 float128_res = sinh(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "sinh: " << "value=" << value;
+    }
+}
+TEST(float128, asinh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::asinh(value);
+        float128 f1 = value;
+        float128 float128_res = asinh(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "asinh: " << "value=" << value;
+    }
+}
+TEST(float128, cosh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::cosh(value);
+        float128 f1 = value;
+        float128 float128_res = cosh(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "cosh: " << "value=" << value;
+    }
+}
+TEST(float128, acosh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = 1.0 + fabs(get_double_random(-60, 2)); // must be >= 1
+        double res = ::acosh(value);
+        float128 f1 = value;
+        float128 float128_res = acosh(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "acosh: " << "value=" << value;
+    }
+}
+TEST(float128, tanh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 2);
+        double res = ::tanh(value);
+        float128 f1 = value;
+        float128 float128_res = tanh(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "tanh: " << "value=" << value;
+    }
+}
+TEST(float128, atanh) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, -1); // must be: -1 < value < 1
+        double res = ::atanh(value);
+        float128 f1 = value;
+        float128 float128_res = atanh(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "atanh: " << "value=" << value;
+    }
+}

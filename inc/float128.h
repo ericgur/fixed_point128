@@ -2709,7 +2709,96 @@ public:
         // x < 0
         return (y < 0) ? res - pi : res + pi;
     }
+    /**
+    * @brief Calculate the hyperbolic sine function
+    * Use the exponent function which produces more accurate results than the power series.
+    *           e^x - e^(-x)
+    * sinh(x) = ------------
+    *                2
+    * @param x value
+    * @return Sine of x
+    */
+    friend FP128_INLINE float128 sinh(const float128 x) noexcept
+    {
+        return (exp(x) - exp(-x)) >> 1;
+    }
+    /**
+     * @brief Calculates the inverse hyperbolic sine
+     * For positive x:
+     * asinh(x) = log(x + sqrt(x^2 + 1))
+     * For negative x, the function returns the result with the sign inverted
+     * @param x value
+     * @return Inverse hyperbolic sine of x
+    */
+    friend FP128_INLINE float128 asinh(const float128 x) noexcept
+    {
+        float128 absx = fabs(x);
+        float128 res = log(absx + sqrt(absx * absx + float128::one()));
 
+        return (x.is_positive()) ? res : -res;
+    }
+    /**
+    * @brief Calculate the hyperbolic cosine function over a limited range [-0.5pi, 0.5pi]
+    *           e^x + e^(-x)
+    * cosh(x) = ------------
+    *                2
+    * @param x value in Radians in the range [-0.5pi, 0.5pi]
+    * @return Sine of x
+    */
+    friend FP128_INLINE float128 cosh(const float128 x) noexcept
+    {
+        return (exp(x) + exp(-x)) >> 1;
+    }
+    /**
+     * @brief Calculates the inverse hyperbolic cosine
+     * For x >= 1:
+     * acosh(x) = log(x + sqrt(x^2 - 1))
+     * For x < 1, the function return zero
+     * @param x value in the range [1, inf]
+     * @return Inverse hyperbolic cosine of x
+    */
+    friend FP128_INLINE float128 acosh(const float128 x) noexcept
+    {
+        if (x < 1) return 0;
+
+        float128 res = log(x + sqrt(x * x - 1));
+        return res;
+    }
+    /**
+     * @brief Calculates the hyperbolic tangent
+     *           e^x - e^(-x)
+     * tanh(x) = ------------
+     *           e^x + e^(-x)
+     * @param x value
+     * @return hyperbolic tangent of x
+    */
+    friend FP128_INLINE float128 tanh(const float128 x) noexcept
+    {
+        float128 ex = exp(x); // e^x
+        float128 exm1 = exp(-x); // e^(-x)
+        //
+        //           e^x - e^(-x)
+        // tanh(x) = ------------
+        //           e^x + e^(-x)
+        //
+        return (ex - exm1) / (ex + exm1);
+    }
+    /**
+     * @brief Calculates the inverse hyperbolic tangent
+     *                       1 + x
+     * atanh(x) = 0.5 * log( -----)
+     *                       1 - x
+     * @param x value in the range (-1, 1)
+     * @return Inverse hyperbolic tangent of x
+    */
+    friend FP128_INLINE float128 atanh(const float128 x) noexcept
+    {
+        auto one = float128::one();
+        if (fabs(x) >= 1)
+            return 0;
+
+        return log((one + x) / (one - x)) >> 1;
+    }
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);
