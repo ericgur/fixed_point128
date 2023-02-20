@@ -1766,7 +1766,6 @@ public:
     friend __forceinline bool operator!=(const T& lhs, const float128& rhs) noexcept {
         return rhs != float128(lhs);
     }
-
     /**
      * @brief Return true if this object is small than the other
      * @param lhs left hand side operand
@@ -2040,7 +2039,6 @@ public:
     {
         return sqrt(x * x + y * y);
     }
-
     /**
      * @brief Calculates the square root using Newton's method.
      * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw
@@ -2524,6 +2522,152 @@ public:
             return -cos1(x);
         }
     }
+    /**
+     * @brief Calculate the inverse sine function
+     * Uses Newton's method to converge quickly.
+     * @param x value in radians in the range [-1,1]
+     * @return Inverse sine of x
+    */
+    friend float128 asin(float128 x) noexcept
+    {
+        constexpr int max_iterations = 6;
+        if (x < -1 || x > 1) return 0;
+
+        //              sin(Xn) - a
+        // Xn+1 = Xn - -------------
+        //                cos(Xn)
+        // where 'a' is the argument, each iteration will converge on the result if the initial
+        //  estimate is close enough.
+        auto sign = x.get_sign();
+        x.set_sign(0);
+        
+        // initial estimate using the standard library
+        float128 res = ::asin(static_cast<double>(x));
+        const float128 eps = fabs(res >> 110);
+        for (int i = 0; i < max_iterations; ++i) {
+            float128 e = (sin(res) - x) / cos(res);
+            res -= e;
+            if (fabs(e) <= eps)
+                break;
+        }
+
+        res.set_sign(sign);
+        return res;
+    }
+    /**
+     * @brief Calculate the cosine function
+     * Ultimately uses sin1() with a reduced range of [-pi/4, pi/4]
+     * Sine's Maclaurin series converges faster than Cosine's.
+     * @param x value in Radians
+     * @return Cosine of x
+    */
+    friend float128 cos(float128 x) noexcept
+    {
+        const float128 half_pi = float128::half_pi(); // pi / 2
+        double round = (x.is_positive()) ? 0.5 : -0.5;
+
+        int64_t n = static_cast<int64_t>((x / half_pi) + round);
+        x -= half_pi * n;
+        n = n & 3ull; // n mod 4
+        switch (n) {
+        case 0:  // [-45-45) degrees
+            return cos1(x);
+        case 1:  // [45-135) degrees
+            return -sin1(x);
+        case 2:  // [135-225) degrees
+            return -cos1(x);
+        case 3:  // [225-315) degrees
+        default:
+            return sin1(x);
+        }
+    }
+    /**
+     * @brief Calculate the inverse cosine function
+     * Uses Newton's method to converge quickly.
+     * @param x value in radians in the range [-1,1]
+     * @return Inverse cosine of x
+    */
+    friend float128 acos(float128 x) noexcept
+    {
+        constexpr int max_iterations = 6;
+        if (x < -1 || x > 1) return 0;
+        //              cos(Xn) - a           a - cos(Xn)
+        // Xn+1 = Xn - ------------- = Xn -  ------------
+        //                -sin(Xn)              sin(Xn)
+        // where 'a' is the argument, each iteration will converge on the result if the initial
+        //  estimate is close enough.
+        float128 res = ::acos(static_cast<double>(x));
+        const float128 eps = fabs(res >> 110);
+
+        for (int i = 0; i < max_iterations; ++i) {
+            float128 cos_xn = cos(res);
+            float128 sin_xn = sin(res);
+            float128 e = (x - cos_xn) / sin_xn;
+            res -= e;
+            if (fabs(e) <= eps)
+                break;
+        }
+
+        return res;
+    }
+    /**
+     * @brief Calculate the tangent function
+     * tan(x) = sin(x)/cos(x)
+     * @param x value
+     * @return Tangent of x
+    */
+    friend FP128_INLINE float128 tan(float128 x) noexcept
+    {
+        return sin(x) / cos(x);
+    }
+    /**
+     * @brief Calculate the inverse tangent function
+     * @param x value
+     * @return Arctangent of x
+    */
+    friend float128 atan(float128 x) noexcept
+    {
+        // constants for segmentation
+        const float128 half_pi = float128::half_pi(); // pi / 2
+        bool comp = false;
+        constexpr int max_iterations = 6;
+
+        // make argument positive, save the sign
+        auto sign = x.get_sign();
+        x.set_sign(0);
+
+        // limit argument to 0..1
+        if (x > 1) {
+            comp = true;
+            x = reciprocal(x);
+        }
+
+        // initial step uses the CRT function.
+        float128 res = ::atan(static_cast<double>(x));
+        const float128 eps = fabs(res >> 110);
+
+        //
+        // Xn+1 =  Xn - cos(Xn) * ( sin(Xn) - a * cos(Xn))
+        // 
+        // where 'a' is the argument, each iteration will converge on the result if the initial
+        //  estimate is close enough.
+        for (int i = 0; i < max_iterations; ++i) {
+            float128 cos_xn = cos(res);
+            float128 sin_xn = sin(res);
+            float128 e = cos_xn * (sin_xn - x * cos_xn); // this is the iteration estimated error
+            res -= e;
+            if (fabs(e) <= eps)
+                break;
+        }
+
+        // restore complement if needed
+        if (comp)
+            res = half_pi - res;
+        // restore sign if needed
+        res.set_sign(sign);
+        return res;
+    }
+
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);

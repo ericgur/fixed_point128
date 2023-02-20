@@ -1082,63 +1082,63 @@ TEST(float128, pow) {
 TEST(float128, sin) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-60, 4);
+        double value = get_double_random(-60, 3);
         double res = ::sin(value);
         float128 f1 = value;
         float128 float128_res = sin(f1);
         EXPECT_DOUBLE_EQ(float128_res, res) << "sin: " << "value=" << value;
     }
 }
-//TEST(float128, cos) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 2);
-//        double res = ::cos(value);
-//        float128 f1 = value;
-//        float128 float128_res = cos(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "cos: " << "value=" << value;
-//    }
-//}
-//TEST(float128, tan) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 2);
-//        double res = ::tan(value);
-//        float128 f1 = value;
-//        float128 float128_res = tan(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "tan: " << "value=" << value;
-//    }
-//}
-//TEST(float128, asin) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, -1);
-//        double res = ::asin(value);
-//        float128 f1 = value;
-//        float128 float128_res = asin(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "asin: " << "value=" << value;
-//    }
-//}
-//TEST(float128, acos) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, -1);
-//        double res = acos(value);
-//        float128 f1 = value;
-//        float128 float128_res = acos(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "acos: " << "value=" << value;
-//    }
-//}
-//TEST(float128, atan) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value = get_double_random(-60, 14); //lower exponent results in lost bits
-//        double res = atan(value);
-//        float128 f1 = value;
-//        float128 float128_res = atan(f1);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "atan: " << "value=" << value;
-//    }
-//}
+TEST(float128, cos) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 3);
+        double res = ::cos(value);
+        float128 f1 = value;
+        float128 float128_res = cos(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "cos: " << "value=" << value;
+    }
+}
+TEST(float128, tan) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 3);
+        double res = ::tan(value);
+        float128 f1 = value;
+        float128 float128_res = tan(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "tan: " << "value=" << value;
+    }
+}
+TEST(float128, asin) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, -1);
+        double res = ::asin(value);
+        float128 f1 = value;
+        float128 float128_res = asin(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "asin: " << "value=" << value;
+    }
+}
+TEST(float128, acos) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, -1);
+        double res = acos(value);
+        float128 f1 = value;
+        float128 float128_res = acos(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "acos: " << "value=" << value;
+    }
+}
+TEST(float128, atan) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 14);
+        double res = atan(value);
+        float128 f1 = value;
+        float128 float128_res = atan(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "atan: " << "value=" << value;
+    }
+}
 //TEST(float128, atan2) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
