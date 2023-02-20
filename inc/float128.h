@@ -2667,6 +2667,48 @@ public:
         res.set_sign(sign);
         return res;
     }
+    /**
+     * @brief Calculate the inverse tangent function of the ratio y / x
+     * @param y value
+     * @param x value
+     * @return Arctangent of y / x in the range [-pi, pi]
+    */
+    friend float128 atan2(float128 y, float128 x) noexcept
+    {
+        // constants for segmentation
+        const float128 pi = float128::pi();
+        const float128 half_pi = float128::half_pi(); // pi / 2
+        const float128 quarter_pi = float128::quarter_pi(); // pi / 4
+
+        // x == 0
+        if (!x) {
+            if (!y) return 0;
+
+            return (y.is_negative()) ? -half_pi : half_pi;
+        }
+        // y == 0
+        if (!y)
+            return (x.is_negative()) ? -pi : pi;
+
+        float128 res;
+        // save the signs of x, y
+        bool comp = fabs(y) > fabs(x);
+        float128 ratio;
+
+        // calculate the ratio keeping it below 1.0
+        ratio = (comp) ? x / y : y / x;
+        res = atan(ratio);
+        const float128 eps = fabs(res >> 110);
+
+        if (comp)
+            res = (res.is_negative()) ? -half_pi - res : half_pi - res;
+
+        if (x > 0)
+            return res;
+
+        // x < 0
+        return (y < 0) ? res - pi : res + pi;
+    }
 
 };
 

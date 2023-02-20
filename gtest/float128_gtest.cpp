@@ -1139,18 +1139,18 @@ TEST(float128, atan) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "atan: " << "value=" << value;
     }
 }
-//TEST(float128, atan2) {
-//    srand(RANDOM_SEED);
-//    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-//        double value1 = get_double_random(-10, 14); //lower exponent results in lost bits
-//        double value2 = get_double_random(-10, 14); //lower exponent results in lost bits
-//        double res = atan2(value1, value2);
-//        float128 f1 = value1;
-//        float128 f2 = value2;
-//        float128 float128_res = atan2(f1, f2);
-//        EXPECT_DOUBLE_EQ(float128_res, res) << "atan2: " << " value1=" << value1 << ", value2=" << value2;
-//    }
-//}
+TEST(float128, atan2) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value1 = get_double_random(-10, 14); //lower exponent results in lost bits
+        double value2 = get_double_random(-10, 14); //lower exponent results in lost bits
+        double res = atan2(value1, value2);
+        float128 f1 = value1;
+        float128 f2 = value2;
+        float128 float128_res = atan2(f1, f2);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "atan2: " << " value1=" << value1 << ", value2=" << value2;
+    }
+}
 //TEST(float128, sinh) {
 //    srand(RANDOM_SEED);
 //    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
