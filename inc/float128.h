@@ -73,6 +73,7 @@ float128 fdim(const float128& x, const float128& y) noexcept;
 float128 fmin(const float128& x, const float128& y) noexcept;
 float128 fmax(const float128& x, const float128& y) noexcept;
 float128 hypot(const float128& x, const float128& y) noexcept;
+float128 cbrt(const float128 x, uint32_t iterations = 1) noexcept;
 float128 sqrt(const float128& x, uint32_t iterations = 3) noexcept;
 float128 sin(float128 x) noexcept;
 float128 asin(float128 x) noexcept;
@@ -2048,8 +2049,12 @@ public:
     */
     friend float128 sqrt(const float128& x, uint32_t iterations) noexcept {
         static const float128 factor = "0.70710678118654752440084436210484903928483593768847403658833981"; // sqrt(2) / 2
-        if (x.is_negative() || x.is_zero())
+        if (x.is_negative())
+            return float128::nan();
+        if (x.is_zero())
             return 0;
+        if (x.is_special())
+            return x;
 
         // normalize the input to the range [0.5, 1)
         int32_t expo = x.get_exponent() + 1;
@@ -2081,6 +2086,65 @@ public:
         return root;
     }
     /**
+     * @brief Calculates the cube root.
+     * Uses the Halley's method.
+     * @param x Floating point value
+     * @param iterations how many Halley to perform, usually 1 is enough
+     * @return cube root of x
+    */
+    friend FP128_INLINE float128 cbrt(const float128 x, uint32_t iterations) noexcept {
+        static const float128 factor1 = "0.62996052494743659533327218014164827764034271240234"; // cbrt(2) / 2
+        static const float128 factor2 = "0.79370052598409979172089379062526859343051910400391"; // cbrt(4) / 2
+
+        if (x.is_negative())
+            return float128::nan();
+        if (x.is_zero())
+            return 0;
+        if (x.is_special())
+            return x;
+
+        // normalize the input to the range [0.5, 1)
+        int32_t expo = x.get_exponent() + 1;
+        float128 norm_x = x;
+        norm_x.set_exponent(-1);
+
+        // use existing HW to provide an excellent first estimate.
+        // regardless of what x was, norm_x is within double's precision range
+        double temp = static_cast<double>(norm_x);
+        float128 root = ::cbrt(temp);
+
+        // iterate several times via Halley's method
+        //                3
+        //              Xn  + 2X
+        //   Xn+1 = Xn ----------
+        //                3
+        //              2Xn  + X
+        const auto x2 = norm_x << 1;
+        for (auto i = iterations; i != 0; --i) {
+            float128 r_cube = root * root * root;
+            root = root * (r_cube + x2) / ((r_cube << 1) + norm_x);
+        }
+        
+        // correct the result if the exponent was not a multiple of 3.
+        // the offset is to have the expo always positive.
+        switch ((expo + 300000) % 3) {
+        case 1:
+            root *= factor1;
+            break;
+        case 2:
+            root *= factor2;
+            break;
+        default:
+            break;
+        }
+
+        // Denormalize the result
+        int32_t root_expo = root.get_exponent();
+        root_expo += (expo > 0) ? (expo + 2) / 3 : expo / 3;
+        root.set_exponent(root_expo);
+        return root;
+    }
+    /**
      * @brief Calculates the reciprocal of a value. y = 1 / x
      * Using newton iterations: Yn+1 = Yn(2 - x * Yn)
      * @param x Input value
@@ -2091,6 +2155,7 @@ public:
         constexpr int max_iterations = 3;
         constexpr int debug = false;
         auto x_sign = x.get_sign();
+        if (x.is_special()) return x;
         if (x.is_subnormal() || x.is_zero()) return (x_sign) ? -inf() : inf();
         
         float128 norm_x = x;

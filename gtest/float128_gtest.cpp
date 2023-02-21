@@ -922,6 +922,16 @@ TEST(float128, sqrt) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "sqrt: " << "value=" << value;
     }
 }
+TEST(float128, cbrt) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = fabs(get_double_random());
+        double res = ::cbrt(value);
+        float128 f1 = value;
+        float128 float128_res = cbrt(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "cbrt: " << "value=" << value;
+    }
+}
 TEST(float128, reciprocal) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
