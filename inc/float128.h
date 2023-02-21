@@ -75,6 +75,8 @@ float128 fmax(const float128& x, const float128& y) noexcept;
 float128 hypot(const float128& x, const float128& y) noexcept;
 float128 cbrt(const float128 x, uint32_t iterations = 1) noexcept;
 float128 sqrt(const float128& x, uint32_t iterations = 3) noexcept;
+float128 erf(float128 x) noexcept;
+float128 erfc(float128 x) noexcept;
 float128 sin(float128 x) noexcept;
 float128 asin(float128 x) noexcept;
 float128 cos(float128 x) noexcept;
@@ -2864,6 +2866,42 @@ public:
 
         return log((one + x) / (one - x)) >> 1;
     }
+    /**
+     * @brief Computes the error function of a value.
+     * The erf function return a value in the range -1.0 to 1.0. 
+     * There's no error return. 
+     * @param x A floating-point value.
+     * @return The erf functions return the Gauss error function of x.
+    */
+    friend FP128_INLINE float128 erf(const float128 x) noexcept {
+        static const float128 two_by_sqrt_pi = float128(2) / sqrt(float128::pi());
+        // Maclaurin series:
+        //                             3      5      7      9
+        //             2              x      x      x      x
+        // erf(x) = -------- * ( x - ---  + ---- - ---- + ----- - ... )
+        //          sqrt(pi)          3      10     42     216
+        //
+        //
+        // each element in the series is:
+        //      n    2n+1
+        //  (-1)  * x
+        //  -------------
+        //  n! * (2n + 1)
+        //
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
+    /**
+     * @brief Computes the complementary error function of a value.
+     * The erfc functions return a value in the range 0 to 2. If x is too large for erfc, the errno variable is set to ERANGE.
+     * @param x A floating-point value.
+     * @return The erfc functions return the complementary Gauss error function of x.
+    */
+    friend FP128_INLINE float128 erfc(const float128 x) noexcept {
+        if (fabs(x) > 1)
+            return nan();
+        return float128::one() - erf(x);
+    }
+
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);
