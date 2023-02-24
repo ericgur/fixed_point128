@@ -103,6 +103,7 @@ float128 log1p(float128 x, int32_t f = 112) noexcept;
 // non CRT function
 float128 reciprocal(const float128& x) noexcept;
 void fact_reciprocal(int x, float128& res) noexcept;
+float128 double_factorial(int x) noexcept;
 
 /***********************************************************************************
 *                                  Main Code
@@ -2264,6 +2265,30 @@ public:
         }
     }
     /**
+     * @brief returns the double factorial of a number
+     * @param x 
+     * @param res 
+    */
+    friend FP128_INLINE float128 double_factorial(int x) noexcept {
+        constexpr int32_t arr_size = 100;
+        static float128 c[arr_size];
+        if (c[0].is_zero()) {
+            c[0] = 1;
+            c[1] = 1;
+
+            // compute the odd and even double factorials
+            for (int i = 2; i < arr_size - 1; i += 2) {
+                c[i] = c[i - 2] * i;
+                c[i + 1] = c[i - 1] * (i + 1);
+            }
+        }
+        if (x < arr_size)
+            return c[x];
+        
+        // TODO: compute the following members
+        return float128::inf();
+    }
+    /**
      *                                       x
      * @brief Calculates the exponent of x: e
      * Using the Maclaurin series expansion, the formula is:
@@ -2867,28 +2892,114 @@ public:
         return log((one + x) / (one - x)) >> 1;
     }
     /**
+     * @brief Calculates the Maclaurin series constants for the erf function.
+     * The array will hold  1 / (n! * (2n + 1))
+     * @param a pointer to array that receives the results. The array must be preallocated.
+     * @param count Element count in the array
+    */
+    friend void erf_constants(float128* a, int32_t count) {
+        if (a == nullptr) return;
+        
+        a[0] = 1;
+        float128 f = 1; // value of 0!
+        for (int32_t i = 1; i < count; ++i) {
+            f *= i;
+            a[i] = float128::one() / (f * (2 * i + 1));
+        }
+    }
+    /**
      * @brief Computes the error function of a value.
      * The erf function return a value in the range -1.0 to 1.0. 
      * There's no error return. 
      * @param x A floating-point value.
      * @return The erf functions return the Gauss error function of x.
     */
-    friend FP128_INLINE float128 erf(const float128 x) noexcept {
-        static const float128 two_by_sqrt_pi = float128(2) / sqrt(float128::pi());
-        // Maclaurin series:
-        //                             3      5      7      9
-        //             2              x      x      x      x
-        // erf(x) = -------- * ( x - ---  + ---- - ---- + ----- - ... )
-        //          sqrt(pi)          3      10     42     216
-        //
-        //
-        // each element in the series is:
-        //      n    2n+1
-        //  (-1)  * x
-        //  -------------
-        //  n! * (2n + 1)
-        //
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    friend FP128_INLINE float128 erf(float128 x) noexcept {
+        static const float128 sqrt_pi = sqrt(float128::pi());
+        static const float128 two_by_sqrt_pi = float128(2) / sqrt_pi;
+        constexpr int32_t C_len = 30;
+        static float128 C[C_len];
+        if (C[0].is_zero()) {
+            erf_constants(C, C_len);
+        }
+        if (x.is_zero())
+            return 0;
+        if (x.is_inf())
+            return (x.is_positive()) ? 1 : -1;
+        if (x.is_nan())
+            return nan;
+
+        auto x_sign = x.get_sign();
+        x.set_sign(0);
+
+        int32_t expo = x.get_exponent();
+        float128 xx = x * x;
+
+        if (x < 1) {
+            // Maclaurin series:
+            //                             3      5      7      9
+            //             2              x      x      x      x
+            // erf(x) = -------- * ( x - ---  + ---- - ---- + ----- - ... )
+            //          sqrt(pi)          3      10     42     216
+            //
+            //
+            // each element in the series is:
+            //      n    2n+1
+            //  (-1)  * x
+            //  -------------
+            //  n! * (2n + 1)
+            //
+    
+            // the first series element is x
+            // compute the rest of the series: 
+            float128 elem_nom = x;
+            for (int i = 1, sign = 1; i < C_len; ++i, sign = 1 - sign) {
+                elem_nom *= xx;
+
+                float128 elem = elem_nom * C[i]; // next element in the series
+                // precision limit has been hit
+                if (elem.get_exponent() + float128::FRAC_BITS < expo)
+                    break;
+                x += (sign) ? -elem : elem;
+            }
+            x *= two_by_sqrt_pi;
+        }
+        else {
+            //                     2
+            //                   -x           -3       -5       -7
+            //                   e         -1  x      3x      15x
+            //  erf(x) = 1 - --------- * (x  - -   + ---- -  ----- - ...) 
+            //               sqrt(pi)          2      4        8
+            //                                    
+            //
+            // where each element is 
+            //      n                -(2n+1)   -n
+            //  (-1)  * (2n - 1)!! * x       * 2 
+            
+            // the left side of the equation
+            float128 left_side = exp(-xx) / sqrt_pi;
+
+            x = reciprocal(x); // first element
+            float128 elem, elem1 = x, elem2;
+            xx = x * x;
+            expo = x.get_exponent();
+            for (int i = 1, sign = 1; i < 50; ++i, sign = 1 - sign) {
+                elem1 *= xx;
+                elem2 = double_factorial(2 * i - 1);
+                elem = (elem1 * elem2) >> i; // next element in the series
+                // precision limit has been hit
+                if (elem2.is_inf() || elem.get_exponent() + float128::FRAC_BITS < expo)
+                    break;
+                x += (sign) ? -elem : elem;
+            }
+
+            x *= left_side;
+            x = float128::one() - x;
+        }
+
+
+        x.set_sign(x_sign);
+        return x;
     }
     /**
      * @brief Computes the complementary error function of a value.
@@ -2896,9 +3007,12 @@ public:
      * @param x A floating-point value.
      * @return The erfc functions return the complementary Gauss error function of x.
     */
-    friend FP128_INLINE float128 erfc(const float128 x) noexcept {
-        if (fabs(x) > 1)
+    friend FP128_INLINE float128 erfc(float128 x) noexcept {
+        if (x.is_zero()) return 1;
+        if (x.is_inf()) return (x.get_sign()) ? 2 : 0;
+        if (fabs(x) > 1 || x.is_nan())
             return nan();
+
         return float128::one() - erf(x);
     }
 

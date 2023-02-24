@@ -824,19 +824,18 @@ public:
         if constexpr (std::is_floating_point_v<T>) {
             return operator*=(fixed_point128(x));
         }
-        // integers: convert to uint64 for a simpler operation.
-        if constexpr (std::is_signed_v<T>) {
-        #pragma warning(push) 
-        #pragma warning(disable: 4702) // static analysis bug in VS 2022 17.4. This code _is_ reachable.
-            // alway do positive multiplication
-            if (x < 0) {
-                x = -x;
-                sign ^= 1;
+        else {
+            // integers: convert to uint64 for a simpler operation.
+            if constexpr (std::is_signed_v<T>) {
+                // alway do positive multiplication
+                if (x < 0) {
+                    x = -x;
+                    sign ^= 1;
+                }
             }
-        #pragma warning(pop) 
+
+            return operator*=(static_cast<uint64_t>(x));
         }
-        
-        return operator*=(static_cast<uint64_t>(x));
     }
     /**
      * @brief Multiplies a 64 bit value to this object
@@ -932,16 +931,18 @@ public:
         if constexpr (std::is_floating_point_v<T>) {
             return operator/=(static_cast<double>(x));
         }
-        // integers: convert to uint64 for a simpler operation.
-        if constexpr (std::is_signed_v<T>) {
-            // alway do positive division
-            if (x < 0) {
-                x = -x;
-                sign ^= 1;
+        else {
+            // integers: convert to uint64 for a simpler operation.
+            if constexpr (std::is_signed_v<T>) {
+                // alway do positive division
+                if (x < 0) {
+                    x = -x;
+                    sign ^= 1;
+                }
             }
-        }
 
-        return operator/=(static_cast<uint64_t>(x));
+            return operator/=(static_cast<uint64_t>(x));
+        }
     }
     /**
      * @brief Divide this object by x.

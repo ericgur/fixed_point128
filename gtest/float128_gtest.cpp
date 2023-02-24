@@ -932,6 +932,26 @@ TEST(float128, cbrt) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "cbrt: " << "value=" << value;
     }
 }
+TEST(float128, erf) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 4);
+        double res = ::erf(value);
+        float128 f1 = value;
+        float128 float128_res = erf(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "erf: " << "value=" << value;
+    }
+}
+TEST(float128, erfc) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random(-60, 0);
+        double res = ::erfc(value);
+        float128 f1 = value;
+        float128 float128_res = erfc(f1);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "erfc: " << "value=" << value;
+    }
+}
 TEST(float128, reciprocal) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
