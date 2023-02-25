@@ -2965,6 +2965,8 @@ public:
             x *= two_by_sqrt_pi;
         }
         else {
+            x = float128::one() - erfc(x);
+            /*
             //                     2
             //                   -x           -3       -5       -7
             //                   e         -1  x      3x      15x
@@ -2983,7 +2985,7 @@ public:
             float128 elem, elem1 = x, elem2;
             xx = x * x;
             expo = x.get_exponent();
-            for (int i = 1, sign = 1; i < 50; ++i, sign = 1 - sign) {
+            for (int i = 1, sign = 1; i < 25; ++i, sign = 1 - sign) {
                 elem1 *= xx;
                 elem2 = double_factorial(2 * i - 1);
                 elem = (elem1 * elem2) >> i; // next element in the series
@@ -2995,6 +2997,7 @@ public:
 
             x *= left_side;
             x = float128::one() - x;
+            */
         }
 
 
@@ -3010,10 +3013,41 @@ public:
     friend FP128_INLINE float128 erfc(float128 x) noexcept {
         if (x.is_zero()) return 1;
         if (x.is_inf()) return (x.get_sign()) ? 2 : 0;
-        if (fabs(x) > 1 || x.is_nan())
+        if (x.is_nan())
             return nan();
 
-        return float128::one() - erf(x);
+        const float128 one = float128::one();
+        if (fabs(x) < one)
+            return one - erf(x);
+
+        return (::erfc(static_cast<double>(x)));
+
+        //auto x_sign = x.get_sign();
+        //x.set_sign(0);
+
+        //float128 t = reciprocal(one + x >> 1);
+        //static const float128 a[13] = {
+        //   0.00000000000000000,
+        //    -0.0000000000000000087,
+        //    0.0000000000000151128,
+        //    -0.0000000000042211594,
+        //    0.0000000005376941005,
+        //    -0.0000000487263438743,
+        //    0.0000033500543171203,
+        //    -0.0001681266736668477,
+        //    0.0061765455561937135,
+        //    -0.1531173381477592232,
+        //    2.2723844989269186145,
+        //    -18.695741264372354978,
+        //    78.905158514824205072
+        //};
+        //
+        //float128 ans = 0.0;
+        //for (int i = 12; i >= 0; i--) {
+        //    ans = t * ans + a[i];
+        //}
+        //ans *= t * exp(-x * x);
+        //return (x_sign) ? float128(2) - ans : ans;
     }
 
 };
