@@ -78,16 +78,8 @@ private:
     //
     // members
     //
-#pragma warning(push)
-#pragma warning(disable: 4201)
-    union {
-        struct {
-            uint64_t low;  // lower QWORD
-            uint64_t high; // upper QWORD
-        };
-        uint64_t words[2];
-    };
-#pragma warning(pop)
+    uint64_t low;  // lower QWORD
+    uint64_t high; // upper QWORD
     // useful const calculations
     static constexpr uint64_t dbl_f_msb = 64ull + dbl_frac_bits; // msb location of the double precision fraction
     static constexpr uint64_t flt_f_msb = 64ull + flt_frac_bits; // msb location of the single precision fraction
@@ -104,20 +96,20 @@ public:
     /**
      * @brief Default constructor, creates an instance with a value of zero.
     */
-    uint128_t() noexcept :
+    constexpr uint128_t() noexcept :
         low(0), high(0) {}
     /**
      * @brief Copy constructor
      * @param rhs Object to copy from
     */
-    uint128_t(const uint128_t& rhs) noexcept :
+    constexpr uint128_t(const uint128_t& rhs) noexcept :
         low(rhs.low), high(rhs.high) {}
     /**
      * @brief Move constructor
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param rhs Object to copy from
     */
-    uint128_t(const uint128_t&& rhs) noexcept :
+    constexpr uint128_t(const uint128_t&& rhs) noexcept :
         low(rhs.low), high(rhs.high) {}
     /**
      * @brief Constructor from the double type
@@ -168,30 +160,26 @@ public:
      * @brief Constructor from uint64_t type
      * @param x Input value
     */
-    uint128_t(uint64_t x) noexcept :
+    constexpr uint128_t(uint64_t x) noexcept :
         low(x), high(0) {}
     /**
      * @brief Constructor from int64_t type
      * @param x Input value
     */
-    uint128_t(int64_t x) noexcept {
-        low = static_cast<uint64_t>(x);
-        high = (x < 0) ? UINT64_MAX : 0; // sign extend the value to the higher QWORD
-    }
+    constexpr uint128_t(int64_t x) noexcept :
+     low(static_cast<uint64_t>(x)), high((x < 0) ? UINT64_MAX : 0) {}
     /**
      * @brief Constructor from uint32_t type
      * @param x Input value
    */
-    uint128_t(uint32_t x) noexcept :
+    constexpr uint128_t(uint32_t x) noexcept :
         low(x), high(0) {}
     /**
      * @brief Constructor from int32_t type
      * @param x Input value
    */
-    uint128_t(int32_t x) noexcept {
-        low = static_cast<uint64_t>(x);
-        high = (x < 0) ? UINT64_MAX : 0; // sign extend the value to the higher QWORD
-    }
+    constexpr uint128_t(int32_t x) noexcept : 
+        low(static_cast<uint64_t>(x)), high((x < 0) ? UINT64_MAX : 0) {}
     /**
      * @brief Constructor from const char* (C string).
      * Allows creating 128 bit values from a string. Much slower than the other constructors.<BR>
@@ -262,12 +250,12 @@ public:
      * @param l Low QWORD
      * @param h High QWORD
     */
-    uint128_t(uint64_t l, uint64_t h) noexcept:
+    constexpr uint128_t(uint64_t l, uint64_t h) noexcept:
         low(l), high(h) {}    
     /**
      * @brief Destructor
     */
-    ~uint128_t() noexcept {}
+    __forceinline ~uint128_t() noexcept = default;
     /**
      * @brief Assignment operator
      * @param rhs Object to copy from 
@@ -612,7 +600,7 @@ public:
         }
 
         uint64_t nom[2] = { low, high };
-
+        uint64_t* words = &low;
         if (div_64bit(words, nullptr, (uint64_t*)nom, uval, 2)) {
             FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
         }
@@ -645,6 +633,7 @@ public:
         }
         else {
             const uint64_t denom[2] = { rhs.low, rhs.high };
+            uint64_t* words = &low;
             if (div_32bit((uint32_t*)q, (uint32_t*)words, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
                 FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
             }

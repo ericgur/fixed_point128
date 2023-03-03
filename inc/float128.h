@@ -183,14 +183,14 @@ public:
      * @brief Copy constructor
      * @param other Object to copy from
     */
-    __forceinline float128(const float128& other) noexcept :
+    __forceinline constexpr float128(const float128& other) noexcept :
         low(other.low), high(other.high) {}
     /**
      * @brief Move constructor
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param other Object to copy from
     */
-    __forceinline float128(const float128&& other) noexcept :
+    __forceinline constexpr float128(const float128&& other) noexcept :
         low(other.low), high(other.high) {}
     /**
      * @brief Low level constructor
@@ -206,11 +206,8 @@ public:
      * @param e Exponent
      * @param s sign
     */
-    __forceinline float128(uint64_t lf, uint64_t hf, uint32_t e, uint32_t s) noexcept :
-        low(lf) {
-        high_bits.f = hf;
-        high_bits.e = e;
-        high_bits.s = s;
+    __forceinline constexpr float128(uint64_t lf, uint64_t hf, uint32_t e, uint32_t s) noexcept :
+        low(lf), high((hf & FP128_MAX_VALUE_64(48)) | (((0x7FFFull & e) << 48)) | ((1ull & s) << 63)) {
     }
     /**
      * @brief Constructor from the double type
@@ -255,7 +252,8 @@ public:
         set_sign(d.s);
     }
     template<typename T>
-    __forceinline float128(T x) noexcept {
+    __forceinline float128(T x) noexcept :
+        low(0), high(0) {
         if constexpr (std::is_floating_point_v<T>) {
             new(this) float128(static_cast<double>(x));
             return;
@@ -277,7 +275,6 @@ public:
             }
 
             // integers: convert to uint64 for a simpler operation.
-            high = 0;
             low = static_cast<uint64_t>(x);
             if (low == 0)
                 return;
@@ -290,7 +287,6 @@ public:
             return;
         }
     }
-
     /**
      * @brief Construct from a string
      * Allows creating very high precision values, approximately 34 decimal digits.
@@ -589,7 +585,7 @@ public:
     /**
      * @brief Destructor
     */
-    __forceinline ~float128() {}
+    __forceinline ~float128() = default;
     /**
      * @brief Assignment operator
      * @param other Object to copy from
@@ -818,7 +814,6 @@ public:
             ++int_digits;
             constexpr int32_t digit_group = 5, max_frac_digits = 35;
             static_assert(digit_group <= 9); // must fit in 32 bit
-            //float128 base = exp10(digit_group);
             float128 base = 100000;
             char fmt[10];
             sprintf(fmt, "%%0%ii", digit_group);
@@ -846,7 +841,7 @@ public:
     */
     void to_e_format(char* str, int32_t buff_size) const {
         if (is_zero()) {
-            sprintf(str, "%s0E0", is_negative() ? "-" : "");
+            sprintf(str, "%s0e0", is_negative() ? "-" : "");
             return;
         }
 
@@ -854,8 +849,8 @@ public:
         float128 f = *this / exp10(l10);
         std::string s = f;
         char temp[128];
-        sprintf(temp, "E%d", l10);
-        auto tail_len = strlen(temp);
+        sprintf(temp, "e%d", l10);
+        auto tail_len = strlen(temp) + 1;
         s.resize(buff_size - tail_len, '0');
         s.append(temp);
         strncpy(str, s.c_str(), buff_size);
@@ -1623,22 +1618,22 @@ public:
      * @brief Return the value of pi
      * @return pi
     */
-    __forceinline static float128 pi() {
+    __forceinline static constexpr float128 pi() {
         return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x4000, 0);
     }
     /**
      * @brief Return the value of pi / 2
      * @return pi / 2
     */
-    __forceinline static float128 half_pi() {
-        return pi() >> 1;
+    __forceinline static constexpr float128 half_pi() {
+        return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x3FFF, 0);
     }
     /**
      * @brief Return the value of pi / 4
      * @return pi / 4
     */
-    __forceinline static float128 quarter_pi() {
-        return pi() >> 2;
+    __forceinline static constexpr float128 quarter_pi() {
+        return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x3FFE, 0);
     }
     /**
      * @brief Return the value of e
@@ -1660,24 +1655,22 @@ public:
      * @brief  Returns a value of 1
      * @return 1
     */
-    __forceinline static float128 one() noexcept {
-        static const float128 one = 1;
-        return one;
+    __forceinline static constexpr float128 one() noexcept {
+        return float128(0, 0, EXP_BIAS, 0);
     }
     /**
      * @brief  Returns a value of 0.5
      * @return 0.5
     */
-    __forceinline static float128 half() noexcept
+    __forceinline static constexpr float128 half() noexcept
     {
-        static const float128 half = 0.5;
-        return half;
+        return float128(0, 0, EXP_BIAS - 1, 0);
     }
     /**
      * @brief Return 0.1 using maximum precision
      * @return 
     */
-    __forceinline static float128 tenth() noexcept
+    __forceinline static constexpr float128 tenth() noexcept
     {
         // 0.1 using maximum precision
         return float128(0x999999999999999A, 0x999999999999, EXP_BIAS - 4, 0u);
@@ -2616,7 +2609,7 @@ public:
         */
     friend __forceinline float128 cos1(const float128& x) noexcept
     {
-        const float128 half_pi = float128::half_pi();
+        constexpr float128 half_pi = float128::half_pi();
         assert(fabs(x) <= half_pi);
         return (x.is_positive()) ?
             sin1(half_pi - x) :
@@ -2630,7 +2623,7 @@ public:
     */
     friend float128 sin(float128 x) noexcept
     {
-        const float128 half_pi = float128::half_pi();
+        constexpr float128 half_pi = float128::half_pi();
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
         int64_t n = static_cast<int64_t>((x / half_pi) + round);
@@ -2689,7 +2682,7 @@ public:
     */
     friend float128 cos(float128 x) noexcept
     {
-        const float128 half_pi = float128::half_pi(); // pi / 2
+        constexpr float128 half_pi = float128::half_pi(); // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
         int64_t n = static_cast<int64_t>((x / half_pi) + round);
@@ -2754,7 +2747,7 @@ public:
     friend float128 atan(float128 x) noexcept
     {
         // constants for segmentation
-        const float128 half_pi = float128::half_pi(); // pi / 2
+        constexpr float128 half_pi = float128::half_pi(); // pi / 2
         bool comp = false;
         constexpr int max_iterations = 6;
 
@@ -2802,9 +2795,9 @@ public:
     friend float128 atan2(float128 y, float128 x) noexcept
     {
         // constants for segmentation
-        const float128 pi = float128::pi();
-        const float128 half_pi = float128::half_pi(); // pi / 2
-        const float128 quarter_pi = float128::quarter_pi(); // pi / 4
+        constexpr float128 pi = float128::pi();
+        constexpr float128 half_pi = float128::half_pi(); // pi / 2
+        constexpr float128 quarter_pi = float128::quarter_pi(); // pi / 4
 
         // x == 0
         if (!x) {
@@ -2919,7 +2912,7 @@ public:
     */
     friend FP128_INLINE float128 atanh(const float128 x) noexcept
     {
-        auto one = float128::one();
+        constexpr auto one = float128::one();
         if (fabs(x) >= 1)
             return 0;
 
@@ -3052,7 +3045,7 @@ public:
         if (x.is_nan())
             return nan();
 
-        const float128 one = float128::one();
+        constexpr float128 one = float128::one();
         if (fabs(x) < one)
             return one - erf(x);
 
@@ -3096,7 +3089,8 @@ public:
      * @return (x * y) + z
     */
     float128 fma(float128 x, float128 y, float128 z) noexcept {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        // TODO: implement properly (w/o losing precision)
+        return x * y + z;
     }
 };
 
