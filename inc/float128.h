@@ -72,6 +72,7 @@ float128 modf(const float128& x, float128* iptr) noexcept;
 float128 fdim(const float128& x, const float128& y) noexcept;
 float128 fmin(const float128& x, const float128& y) noexcept;
 float128 fmax(const float128& x, const float128& y) noexcept;
+float128 fma(float128 x, float128 y, float128 z) noexcept;
 float128 hypot(const float128& x, const float128& y) noexcept;
 float128 cbrt(const float128 x, uint32_t iterations = 1) noexcept;
 float128 sqrt(const float128& x, uint32_t iterations = 3) noexcept;
@@ -100,6 +101,8 @@ float128 log2(float128 x, int32_t f = 112) noexcept;
 float128 log10(float128 x, int32_t f = 112) noexcept;
 float128 logb(float128 x, int32_t f = 112) noexcept;
 float128 log1p(float128 x, int32_t f = 112) noexcept;
+int isfinite(const float128& x) noexcept;
+
 // non CRT function
 float128 reciprocal(const float128& x) noexcept;
 void fact_reciprocal(int x, float128& res) noexcept;
@@ -833,41 +836,6 @@ public:
 
         }
 
-        // convert the fraction part
-        //if (!frac_part.is_zero()) {
-        //    *p++ = '.';
-        //    ++int_digits;
-        //    for (auto i = 0; i < 35; ++i) {
-        //        frac_part *= 10;
-        //        frac_part = modf(frac_part, &int_part);
-        //        uint32_t digit = static_cast<uint32_t>(int_part);
-        //        *p++ = static_cast<char>(digit + '0');
-        //    }
-
-        //    // back track and remove trailing zero
-        //    while (p[-1] == '0') 
-        //        --p;
-
-        //}
-
-        //// there are fraction bits left to print
-        //if (frac_bits > 0) {
-        //    uint32_t digits = (uint32_t)((double)frac_bits / 3.29);
-        //    *p++ = '.';
-        //    uint128_t mask(UINT64_MAX, 0xFFFFFFFFFFFF); // keeps lower 112 bits
-        //    frac_part <<= (128 - frac_bits); // erase the remaining integer bits
-        //    frac_part >>= 16;
-        //    while (frac_part != 0 && digits-- > 0) {
-        //        frac_part *= 10;
-        //        int32_t digit = frac_part >> FRAC_BITS;
-        //        frac_part &= mask;
-        //        if (digit > 0 || frac_part != 0)
-        //            *p++ = static_cast<char>(digit + '0');
-        //    }
-        //}
-
-        //auto msb = 
-
         *p = '\0';
         return s;
     }
@@ -877,8 +845,20 @@ public:
      * @param buff_size Output buffer size in bytes
     */
     void to_e_format(char* str, int32_t buff_size) const {
-        UNREFERENCED_PARAMETER(buff_size);
-        strcpy(str, "e format not supported yet");
+        if (is_zero()) {
+            sprintf(str, "%s0E0", is_negative() ? "-" : "");
+            return;
+        }
+
+        auto l10 = static_cast<int32_t>(trunc(log10(*this)));
+        float128 f = *this / exp10(l10);
+        std::string s = f;
+        char temp[128];
+        sprintf(temp, "E%d", l10);
+        auto tail_len = strlen(temp);
+        s.resize(buff_size - tail_len, '0');
+        s.append(temp);
+        strncpy(str, s.c_str(), buff_size);
     }
 
     //
@@ -1559,8 +1539,35 @@ public:
      * @param x Source value
      * @return Higher value closest to x
     */
-    __forceinline static float128 nextUp(float128 x) {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    FP128_INLINE static float128 nextUp(float128 x) {
+        switch (x.get_class()) {
+        case positiveInfinity:
+        case quietNaN:
+        case signalingNaN:
+            break;
+        case negativeInfinity:
+            return float128(UINT64_MAX, UINT64_MAX, EXP_MASK - 1, 1);
+        case negativeZero:
+        case positiveZero:
+            x.low = 1;
+            x.high_bits.s = 0;
+            break;
+        case positiveSubnormal:
+        case positiveNormal:
+            ++x.low;
+            if (x.low == 0) {
+                ++x.high; // takes care of raising the exponent if needed as well
+            }
+            break;
+        case negativeSubnormal:
+        case negativeNormal:
+            --x.low;
+            if (x.low == UINT64_MAX) {
+                --x.high; // takes care of decreasing the exponent if needed as well
+            }
+            break;
+        }
+        return x;
     }
     /**
      * @brief Produces the closest value smaller than x
@@ -1568,7 +1575,34 @@ public:
      * @return Lower value closest to x
     */
     __forceinline static float128 nextDown(float128 x) {
-        FP128_NOT_IMPLEMENTED_EXCEPTION;
+        switch (x.get_class()) {
+        case negativeInfinity:
+        case quietNaN:
+        case signalingNaN:
+            break;
+        case positiveInfinity:
+            return float128(UINT64_MAX, UINT64_MAX, EXP_MASK - 1, 0);
+        case negativeZero:
+        case positiveZero:
+            x.low = 1;
+            x.high_bits.s = 1;
+            break;
+        case negativeSubnormal:
+        case negativeNormal:
+            ++x.low;
+            if (x.low == 0) {
+                ++x.high; // takes care of raising the exponent if needed as well
+            }
+            break;
+        case positiveSubnormal:
+        case positiveNormal:
+            --x.low;
+            if (x.low == UINT64_MAX) {
+                --x.high; // takes care of decreasing the exponent if needed as well
+            }
+            break;
+        }
+        return x;
     }
 
     /**
@@ -2924,7 +2958,7 @@ public:
         }
         if (x.is_zero())
             return 0;
-        if (x.is_inf())
+        if (x.is_inf() || fabs(x) > 110)
             return (x.is_positive()) ? 1 : -1;
         if (x.is_nan())
             return nan;
@@ -2935,7 +2969,7 @@ public:
         int32_t expo = x.get_exponent();
         float128 xx = x * x;
 
-        if (x < 1) {
+        if (x < 2.0) {
             // Maclaurin series:
             //                             3      5      7      9
             //             2              x      x      x      x
@@ -2964,9 +2998,9 @@ public:
             }
             x *= two_by_sqrt_pi;
         }
-        else {
-            x = float128::one() - erfc(x);
-            /*
+        else if (x > 4.2) {
+            //x = float128::one() - erfc(x);
+
             //                     2
             //                   -x           -3       -5       -7
             //                   e         -1  x      3x      15x
@@ -2997,9 +3031,11 @@ public:
 
             x *= left_side;
             x = float128::one() - x;
-            */
         }
-
+        else {
+            // TODO: implement for other ranges
+            x = ::erf(static_cast<double>(x));
+        }
 
         x.set_sign(x_sign);
         return x;
@@ -3049,7 +3085,19 @@ public:
         //ans *= t * exp(-x * x);
         //return (x_sign) ? float128(2) - ans : ans;
     }
-
+    friend __forceinline int isfinite(const float128& x) noexcept {
+        return x.is_finite();
+    }
+    /**
+     * @brief Computes (x * y) + z without losing precision between operations
+     * @param x The first value to multiply.
+     * @param y The second value to multiply.
+     * @param z The second value to multiply.
+     * @return (x * y) + z
+    */
+    float128 fma(float128 x, float128 y, float128 z) noexcept {
+        FP128_NOT_IMPLEMENTED_EXCEPTION;
+    }
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);

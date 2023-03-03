@@ -935,7 +935,7 @@ TEST(float128, cbrt) {
 TEST(float128, erf) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-60, 4);
+        double value = get_double_random(-60, 5);
         double res = ::erf(value);
         float128 f1 = value;
         float128 float128_res = erf(f1);

@@ -1,7 +1,7 @@
 /***********************************************************************************
     MIT License
 
-    Copyright (c) 2022 Eric Gur (ericgur@iname.com)
+    Copyright (c) 2023 Eric Gur (ericgur@iname.com)
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@
 #include <profileapi.h>
 #include <cstdio>
 #include <cassert>
+#include <cmath>
 #include "../inc/fixed_point128.h" 
 #include "../inc/uint128_t.h" 
 #include "../inc/float128.h" 
@@ -50,13 +51,60 @@ using namespace fp128;
 void test_conversion()
 {
     printf("\nTest Conversion\n");
-
+    float128 e = float128::e();
+    double e_0p5 = exp(0.5);
+    float128 e2 = exp(float128(0.5));
+    float128 e3 = e2 * e2;
     float128 f128_zero;
     double d1 = 0.51;
     float128 df128_v1 = d1;
     double f128_v1 = df128_v1;
-    d1 = pow(2, -1025);
+    d1 = pow(2, -1025)/3.0;
     float128 df128_v2 = d1;
+    double d2 = df128_v2;
+    df128_v1 = "10.1234567890";
+    char* str = (char*)df128_v1;
+    d2 = 1e100;
+    int32_t i = d2;
+    double pi = 3.14159265358979323846;
+    df128_v1 = "3.14159265358979323846264338327950288419716939937510"; // 50 first digits of pi
+    str = (char*)df128_v1;
+    df128_v1 = float128::pi();
+    str = (char*)df128_v1;
+    df128_v1 = "2.71828182845904523536028747135266249775724709369"; // 50 first digits of e
+    str = (char*)df128_v1;
+    df128_v1 >>= 1;
+    df128_v1 = 1;
+    df128_v1 /= 3;
+
+    double ddd = 0;
+    str = (char*)df128_v1;
+    df128_v1 = "31415.9265358979323846264338327950288419716939937510E-4"; // 50 first digits of pi
+    float128 factor = "0.70710678118654752440084436210484903928483593768847403658833981";
+    df128_v1 = "10";
+    df128_v1 = "100";
+    df128_v1 = "1000000000000000000000000000000000000000000";
+    df128_v1 = "0x1";
+    df128_v1 = "0x6";
+    df128_v1 = "0xF";
+    df128_v1 = "0xFF";
+    df128_v1 = "0xDEAD";
+    df128_v1 = "1234567890123456789012345678901234";
+    df128_v1 = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+    df128_v1 = "0xF123456789ABCDEFFEDCBA9876543210";
+    df128_v1 = df128_v1.inf();
+    df128_v1 = -df128_v1.inf();
+    df128_v1 = df128_v1.nan();
+    df128_v1 = -3.1415926535897932384626433832795;
+    df128_v2 = 9.1415926535897932384626433832795;
+    df128_v2 = -9.123E+0019;
+    df128_v1 += df128_v2;
+    d1 = HUGE_VAL;
+    d1 = -d1;
+    d1 = nan("");
+    df128_v1 = -3.1415926535897932384626433832795;
+    float128 float128_res_int;
+    float128 float128_res_frac = modf(df128_v1, &float128_res_int);
 
     uint128_t i1 = 1;
     uint128_t i2 = UINT64_MAX;
