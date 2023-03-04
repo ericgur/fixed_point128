@@ -101,6 +101,7 @@ float128 log2(float128 x, int32_t f = 112) noexcept;
 float128 log10(float128 x, int32_t f = 112) noexcept;
 float128 logb(float128 x, int32_t f = 112) noexcept;
 float128 log1p(float128 x, int32_t f = 112) noexcept;
+float128 frexp(float128 x, int* expptr) noexcept;
 int isfinite(const float128& x) noexcept;
 
 // non CRT function
@@ -1639,24 +1640,26 @@ public:
      * @brief Return the value of e
      * @return e
     */
-    __forceinline static float128 e() {
-        static const float128 e = "2.71828182845904523536028747135266249775724709369"; // 50 first digits of e
-        return e;
+    __forceinline static constexpr float128 e() {
+        //static const float128 e = "2.71828182845904523536028747135266249775724709369"; // 50 first digits of e
+        //return e;
+        return float128(0x95355FB8AC404E7A, 0x5BF0A8B14576, 0x4000, 0);
     }
     /**
      * @brief Returns a value of sqrt(2)
      * @return
     */
     __forceinline static float128 sqrt_2() noexcept {
-        static const float128 sqrt_2 = "1.41421356237309504880168872420969807856967187537"; // 50 first digits of sqrt(2)
-        return sqrt_2;
+        //static const float128 sqrt_2 = "1.41421356237309504880168872420969807856967187537"; // 50 first digits of sqrt(2)
+        //return sqrt_2;
+        return float128(0xC908B2FB1366EA95, 0x00006A09E667F3BC, 0x3FFF, 0);
     }
     /**
      * @brief  Returns a value of 1
      * @return 1
     */
     __forceinline static constexpr float128 one() noexcept {
-        return float128(0, 0, EXP_BIAS, 0);
+        return float128(0, 0, 0x3FFF, 0);
     }
     /**
      * @brief  Returns a value of 0.5
@@ -1664,7 +1667,7 @@ public:
     */
     __forceinline static constexpr float128 half() noexcept
     {
-        return float128(0, 0, EXP_BIAS - 1, 0);
+        return float128(0, 0, 0x3FFE, 0);
     }
     /**
      * @brief Return 0.1 using maximum precision
@@ -3088,9 +3091,29 @@ public:
      * @param z The second value to multiply.
      * @return (x * y) + z
     */
-    float128 fma(float128 x, float128 y, float128 z) noexcept {
+    friend float128 fma(float128 x, float128 y, float128 z) noexcept {
         // TODO: implement properly (w/o losing precision)
         return x * y + z;
+    }
+    /**
+     * @brief Gets the mantissa and exponent of a floating-point number.
+     * @param x Floating-point value.
+     * @param expptr Floating-point value.
+     * @return Mantissa in the [0.5,1) range.
+    */
+    friend float128 frexp(float128 x, int* expptr) noexcept {
+        if (x.is_special() || x.is_zero()) {
+            *expptr = 0;
+            return x;
+        }
+
+        uint64_t l, h;
+        int32_t e;
+        uint32_t s;
+        x.get_components(l, h, e, s);
+        *expptr = e + 1;
+        float128 res(l, h, EXP_BIAS - 1, s);
+        return res;
     }
 };
 

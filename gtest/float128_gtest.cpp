@@ -932,6 +932,18 @@ TEST(float128, cbrt) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "cbrt: " << "value=" << value;
     }
 }
+TEST(float128, frexp) {
+    int res_exp, float128_exp;
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        double res = ::frexp(value, &res_exp);
+        float128 f1 = value;
+        float128 float128_res = frexp(f1, &float128_exp);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "frexp mantissa: " << "value=" << value;
+        EXPECT_EQ(float128_exp, res_exp) << "frexp exp: " << "value=" << value;
+    }
+}
 TEST(float128, erf) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
