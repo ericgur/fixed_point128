@@ -944,6 +944,17 @@ TEST(float128, frexp) {
         EXPECT_EQ(float128_exp, res_exp) << "frexp exp: " << "value=" << value;
     }
 }
+TEST(float128, ldexp) {
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        double value = get_double_random();
+        int value_exp = get_int32_random() % 300;
+        double res = ::ldexp(value, value_exp);
+        float128 f1 = value;
+        float128 float128_res = ldexp(f1, value_exp);
+        EXPECT_DOUBLE_EQ(float128_res, res) << "ldexp: " << "value=" << value;
+    }
+}
 TEST(float128, erf) {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {

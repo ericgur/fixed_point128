@@ -102,6 +102,7 @@ float128 log10(float128 x, int32_t f = 112) noexcept;
 float128 logb(float128 x, int32_t f = 112) noexcept;
 float128 log1p(float128 x, int32_t f = 112) noexcept;
 float128 frexp(float128 x, int* expptr) noexcept;
+float128 ldexp(float128 x, int exp) noexcept;
 int isfinite(const float128& x) noexcept;
 
 // non CRT function
@@ -866,7 +867,7 @@ public:
      * @return This object.
     */
     FP128_INLINE float128& operator>>=(int32_t shift) noexcept {
-        if (shift < 1)
+        if (shift < 1 || is_special())
             return *this;
         
         uint64_t l, h;
@@ -883,7 +884,7 @@ public:
      * @return This object.
     */
     FP128_INLINE float128& operator<<=(int32_t shift) noexcept {
-        if (shift < 1)
+        if (shift < 1 || is_special())
             return *this;
 
         uint64_t l, h;
@@ -3114,6 +3115,17 @@ public:
         *expptr = e + 1;
         float128 res(l, h, EXP_BIAS - 1, s);
         return res;
+    }
+    /**
+     * @brief Multiplies a floating-point number by an integral power of two.
+     * @param x Floating-point value.
+     * @param exp Integer exponent.
+     * @return The ldexp functions return the value of x * 2^exp if successful. On overflow, and depending on the sign of x, ldexp returns +/- inf
+    */
+    friend float128 ldexp(float128 x, int exp) noexcept {
+        if (exp > 0)
+            return x << exp;
+        return x >> -exp;
     }
 };
 
