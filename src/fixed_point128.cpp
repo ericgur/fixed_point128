@@ -51,23 +51,31 @@ using namespace fp128;
 void test_conversion()
 {
     printf("\nTest Conversion\n");
+    float128 _pi = float128::pi();
     float128 e = float128::e();
-    double e_0p5 = exp(0.5);
+    float128 sqrt2 = float128::sqrt_2();
+    //double e_0p5 = exp(0.5);
     float128 e2 = exp(float128(0.5));
+
     float128 e3 = e2 * e2;
     float128 f128_zero;
     double d1 = 0.51;
     float128 df128_v1 = d1;
-    double f128_v1 = df128_v1;
+    //double f128_v1 = df128_v1;
     d1 = pow(2, -1025)/3.0;
     float128 df128_v2 = d1;
     double d2 = df128_v2;
     df128_v1 = "10.1234567890";
     char* str = (char*)df128_v1;
     d2 = 1e100;
-    int32_t i = d2;
-    double pi = 3.14159265358979323846;
+    //int32_t i = (int32_t)d2;
     df128_v1 = "3.14159265358979323846264338327950288419716939937510"; // 50 first digits of pi
+    df128_v1 *= float128::exp10(96);
+    char buff[128];
+    df128_v1.to_e_format(buff, 40);
+    printf(buff);
+    printf("\n");
+
     str = (char*)df128_v1;
     df128_v1 = float128::pi();
     str = (char*)df128_v1;
@@ -77,7 +85,6 @@ void test_conversion()
     df128_v1 = 1;
     df128_v1 /= 3;
 
-    double ddd = 0;
     str = (char*)df128_v1;
     df128_v1 = "31415.9265358979323846264338327950288419716939937510E-4"; // 50 first digits of pi
     float128 factor = "0.70710678118654752440084436210484903928483593768847403658833981";
