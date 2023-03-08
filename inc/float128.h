@@ -65,6 +65,10 @@ float128 floor(const float128& x) noexcept;
 float128 ceil(const float128& x) noexcept;
 float128 trunc(const float128& x) noexcept;
 float128 round(const float128& x) noexcept;
+int64_t llrint(const float128& x) noexcept;
+int64_t llround(const float128& x) noexcept;
+int32_t lrint(const float128& x) noexcept;
+int32_t lround(const float128& x) noexcept;
 int32_t ilogb(const float128& x) noexcept;
 float128 copysign(const float128& x, const float128& y) noexcept;
 float128 fmod(const float128& x, const float128& y) noexcept;
@@ -1469,7 +1473,9 @@ public:
     __forceinline void set_components(uint64_t l, uint64_t h, int32_t e, uint32_t s) noexcept {
         // overflow 
         if (e >= INF_EXP_UNBIASED) {
-            e = INF_EXP_UNBIASED;
+            *this = inf();
+            high_bits.s = s;
+            return;
         }
         // sub normals
         if (e <= SUBNORM_EXP_UNBIASED) {
@@ -1519,7 +1525,6 @@ public:
             if ((h >> 48) != 1) {
                 ++e;
             }
-
         }
         else {
             //assert(shift == 0);
@@ -1606,14 +1611,14 @@ public:
      * @brief Return the infinite constant
      * @return INF
     */
-    __forceinline static float128 inf() {
+    __forceinline static constexpr float128 inf() {
         return float128(0, 0, INF_EXP_BIASED, 0);
     }
     /**
      * @brief Return the quiet (non-signaling) NaN constant
      * @return NaN
     */
-    __forceinline static float128 nan() {
+    __forceinline static constexpr float128 nan() {
         return float128(1, 0, INF_EXP_BIASED, 0);
     }
     /**
@@ -1975,6 +1980,37 @@ public:
         float128 h = (x.is_positive()) ? half() : -half();
         return trunc(x + h);
     }
+    friend __forceinline int64_t llrint(const float128& x) noexcept {
+        return llround(x);
+    }
+    /**
+     * @brief Rounds towards the nearest integer.
+     * The halfway value (0.5) is rounded away from zero.
+     * @param x Value to round
+     * @return Integer value, rounded towards the nearest integer.
+    */
+    friend __forceinline int64_t llround(const float128& x) noexcept {
+        float128 res = round(x);
+        if (res.is_special() || res > INT64_MAX || res < INT64_MIN)
+            return 0;
+        return static_cast<int64_t>(res);
+    }
+    friend __forceinline int32_t lrint(const float128& x) noexcept {
+        return lround(x);
+    }
+    /**
+     * @brief Rounds towards the nearest integer.
+     * The halfway value (0.5) is rounded away from zero.
+     * @param x Value to round
+     * @return Integer value, rounded towards the nearest integer.
+    */
+    friend __forceinline int32_t lround(const float128& x) noexcept {
+        float128 res = round(x);
+        if (res.is_special() || res > INT32_MAX || res < INT32_MIN)
+            return 0;
+        return static_cast<int32_t>(res);
+    }
+
     /**
      * @brief Retrieves an integer that represents the base-2 exponent of the specified value.
      * @param x The specified value.
@@ -3123,6 +3159,11 @@ public:
      * @return The ldexp functions return the value of x * 2^exp if successful. On overflow, and depending on the sign of x, ldexp returns +/- inf
     */
     friend float128 ldexp(float128 x, int exp) noexcept {
+        if (x.is_zero())
+            return x;
+        if (x.is_special())
+            return x;
+
         if (exp > 0)
             return x << exp;
         return x >> -exp;
