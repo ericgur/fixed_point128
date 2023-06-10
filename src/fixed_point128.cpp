@@ -399,9 +399,7 @@ void test_functions()
     for (auto i = 0ull; i < 256; ++i) {
         uint128_t i1 = (1ull + rand()) * (1ull + rand());
         uint128_t i2 = i1 * i1;
-        uint128_t i3 = sqrt(i2);
-
-        assert(i1 == i3);
+        assert(i1 == sqrt(i2));
     }
     printf("uint128_t sqrt passed!\n");
 

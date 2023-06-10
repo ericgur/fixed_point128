@@ -396,7 +396,6 @@ public:
         uint128_t temp = *this;
         str[32] = 0;
         char* p = str + 31; // writing the string in reverse
-        uint128_t base = 10;
         uint64_t q[2]{};
         uint64_t digit{};
         // as long as the intermediate value is >64 bit, use the more expensive long division.

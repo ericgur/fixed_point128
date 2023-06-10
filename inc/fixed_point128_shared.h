@@ -24,6 +24,7 @@
 #ifndef FIXED_POINT128_SHARED_H
 #define FIXED_POINT128_SHARED_H
 
+#include <intrin.h>
 #include <immintrin.h>
 #include <string>
 #include <cstdint>

@@ -2560,7 +2560,7 @@ private:
         fixed_point128 b = fixed_point128::one() >> 1; // 0.5
         const auto high2 = two.high;
         fixed_point128 fy; // fraction part of the result
-        for (size_t i = 0; i < f; ++i) {
+        for (auto i = 0; i < f; ++i) {
             // x = x * x
             x *= x; 
             // if x is greater than 2, we have another bit in the result
