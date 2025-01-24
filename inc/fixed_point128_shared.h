@@ -21,8 +21,7 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 ************************************************************************************/
-#ifndef FIXED_POINT128_SHARED_H
-#define FIXED_POINT128_SHARED_H
+#pragma once
 
 #include <intrin.h>
 #include <immintrin.h>
@@ -593,4 +592,3 @@ __forceinline uint32_t log2(uint32_t x) noexcept
 }
 
 } //namespace fp128 {
-#endif // FIXED_POINT128_SHARED_H

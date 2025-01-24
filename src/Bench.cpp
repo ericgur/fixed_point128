@@ -423,7 +423,6 @@ void bench_log(double time_per_function = 1.0)
 
 void bench_log2(double time_per_function = 1.0)
 {
-    log2(fixed_point128<10>(0.5));
     Duration dur;
     uint64_t total_iterations = 0;
     // setup

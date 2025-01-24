@@ -35,8 +35,7 @@
 
 ************************************************************************************/
 
-#ifndef FIXED_POINT128_H
-#define FIXED_POINT128_H
+#pragma once
 
 // override some static analysis checks
 #pragma warning(push)
@@ -49,7 +48,6 @@
 
 
 #include "fixed_point128_shared.h"
-//#include "uint128_t.h"
 
 namespace fp128 {
 
@@ -172,7 +170,7 @@ public:
     /**
      * @brief Default constructor, creates an instance with a value of zero.
     */
-    __forceinline constexpr fixed_point128() noexcept :
+    constexpr fixed_point128() noexcept :
         low(0), high(0), sign(0) {}
     /**
      * @brief Copy constructor
@@ -214,7 +212,7 @@ public:
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param other Object to copy from
     */
-    __forceinline fixed_point128(const fixed_point128&& other) noexcept :
+    __forceinline fixed_point128(fixed_point128&& other) noexcept :
         low(other.low), high(other.high), sign(other.sign) {}
     /**
      * @brief Constructor from the double type
@@ -435,15 +433,14 @@ public:
      * @param h High QWORD
      * @param s Sign - zero for positive, 1 for negative.
     */
-    __forceinline fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept:
-        low(l), high(h) ,sign(s) {
-        sign = (sign != 0);
-    }
+    __forceinline constexpr fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept:
+        low(l), high(h) ,sign(s != 0) 
+    {}
     
     /**
      * @brief Destructor
     */
-    ~fixed_point128() noexcept {}
+    constexpr ~fixed_point128() noexcept = default;
     /**
      * @brief Assignment operator
      * @param other Object to copy from 
@@ -460,7 +457,7 @@ public:
      * @param other Object to copy from
      * @return This object.
     */
-    __forceinline fixed_point128& operator=(const fixed_point128&& other) noexcept {
+    __forceinline fixed_point128& operator=(fixed_point128&& other) noexcept {
         high = other.high;
         low = other.low;
         sign = other.sign;
@@ -504,14 +501,14 @@ public:
      * @brief operator uint64_t - converts to a uint64_t
      * @return Object value.
     */
-    FP128_INLINE operator uint64_t() const noexcept {
+    [[nodiscard]] FP128_INLINE operator uint64_t() const noexcept {
         return (high >> upper_frac_bits) & UINT64_MAX;
     }
     /**
      * @brief operator int64_t - converts to a int64_t
      * @return Object value.
     */
-    FP128_INLINE operator int64_t() const noexcept {
+    [[nodiscard]] FP128_INLINE operator int64_t() const noexcept {
         const int64_t res = (sign) ? -1ll : 1ll;
         return res * ((high >> upper_frac_bits) & UINT64_MAX);
     }
@@ -519,14 +516,14 @@ public:
      * @brief operator uint32_t - converts to a uint32_t
      * @return Object value.
     */
-    FP128_INLINE operator uint32_t() const noexcept {
+    [[nodiscard]] FP128_INLINE operator uint32_t() const noexcept {
         return (high >> upper_frac_bits) & UINT32_MAX;
     }
     /**
      * @brief operator int32_t - converts to a int32_t
      * @return Object value.
     */
-    FP128_INLINE operator int32_t() const noexcept {
+    [[nodiscard]] FP128_INLINE operator int32_t() const noexcept {
         int32_t res = (sign) ? -1 : 1;
         return res * ((int32_t)((int64_t)high >> upper_frac_bits) & (UINT32_MAX));
     }
@@ -534,7 +531,7 @@ public:
      * @brief operator float - converts to a float
      * @return Object value.
     */
-    FP128_INLINE operator float() const noexcept {
+    [[nodiscard]] FP128_INLINE operator float() const noexcept {
         if (!*this)
             return 0.0f;
         constexpr uint64_t f_mask = FP128_MAX_VALUE_64(flt_frac_bits);
@@ -566,7 +563,7 @@ public:
      * @brief operator double - converts to a double
      * @return Object value.
     */
-    FP128_INLINE operator double() const noexcept {
+    [[nodiscard]] FP128_INLINE operator double() const noexcept {
         if (!*this)
             return 0.0;
         constexpr uint64_t f_mask = FP128_MAX_VALUE_64(dbl_frac_bits);
@@ -598,21 +595,21 @@ public:
      * @brief operator long double - converts to a long double
      * @return Object value.
     */
-    FP128_INLINE operator long double() const noexcept {
+    [[nodiscard]] FP128_INLINE operator long double() const noexcept {
         return operator double();
     }
     /**
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
     */
-    FP128_INLINE operator std::string() const noexcept {
+    [[nodiscard]] FP128_INLINE operator std::string() const noexcept {
         return operator char*();
     }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
      * @return object string representation
     */
-    explicit FP128_INLINE operator char*() const noexcept {
+    [[nodiscard]] explicit FP128_INLINE operator char*() const noexcept {
         static thread_local char str[128]; // need roughly a (meaningful) decimal digits per 3.2 bits
 
         char* p = &str[0];
@@ -659,7 +656,7 @@ public:
      * @return Temporary object with the result of the operation
     */
     template<typename T>
-    __forceinline fixed_point128 operator>>(T shift) const noexcept {
+    [[nodiscard]] __forceinline fixed_point128 operator>>(T shift) const noexcept {
         fixed_point128 temp(*this);
         return temp >>= static_cast<int32_t>(shift);
     }
@@ -669,7 +666,7 @@ public:
      * @return Temporary object with the result of the operation
     */
     template<typename T>
-    __forceinline fixed_point128 operator<<(T shift) const noexcept {
+    [[nodiscard]] __forceinline fixed_point128 operator<<(T shift) const noexcept {
         fixed_point128 temp(*this);
         return temp <<= static_cast<int32_t>(shift);
     }
@@ -1162,19 +1159,19 @@ public:
     /**
      * @brief Convert to bool
     */
-    __forceinline operator bool() const noexcept {
+    [[nodiscard]] __forceinline operator bool() const noexcept {
         return high != 0 || low != 0;
     }
     /**
      * @brief Logical not (!). Opposite of operator bool.
     */
-    __forceinline bool operator!() const noexcept {
+    [[nodiscard]] __forceinline bool operator!() const noexcept {
         return high == 0 && low == 0;
     }
     /**
      * @brief Bitwise not (~).
     */
-    __forceinline fixed_point128 operator~() const noexcept {
+    [[nodiscard]] __forceinline fixed_point128 operator~() const noexcept {
         fixed_point128 temp(*this);
         temp.high = ~high;
         temp.low = ~low;
@@ -1184,14 +1181,14 @@ public:
     /**
      * @brief Unary +. Returns a copy of the object.
     */
-    __forceinline fixed_point128 operator+() const noexcept {
+    [[nodiscard]] __forceinline fixed_point128 operator+() const noexcept {
         fixed_point128 temp(*this);
         return temp;
     }
     /**
      * @brief Unary -. Returns a copy of the object with sign inverted.
     */
-    __forceinline fixed_point128 operator-() const noexcept {
+    [[nodiscard]] __forceinline fixed_point128 operator-() const noexcept {
         fixed_point128 temp(*this);
         temp.sign ^= 1;
         temp.reset_sign_for_zero();
@@ -1204,7 +1201,7 @@ public:
      * @brief Returns true if the value is an int (fraction is zero)
      * @return True when the fraction is zero.
     */
-    __forceinline bool is_int() const noexcept
+    [[nodiscard]] __forceinline bool is_int() const noexcept
     {
         return 0 == low && 0 == (high << I);
     }
@@ -1212,7 +1209,7 @@ public:
      * @brief Returns true if the value positive (incuding zero)
      * @return True when the the value positive
     */
-    __forceinline bool is_positive() const noexcept
+    [[nodiscard]] __forceinline bool is_positive() const noexcept
     {
         return 0 == sign;
     }
@@ -1220,7 +1217,7 @@ public:
      * @brief Returns true if the value negative (smaller than zero)
      * @return True when the the value negative
     */
-    __forceinline bool is_negative() const noexcept
+    [[nodiscard]] __forceinline bool is_negative() const noexcept
     {
         return 1 == sign;
     }
@@ -1228,7 +1225,7 @@ public:
      * @brief Returns true if the value is zero
      * @return Returns true if the value is zero 
     */
-    __forceinline bool is_zero() const noexcept
+    [[nodiscard]] __forceinline bool is_zero() const noexcept
     {
         return 0 == low && 0 == high;
     }
@@ -1237,7 +1234,7 @@ public:
      * @param bit bit to get [0,127]
      * @return 0 or 1. Undefined when bit > 127
     */
-    __forceinline int32_t get_bit(uint32_t bit) const noexcept
+    [[nodiscard]] __forceinline int32_t get_bit(uint32_t bit) const noexcept
     {
         if (bit < 64) {
             return FP128_GET_BIT(low, bit);
@@ -1249,7 +1246,7 @@ public:
      * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
      * @return Exponent of the number
     */
-    __forceinline int32_t get_exponent() const noexcept
+    [[nodiscard]] __forceinline int32_t get_exponent() const noexcept
     {
         const int32_t s = static_cast<int32_t>(lzcnt128(*this));
         return I - 1 - s;
@@ -1258,7 +1255,7 @@ public:
      * @brief Returns an instance of fixed_point128 with the value of pi
      * @return pi
     */
-    __forceinline static const fixed_point128& pi() noexcept {
+    [[nodiscard]] __forceinline static const fixed_point128& pi() noexcept {
         static const fixed_point128 pi = "3.14159265358979323846264338327950288419716939937510"; // 50 first digits of pi
         return pi;
     }
@@ -1266,7 +1263,7 @@ public:
      * @brief Returns an instance of fixed_point128 with the value of pi * 2
      * @return pi * 2
     */
-    __forceinline static const fixed_point128& pi2() noexcept {
+    [[nodiscard]] __forceinline static const fixed_point128& pi2() noexcept {
         static const fixed_point128 pi2 = "6.28318530717958647692528676655900576839433879875021"; // 50 first digits of pi * 2
         return pi2;
     }
@@ -1274,7 +1271,7 @@ public:
      * @brief Returns an instance of fixed_point128 with the value of pi / 2
      * @return pi / 2
     */
-    __forceinline static const fixed_point128& half_pi() noexcept {
+    [[nodiscard]] __forceinline static const fixed_point128& half_pi() noexcept {
         static const fixed_point128 half_pi = "1.57079632679489661923132169163975144209858469968755"; // 50 first digits of pi / 2
         return half_pi;
     }    
@@ -1282,7 +1279,7 @@ public:
      * @brief Returns an instance of fixed_point128 with the value of the golden ratio
      * @return golden ratio constant
     */
-    __forceinline static const fixed_point128& golden_ratio() noexcept {
+    [[nodiscard]] __forceinline static const fixed_point128& golden_ratio() noexcept {
         static const fixed_point128 golden_ratio = "1.6180339887498948482045868343656381177203"; // 40 first digits of the golden ratio
         return golden_ratio;
     }
@@ -1290,7 +1287,7 @@ public:
      * @brief Returns an instance of fixed_point128 with the value of e
      * @return e
     */
-    __forceinline static const fixed_point128& e() noexcept {
+    [[nodiscard]] __forceinline static const fixed_point128& e() noexcept {
         static const fixed_point128 e = "2.71828182845904523536028747135266249775724709369"; // 50 first digits of e
         return e;
     }
@@ -1298,7 +1295,7 @@ public:
      * @brief Returns an instance of fixed_point128 with the value of sqrt(2)
      * @return e
     */
-    __forceinline static const fixed_point128& sqrt_2() noexcept {
+    [[nodiscard]] __forceinline static const fixed_point128& sqrt_2() noexcept {
         static const fixed_point128 sqrt_2 = "1.41421356237309504880168872420969807856967187537"; // 50 first digits of sqrt(2)
         return sqrt_2;
     }
@@ -1306,7 +1303,7 @@ public:
      * @brief Return an instance of fixed_point128 with the value of 1
      * @return 1
     */
-    __forceinline static const fixed_point128& one() noexcept {
+    [[nodiscard]] __forceinline static const fixed_point128& one() noexcept {
         static const fixed_point128 one = 1;
         return one;
     }
@@ -1314,7 +1311,7 @@ public:
      * @brief Return an instance of fixed_point128 with the value of 0.5
      * @return 0.5
     */
-    __forceinline static const fixed_point128& half() noexcept
+    [[nodiscard]] __forceinline static const fixed_point128& half() noexcept
     {
         static const fixed_point128 half = 0.5;
         return half;
@@ -1323,8 +1320,8 @@ public:
      * @brief Return an instance of fixed_point128 with the smallest positive value possible
      * @return 1
     */
-    __forceinline static const fixed_point128& epsilon() noexcept {
-        static const fixed_point128 epsilon(1, 0, 0);
+    [[nodiscard]] __forceinline static const fixed_point128& epsilon() noexcept {
+        static constexpr fixed_point128 epsilon(1, 0, 0);
         return epsilon;
     }
 private:
@@ -1349,7 +1346,7 @@ private:
      * @return Result of the operation
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator+(fixed_point128 lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline fixed_point128 operator+(fixed_point128 lhs, const T& rhs) noexcept {
         return lhs += rhs;
     }
     /**
@@ -1359,7 +1356,7 @@ private:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator-(fixed_point128 lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline fixed_point128 operator-(fixed_point128 lhs, const T& rhs) noexcept {
         return lhs -= rhs;
     }
     /**
@@ -1369,7 +1366,7 @@ private:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator*(fixed_point128 lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline fixed_point128 operator*(fixed_point128 lhs, const T& rhs) noexcept {
         return lhs *= rhs;
     }
     /**
@@ -1379,7 +1376,7 @@ private:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator/(fixed_point128 lhs, const T& rhs) {
+    [[nodiscard]] friend __forceinline fixed_point128 operator/(fixed_point128 lhs, const T& rhs) {
         return lhs /= rhs;
     }
     /**
@@ -1389,7 +1386,7 @@ private:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator%(fixed_point128 lhs, const T& rhs) {
+    [[nodiscard]] friend __forceinline fixed_point128 operator%(fixed_point128 lhs, const T& rhs) {
         return lhs %= rhs;
     }
     
@@ -1404,7 +1401,7 @@ private:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator&(fixed_point128 lhs, const T& rhs) {
+    [[nodiscard]] friend __forceinline fixed_point128 operator&(fixed_point128 lhs, const T& rhs) {
         return lhs &= rhs;
     }
     /**
@@ -1414,7 +1411,7 @@ private:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator|(fixed_point128 lhs, const T& rhs) {
+    [[nodiscard]] friend __forceinline fixed_point128 operator|(fixed_point128 lhs, const T& rhs) {
         return lhs |= rhs;
     }
     /**
@@ -1424,7 +1421,7 @@ private:
      * @return The fixed_point128 result
     */
     template<typename T>
-    friend __forceinline fixed_point128 operator^(fixed_point128 lhs, const T& rhs) {
+    [[nodiscard]] friend __forceinline fixed_point128 operator^(fixed_point128 lhs, const T& rhs) {
         return lhs ^= rhs;
     }
 
@@ -1438,15 +1435,15 @@ private:
      * @param rhs Right hand side operand
      * @return True if this and other are equal.
     */
-    friend __forceinline bool operator==(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator==(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
         return lhs.sign == rhs.sign && lhs.high == rhs.high && lhs.low == rhs.low;
     }
     template<typename T>
-    friend __forceinline bool operator==(const fixed_point128& lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator==(const fixed_point128& lhs, const T& rhs) noexcept {
         return lhs == fixed_point128(rhs);
     }
     template<typename T>
-    friend __forceinline bool operator==(const T& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator==(const T& lhs, const fixed_point128& rhs) noexcept {
         return rhs == fixed_point128(lhs);
     }
     /**
@@ -1455,15 +1452,15 @@ private:
      * @param rhs Right hand side operand
      * @return True if not equal.
     */
-    friend __forceinline bool operator!=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator!=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
         return lhs.sign != rhs.sign || lhs.high != rhs.high || lhs.low != rhs.low;
     }
     template<typename T>
-    friend __forceinline bool operator!=(const fixed_point128& lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator!=(const fixed_point128& lhs, const T& rhs) noexcept {
         return lhs != fixed_point128(rhs);
     }
     template<typename T>
-    friend __forceinline bool operator!=(const T& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator!=(const T& lhs, const fixed_point128& rhs) noexcept {
         return rhs != fixed_point128(lhs);
     }
     /**
@@ -1472,7 +1469,7 @@ private:
      * @param rhs Right hand side operand
      * @return True when this object is smaller.
     */
-    friend __forceinline bool operator<(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator<(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
         // signs are different
         if (lhs.sign != rhs.sign)
             return lhs.sign > rhs.sign; // true when lhs.sign is 1 and rhs.sign is 0
@@ -1484,11 +1481,11 @@ private:
         return (lhs.sign) ? lhs.high > rhs.high : lhs.high < rhs.high;
     }
     template<typename T>
-    friend __forceinline bool operator<(const fixed_point128& lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator<(const fixed_point128& lhs, const T& rhs) noexcept {
         return lhs < fixed_point128(rhs);
     }
     template<typename T>
-    friend __forceinline bool operator<(const T& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator<(const T& lhs, const fixed_point128& rhs) noexcept {
         return fixed_point128(lhs) < rhs;
     }
     /**
@@ -1497,15 +1494,15 @@ private:
      * @param rhs Right hand side operand
      * @return True when this object is smaller or equal.
     */
-    friend __forceinline bool operator<=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator<=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
         return !(lhs > rhs);
     }
     template<typename T>
-    friend __forceinline bool operator<=(const fixed_point128& lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator<=(const fixed_point128& lhs, const T& rhs) noexcept {
         return !(lhs > fixed_point128(rhs));
     }
     template<typename T>
-    friend __forceinline bool operator<=(const T& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator<=(const T& lhs, const fixed_point128& rhs) noexcept {
         return !(fixed_point128(lhs) > rhs);
     }
     /**
@@ -1514,7 +1511,7 @@ private:
      * @param rhs Right hand side operand
      * @return True when this object is larger.
     */
-    friend __forceinline bool operator>(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator>(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
         // signs are different
         if (lhs.sign != rhs.sign)
             return lhs.sign < rhs.sign; // true when sign is 0 and other.sign is 1
@@ -1526,11 +1523,11 @@ private:
         return (lhs.sign) ? lhs.high < rhs.high : lhs.high > rhs.high;
     }
     template<typename T>
-    friend __forceinline bool operator>(const fixed_point128& lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator>(const fixed_point128& lhs, const T& rhs) noexcept {
         return lhs > fixed_point128(rhs);
     }
     template<typename T>
-    friend __forceinline bool operator>(const T& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator>(const T& lhs, const fixed_point128& rhs) noexcept {
         return fixed_point128(lhs) > rhs;
     }
     /**
@@ -1539,15 +1536,15 @@ private:
      * @param rhs Right hand side operand
      * @return True when this objext is larger or equal.
     */
-    friend __forceinline bool operator>=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator>=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept {
         return !(lhs < rhs);
     }
     template<typename T>
-    friend __forceinline bool operator>=(const fixed_point128& lhs, const T& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator>=(const fixed_point128& lhs, const T& rhs) noexcept {
         return !(lhs < fixed_point128(rhs));
     }
     template<typename T>
-    friend __forceinline bool operator>=(const T& lhs, const fixed_point128& rhs) noexcept {
+    [[nodiscard]] friend __forceinline bool operator>=(const T& lhs, const fixed_point128& rhs) noexcept {
         return !(fixed_point128(lhs) < rhs);
     }
 
@@ -1560,7 +1557,7 @@ private:
      * @param x Input value
      * @return A copy of x with sign removed
     */
-    friend __forceinline fixed_point128 fabs(const fixed_point128& x) noexcept
+    [[nodiscard]] friend __forceinline fixed_point128 fabs(const fixed_point128& x) noexcept
     {
         fixed_point128 temp = x;
         temp.sign = 0;
@@ -1571,7 +1568,7 @@ private:
      * @param x Input value
      * @return A fixed_point128 holding the integer value. Overflow is not reported.
     */
-    friend FP128_INLINE fixed_point128 floor(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 floor(const fixed_point128& x) noexcept
     {
         if (x.is_int()) return x;
 
@@ -1588,7 +1585,7 @@ private:
      * @param x Input value
      * @return A fixed_point128 holding the integer value. Overflow is not reported.
     */
-    friend FP128_INLINE fixed_point128 ceil(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 ceil(const fixed_point128& x) noexcept
     {
         if (x.is_int()) return x;
 
@@ -1604,7 +1601,7 @@ private:
      * @param x Value to truncate
      * @return Integer value, rounded towards zero.
     */
-    friend __forceinline fixed_point128 trunc(const fixed_point128& x) noexcept
+    [[nodiscard]] friend __forceinline fixed_point128 trunc(const fixed_point128& x) noexcept
     {
         return fixed_point128(0, x.high & x.int_mask, x.sign);
     }
@@ -1614,7 +1611,7 @@ private:
      * @param x Value to round
      * @return Integer value, rounded towards the nearest integer.
     */
-    friend FP128_INLINE fixed_point128 round(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 round(const fixed_point128& x) noexcept
     {
         // save the sign
         auto sign = x.sign;
@@ -1629,7 +1626,7 @@ private:
      * @param x The specified value.
      * @return Integer value, rounded towards the nearest integer.
     */
-    friend FP128_INLINE int32_t ilogb(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE int32_t ilogb(const fixed_point128& x) noexcept
     {
         return x.get_exponent();
     }
@@ -1639,7 +1636,7 @@ private:
      * @param y The sign of the result.
      * @return The copysign functions return a floating-point value that combines the magnitude of x and the sign of y.
     */
-    friend FP128_INLINE fixed_point128 copysign(const fixed_point128& x, const fixed_point128& y) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 copysign(const fixed_point128& x, const fixed_point128& y) noexcept
     {
         fixed_point128 res = x;
         res.sign = y.sign;
@@ -1651,7 +1648,7 @@ private:
      * @param y Denominator
      * @return A fixed_point128 holding the modulo value.
     */
-    friend __forceinline fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y)
+    [[nodiscard]] friend __forceinline fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y)
     {
         return x % y;
     }
@@ -1662,7 +1659,7 @@ private:
      * @param iptr Pointer to fixed_point128 holding the integer part of x.
      * @return The fraction part of x. Undefined when iptr is nullptr.
     */
-    friend FP128_INLINE fixed_point128 modf(const fixed_point128& x, fixed_point128* iptr) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 modf(const fixed_point128& x, fixed_point128* iptr) noexcept
     {
         if (iptr == nullptr)
             return 0;
@@ -1681,7 +1678,7 @@ private:
      * @param y Second value
      * @return If x > y returns x - y. Otherwise zero.
     */
-    friend FP128_INLINE fixed_point128 fdim(const fixed_point128& x, const fixed_point128& y) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 fdim(const fixed_point128& x, const fixed_point128& y) noexcept
     {
         return (x > y) ? x - y : 0;
     }
@@ -1691,7 +1688,7 @@ private:
      * @param y Second value
      * @return If x < y returns x. Otherwise y.
     */
-    friend FP128_INLINE fixed_point128 fmin(const fixed_point128& x, const fixed_point128& y) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 fmin(const fixed_point128& x, const fixed_point128& y) noexcept
     {
         return (x < y) ? x : y;
     }
@@ -1701,7 +1698,7 @@ private:
      * @param y Second value
      * @return If x > y returns x. Otherwise y.
     */
-    friend FP128_INLINE fixed_point128 fmax(const fixed_point128& x, const fixed_point128& y) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 fmax(const fixed_point128& x, const fixed_point128& y) noexcept
     {
         return (x > y) ? x : y;
     }
@@ -1711,7 +1708,7 @@ private:
      * @param y Second value
      * @return sqrt(x^2 + y^2).
     */
-    friend FP128_INLINE fixed_point128 hypot(const fixed_point128& x, const fixed_point128& y) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 hypot(const fixed_point128& x, const fixed_point128& y) noexcept
     {
         return sqrt(x * x + y * y);
     }
@@ -1720,7 +1717,7 @@ private:
      * @param x input value.
      * @return lzc (uint32_t) of th result.
     */
-    friend __forceinline uint64_t lzcnt128(const fixed_point128& x) noexcept
+    [[nodiscard]] friend __forceinline uint64_t lzcnt128(const fixed_point128& x) noexcept
     {
         return (x.high != 0) ? __lzcnt64(x.high) : 64 + __lzcnt64(x.low);
     }
@@ -1731,7 +1728,7 @@ private:
      * @param iterations how many iterations to perform (more is more accurate). Sensible values are 0-5.
      * @return Square root of (x), zero when x <= 0.
     */
-    friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x, uint32_t iterations = 3) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x, uint32_t iterations = 3) noexcept
     {
         static const fixed_point128 factor = "0.70710678118654752440084436210484903928483593768847403658833981"; // sqrt(2) / 2
         if (x.sign || !x)
@@ -1772,7 +1769,7 @@ private:
      * @param x Input value
      * @param res Result of the function
     */
-    friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
+    [[nodiscard]] friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
     {
         static const fixed_point128 c[] = {
             "1",                                         // 1 /  0!
@@ -1826,7 +1823,7 @@ private:
      * @param x Input value
      * @return 1 / x. Returns zero on overflow or division by zero
     */
-    friend FP128_INLINE fixed_point128 reciprocal(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 reciprocal(const fixed_point128& x) noexcept
     {
         static const fixed_point128 one = 1, two = 2;
         static const fixed_point128 xy_max = one + (fixed_point128::epsilon() << 2);
@@ -1864,7 +1861,7 @@ private:
      * @param sin_x
      * @param cos_x
     */
-    friend FP128_INLINE void _sincos_cordic(fixed_point128 x, fixed_point128& sin_x, fixed_point128& cos_x, bool apply_scale_factor) noexcept
+    [[nodiscard]] friend FP128_INLINE void _sincos_cordic(fixed_point128 x, fixed_point128& sin_x, fixed_point128& cos_x, bool apply_scale_factor) noexcept
     {
         static const fixed_point128 angles[] = {
             "0.7853981633974483096156608458198757210492", // arctan(2^-0)
@@ -2011,7 +2008,7 @@ private:
          * @param x value in Radians in the range [-0.5pi, 0.5pi]
          * @return Sine of x
         */
-    friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
         assert(fabs(x) <= fixed_point128::half_pi());
@@ -2039,7 +2036,7 @@ private:
          * @param x value in Radians in the range [-0.5pi, 0.5pi]
          * @return Cosine of x
         */
-    friend __forceinline fixed_point128 cos1(const fixed_point128& x) noexcept
+    [[nodiscard]] friend __forceinline fixed_point128 cos1(const fixed_point128& x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi();
@@ -2054,7 +2051,7 @@ private:
      * @param x value in Radians
      * @return Sine of x
     */
-    friend fixed_point128 sin(fixed_point128 x) noexcept
+    [[nodiscard]] friend fixed_point128 sin(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
@@ -2081,7 +2078,7 @@ private:
      * @param x value in radians in the range [-1,1]
      * @return Inverse sine of x
     */
-    friend fixed_point128 asin(fixed_point128 x) noexcept
+    [[nodiscard]] friend fixed_point128 asin(fixed_point128 x) noexcept
     {
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         constexpr int max_iterations = 6;
@@ -2112,7 +2109,7 @@ private:
      * @param x value in Radians
      * @return Cosine of x
     */
-    friend fixed_point128 cos(fixed_point128 x) noexcept
+    [[nodiscard]] friend fixed_point128 cos(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cos()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
@@ -2139,7 +2136,7 @@ private:
      * @param x value in radians in the range [-1,1]
      * @return Inverse cosine of x
     */
-    friend fixed_point128 acos(fixed_point128 x) noexcept
+    [[nodiscard]] friend fixed_point128 acos(fixed_point128 x) noexcept
     {
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         constexpr int max_iterations = 6;
@@ -2167,7 +2164,7 @@ private:
      * @param x value
      * @return Tangent of x
     */
-    friend FP128_INLINE fixed_point128 tan(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 tan(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use tan()!");
         constexpr bool use_cordic = false; // CORDIC is currently slower and less accurate
@@ -2187,7 +2184,7 @@ private:
      * @param x value
      * @return Arctangent of x
     */
-    friend fixed_point128 atan(fixed_point128 x) noexcept
+    [[nodiscard]] friend fixed_point128 atan(fixed_point128 x) noexcept
     {
         // constants for segmentation
         static const fixed_point128& half_pi = fixed_point128::half_pi(); // pi / 2
@@ -2234,7 +2231,7 @@ private:
      * @param x value
      * @return Arctangent of y / x in the range [-pi, pi]
     */
-    friend fixed_point128 atan2(fixed_point128 y, fixed_point128 x) noexcept
+    [[nodiscard]] friend fixed_point128 atan2(fixed_point128 y, fixed_point128 x) noexcept
     {
         // constants for segmentation
         static const fixed_point128& pi = fixed_point128::pi();
@@ -2279,7 +2276,7 @@ private:
     * @param x value
     * @return Sine of x
     */
-    friend FP128_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sinh()!");
         return (exp(x) - exp(-x)) >> 1;
@@ -2319,7 +2316,7 @@ private:
      * @param x value
      * @return Inverse hyperbolic sine of x
     */
-    friend FP128_INLINE fixed_point128 asinh(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 asinh(const fixed_point128& x) noexcept
     {
         fixed_point128 absx = fabs(x);
         fixed_point128 res = log(absx + sqrt(absx * absx + fixed_point128::one()));
@@ -2334,7 +2331,7 @@ private:
     * @param x value in Radians in the range [-0.5pi, 0.5pi]
     * @return Sine of x
     */
-    friend FP128_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept
     {
         static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cosh()!");
         return (exp(x) + exp(-x)) >> 1;
@@ -2370,7 +2367,7 @@ private:
      * @param x value in the range [1, inf]
      * @return Inverse hyperbolic cosine of x
     */
-    friend FP128_INLINE fixed_point128 acosh(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 acosh(const fixed_point128& x) noexcept
     {
         if (x < 1) return 0;
 
@@ -2385,7 +2382,7 @@ private:
      * @param x value
      * @return hyperbolic tangent of x
     */
-    friend FP128_INLINE fixed_point128 tanh(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 tanh(const fixed_point128& x) noexcept
     {
         fixed_point128 ex = exp(x); // e^x
         fixed_point128 exm1 = exp(-x); // e^(-x)
@@ -2404,7 +2401,7 @@ private:
      * @param x value in the range (-1, 1)
      * @return Inverse hyperbolic tangent of x
     */
-    friend FP128_INLINE fixed_point128 atanh(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 atanh(const fixed_point128& x) noexcept
     {
         auto one = fixed_point128::one();
         if (fabs(x) >= 1)
@@ -2430,7 +2427,7 @@ private:
      * @param x A number specifying a power.
      * @return Exponent of x
     */
-    friend FP128_INLINE fixed_point128 exp(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 exp(const fixed_point128& x) noexcept
     {
         static const fixed_point128 e = fixed_point128::e();
         fixed_point128 _ix, exp_ix; // integer part of x
@@ -2481,7 +2478,7 @@ private:
      * @param x A number specifying a power.
      * @return Exponent of x
     */
-    friend FP128_INLINE fixed_point128 expm1(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 expm1(const fixed_point128& x) noexcept
     {
         return exp(x) - fixed_point128::one();
     }
@@ -2490,7 +2487,7 @@ private:
      * @param x Exponent value
      * @return 2^x
     */
-    friend FP128_INLINE fixed_point128 exp2(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 exp2(const fixed_point128& x) noexcept
     {
         //
         // Based on exponent law: (x^n)^m = x^(m*n)
@@ -2508,7 +2505,7 @@ private:
      * @param f Optional: how many fraction bits in the result. Default to all.
      * @return x^y
     */
-    friend FP128_INLINE fixed_point128 pow(const fixed_point128& x, const fixed_point128& y, int32_t f = fixed_point128::F) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 pow(const fixed_point128& x, const fixed_point128& y, int32_t f = fixed_point128::F) noexcept
     {
         //
         // Based on exponent law: (x^n)^m = x^(m * n)
@@ -2530,7 +2527,7 @@ private:
      * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log2(x)
     */
-    friend FP128_INLINE fixed_point128 log2(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 log2(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
     {
         if (x.is_negative() || x.is_zero()) {
             return fixed_point128(UINT64_MAX, UINT64_MAX, 1); // represents negative infinity
@@ -2581,7 +2578,7 @@ private:
      * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log(x)
     */
-    friend FP128_INLINE fixed_point128 log(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 log(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
     {
         static const fixed_point128 inv_log2_e = "0.693147180559945309417232121458176575";
         fixed_point128 y = log2(x, f);
@@ -2593,7 +2590,7 @@ private:
      * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log1p(x)
     */
-    friend FP128_INLINE fixed_point128 log1p(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 log1p(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
     {
         return log(fixed_point128::one() + x, f);
     }
@@ -2603,7 +2600,7 @@ private:
      * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log10(x)
     */
-    friend FP128_INLINE fixed_point128 log10(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 log10(fixed_point128 x, int32_t f = fixed_point128::F) noexcept
     {
         static const fixed_point128 inv_log2_10 = "0.301029995663981195213738894724493068";
         fixed_point128 y = log2(x, f);
@@ -2615,7 +2612,7 @@ private:
      * @param x The number to perform log on.
      * @return logb(x)
     */
-    friend FP128_INLINE fixed_point128 logb(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 logb(fixed_point128 x) noexcept
     {
         return x.get_exponent();
     }
@@ -2727,5 +2724,3 @@ private:
 } //namespace fp128
 
 #pragma warning(pop)
-
-#endif // #ifndef FIXED_POINT128_H
