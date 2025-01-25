@@ -1,7 +1,7 @@
 /***********************************************************************************
     MIT License
 
-    Copyright (c) 2023 Eric Gur (ericgur@iname.com)
+    Copyright (c) 2025 Eric Gur (ericgur@iname.com)
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -555,6 +555,25 @@ void test_comparison()
     }
 }
 
+void test_literals()
+{
+    printf("\nTest Literals\n");
+    printf("float128:\n");
+
+    float128 pi1 = 3.14159265358979323846264338327950288419716939937510_f128;
+    float128 pi2 = float128::pi();
+    auto diff = pi2 - pi1;
+    printf("True Pi vs. literal Pi: %s\n", (char*)diff);
+
+    printf("uint128_t:\n");
+    uint128_t v1 = 0x1234567890abcdef1234567890abcdef_uint128;
+    uint128_t v2 = "0x1234567890abcdef1234567890abcdef";
+    printf("uint128_t hex string vs. literal: %s\n", (v2 - v1).hex());
+    v1 = 24197857200151252728969465429440056815_uint128;
+    v2 = "24197857200151252728969465429440056815";
+    printf("uint128_t decimal string vs. literal: %s\n", (char*)(v2 - v1));
+}
+
 void test()
 {
     test_precision();
@@ -566,6 +585,7 @@ void test()
     test_functions();
     test_string();
     test_comparison();
+    test_literals();
 }
 
 int main()
