@@ -4,6 +4,7 @@
 
 #include "..\inc\fixed_point128.h"
 #include "..\inc\uint128_t.h"
+#include "..\inc\int128_t.h"
 #include "..\inc\float128.h"
 #ifndef GTEST_SHARED_H
 #define GTEST_SHARED_H
@@ -62,7 +63,7 @@ uint64_t static get_uint64_random()
     return (((uint64_t)rand()) << 60) + (((uint64_t)rand()) << 45) + (((uint64_t)rand()) << 30) + (((uint64_t)rand()) << 15) + (uint64_t)rand();
 }
 
-// returns a positive random number
+// returns a random number
 int64_t static get_int64_random()
 {
     return (int64_t)get_uint64_random() * (int64_t)get_random_sign();
@@ -102,7 +103,12 @@ bool check_overflow(T value, const fixed_point128<I>& d)
 
 bool static check_overflow_uint128(double value)
 {
-    return floor(log2(value)) > 127;
+    return floor(log2(abs(value))) > 127;
+}
+
+bool static check_overflow_int128(double value)
+{
+    return floor(log2(abs(value))) > 126;
 }
 
 bool static is_similar_double(double v1, double v2)

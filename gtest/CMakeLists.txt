@@ -15,6 +15,7 @@ add_executable(
   fixed_point128_gtest
   fixed_point128_gtest.cpp
   uint128_t_gtest.cpp
+  int128_t_gtest.cpp
   float128_gtest.cpp
 )
 

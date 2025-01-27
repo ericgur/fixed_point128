@@ -175,8 +175,9 @@ FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift) noexcept
     x += 1ull << (shift - 1);
     return x >> shift;
 }
+
 /**
-    * @brief Right shift a 128 bit integer (inplace). 
+    * @brief Right shift a 128 bit signed integer (inplace).
     * Limited range, inplace and no paramter checks.
     * @param l Low QWORD
     * @param h High QWORD

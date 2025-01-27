@@ -21,6 +21,21 @@
       <Item Name="[high]" ExcludeView="simple">high,d</Item>
     </Expand>
   </Type>
+  <Type Name="fp128::int128_t">
+    <Intrinsic Name="sign" Expression="(high >> 63) == 1" />
+    <Intrinsic Name="sign_int" Expression="(sign()) ? -1 : 1" />
+    <Intrinsic Name="comp_low" Expression="~low + 1" />
+    <Intrinsic Name="comp_high" Expression="(int)(comp_low() == 0) + ~high" />
+    <DisplayString Condition="sign()">-{comp_high(),h}{comp_low(),hb}</DisplayString>
+    <DisplayString>{high,h}{low,hb}</DisplayString>
+    <Expand HideRawView="true" >
+      <Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
+      <Item Name="[high (hex)]" ExcludeView="simple">high,h</Item>
+      <Item Name="[low]"  ExcludeView="simple">low,d</Item>
+      <Item Name="[high]" ExcludeView="simple">high,d</Item>
+      <!-- <Item Name="[Value]" ExcludeView="simple">this-&gt;to_string()</Item> -->
+    </Expand>
+  </Type>
   <Type Name="fp128::float128">
     <Intrinsic Name="special" Expression="high_bits.e == 0x7FFF" />
     <Intrinsic Name="has_fraction" Expression="high_bits.f != 0 || low != 0" />

@@ -99,13 +99,13 @@ float128 atanh(float128 x) noexcept;
 float128 exp(const float128& x) noexcept;
 float128 exp2(const float128& x) noexcept;
 float128 expm1(const float128& x) noexcept;
-float128 pow(const float128& x, const float128& y, int32_t f = 112) noexcept;
+float128 pow(const float128& x, const float128& y) noexcept;
 float128 pow(const float128& x, int32_t y) noexcept;
-float128 log(float128 x, int32_t f = 112) noexcept;
-float128 log2(float128 x, int32_t f = 112) noexcept;
-float128 log10(float128 x, int32_t f = 112) noexcept;
-float128 logb(float128 x, int32_t f = 112) noexcept;
-float128 log1p(float128 x, int32_t f = 112) noexcept;
+float128 log(float128 x) noexcept;
+float128 log2(float128 x) noexcept;
+float128 log10(float128 x) noexcept;
+float128 logb(float128 x) noexcept;
+float128 log1p(float128 x) noexcept;
 float128 frexp(float128 x, int* expptr) noexcept;
 float128 ldexp(float128 x, int exp) noexcept;
 int isfinite(const float128& x) noexcept;
@@ -315,12 +315,10 @@ public:
         // convert the input string to lowercase for simpler processing.
         const auto x_len = 1 + strlen(x);
         auto str_ptr = std::make_unique_for_overwrite<char[]>(x_len);
-        char* str = str_ptr.get();
-        memcpy(str, x, x_len);
-        _strlwr_s(str, x_len);
-
-        char* p = str;
+        char* p = str_ptr.get();
         if (p == nullptr) return;
+        memcpy(p, x, x_len);
+        _strlwr_s(p, x_len);
 
         // skip white space
         while (*p == ' ') ++p;
@@ -491,7 +489,7 @@ public:
             // multiply by 10 for each digit
             while (extra_digits > 0) {
                 --extra_digits;
-                uint64_t msb = log2(int_part);
+                uint64_t msb = int_part ? log2(int_part) : 0;
                 if (msb >= 123) {
                     int_part >>= 4;
                     shift_bits += 4;
@@ -500,7 +498,7 @@ public:
                 int_part *= 10;
             }
 
-            int32_t msb = static_cast<int32_t>(log2(int_part));
+            int32_t msb = int_part ? static_cast<int32_t>(log2(int_part)) : 0;
             expo2 = msb + shift_bits;
 
             // shift the integer value into position: msb at bit 112
@@ -2502,10 +2500,9 @@ public:
      * @brief Computes x to the power of y
      * @param x Base value
      * @param y Exponent value
-     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return x^y
     */
-    [[nodiscard]] friend FP128_INLINE float128 pow(const float128& x, const float128& y, int32_t f) noexcept
+    [[nodiscard]] friend FP128_INLINE float128 pow(const float128& x, const float128& y) noexcept
     {
         //
         // Based on exponent law: (x^n)^m = x^(m * n)
@@ -2520,7 +2517,7 @@ public:
             return -nan();
         }
 
-        float128 lan_x = log(x, f);
+        float128 lan_x = log(x);
         if (!lan_x)
             return lan_x;
 
@@ -2529,12 +2526,11 @@ public:
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
-     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log(x)
     */
-    [[nodiscard]] friend FP128_INLINE float128 log(float128 x, int32_t f) noexcept {
+    [[nodiscard]] friend FP128_INLINE float128 log(float128 x) noexcept {
         static const float128 lan2 = "0.693147180559945309417232121458176575";
-        float128 y = log2(x, f);
+        float128 y = log2(x);
         return y * lan2;
     }
     /**
@@ -2543,7 +2539,7 @@ public:
      * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log2(x)
     */
-    [[nodiscard]] friend FP128_INLINE float128 log2(float128 x, int32_t f) noexcept {
+    [[nodiscard]] friend FP128_INLINE float128 log2(float128 x) noexcept {
         if (x.is_negative() || x.is_zero()) {
             return -inf();
         }
@@ -2566,7 +2562,7 @@ public:
         static const float128 two(2);
         float128 b = float128::half(); // 0.5
         float128 fy; // fraction part of the result
-        for (size_t i = 0; i < f; ++i) {
+        for (size_t i = 0; i < float128::FRAC_BITS; ++i) {
             // x = x * x
             x *= x;
             // if x is greater than 2, we have another bit in the result
@@ -2584,12 +2580,11 @@ public:
     /**
      * @brief Calculates Log base 10 of x: log10(x)
      * @param x The number to perform log on.
-     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log10(x)
     */
-    [[nodiscard]] friend FP128_INLINE float128 log10(float128 x, int32_t f) noexcept {
+    [[nodiscard]] friend FP128_INLINE float128 log10(float128 x) noexcept {
         static const float128 log10_2 = "0.301029995663981195213738894724493068";  // log10(2)
-        float128 y = log2(x, f);
+        float128 y = log2(x);
         return y * log10_2;
     }
     /**
@@ -2598,17 +2593,16 @@ public:
      * @param x The number to perform log on.
      * @return logb(x)
     */
-    [[nodiscard]] friend FP128_INLINE float128 logb(float128 x, int32_t) noexcept {
+    [[nodiscard]] friend FP128_INLINE float128 logb(float128 x) noexcept {
         return x.get_exponent();
     }
     /**
      * @brief Calculates the natural Log (base e) of 1 + x: log(1 + x)
      * @param x The number to perform log on.
-     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log1p(x)
     */
-    [[nodiscard]] friend FP128_INLINE float128 log1p(float128 x, int32_t f) noexcept {
-        return log(float128::one() + x, f);
+    [[nodiscard]] friend FP128_INLINE float128 log1p(float128 x) noexcept {
+        return log(float128::one() + x);
     }
 
     //

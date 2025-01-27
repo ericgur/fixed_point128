@@ -44,14 +44,11 @@
 #pragma warning(disable: 26481) // Don't use pointer arithmetic. Use span instead
 #pragma warning(disable: 26446) // Prefer to use gsl::at() instead of unchecked subscript operator
 #pragma warning(disable: 26482) // Only index into arrays using constant expressions
-#pragma warning(disable: 26408) // Avoid malloc() and free(), prefer the nothrow version of new with delete
 
 
 #include "fixed_point128_shared.h"
 
 namespace fp128 {
-
-
     
 /***********************************************************************************
 *                                  Forward declarations
@@ -370,16 +367,18 @@ public:
         sign = 0;
         if (x == nullptr) return;
         
-        char* str = _strdup(x);
-        char* p = str;
+        const auto x_len = 1 + strlen(x);
+        auto str_ptr = std::make_unique_for_overwrite<char[]>(x_len);
+        char* p = str_ptr.get();
         if (p == nullptr) return;
+        memcpy(p, x, x_len);
+        _strlwr_s(p, x_len);
 
         // skip white space
         while (*p == ' ') ++p;
 
         if (*p == '\0') {
             *this = fixed_point128();
-            free(str);
             return;
         }
 
@@ -395,7 +394,6 @@ public:
         // number is an integer
         if (dec == nullptr) {
             high = std::strtoull(p, nullptr, 10) << upper_frac_bits;
-            free(str);
             return;
         }
 
@@ -416,7 +414,6 @@ public:
         frac >>= (I - 1);
         low = frac.low;
         high = frac.high + int_val;
-        free(str);
     }
     /**
      * @brief Constructor from std::string.
@@ -2526,11 +2523,12 @@ private:
      * @param x The number to perform log2 on.
      * @return log2(x)
     */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 log2(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 log2(fixed_point128 x)
     {
-        if (x.is_negative() || x.is_zero()) {
-            return fixed_point128(UINT64_MAX, UINT64_MAX, 1); // represents negative infinity
+        if (x.is_zero()) {
+            throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
         }
+
         // Calculate the log in 2 steps:
         // - The integer part (iy) is simple and fast via the get_exponent() function.
         // - The fraction part (fy) is trickier. Uses Binary Logarithm
@@ -2577,9 +2575,14 @@ private:
      * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log(x)
     */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 log(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 log(fixed_point128 x)
     {
         static const fixed_point128 inv_log2_e = "0.693147180559945309417232121458176575";
+        if (x.is_zero()) {
+            throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
+        }
+        if (x == 1) return 0;
+
         fixed_point128 y = log2(x);
         return y * inv_log2_e;
     }
@@ -2597,9 +2600,15 @@ private:
      * @param x The number to perform log on.
      * @return log10(x)
     */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 log10(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 log10(fixed_point128 x)
     {
         static const fixed_point128 inv_log2_10 = "0.301029995663981195213738894724493068";
+        if (x.is_zero()) {
+            throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
+        }
+
+        if (x == 1) return 0;
+
         fixed_point128 y = log2(x);
         return y * inv_log2_10;
     }
@@ -2609,8 +2618,12 @@ private:
      * @param x The number to perform log on.
      * @return logb(x)
     */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 logb(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 logb(fixed_point128 x)
     {
+        if (x.is_zero()) {
+            throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
+        }
+
         return x.get_exponent();
     }
     /*

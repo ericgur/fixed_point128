@@ -34,6 +34,7 @@
 #include <cmath>
 #include "../inc/fixed_point128.h" 
 #include "../inc/uint128_t.h" 
+#include "../inc/int128_t.h" 
 #include "../inc/float128.h" 
 
 #pragma warning(disable: 26493) // Don't use C-style casts.
@@ -566,12 +567,22 @@ void test_literals()
     printf("True Pi vs. literal Pi: %s\n", (char*)diff);
 
     printf("uint128_t:\n");
-    uint128_t v1 = 0x1234567890abcdef1234567890abcdef_uint128;
-    uint128_t v2 = "0x1234567890abcdef1234567890abcdef";
-    printf("uint128_t hex string vs. literal: %s\n", (v2 - v1).hex());
-    v1 = 24197857200151252728969465429440056815_uint128;
-    v2 = "24197857200151252728969465429440056815";
-    printf("uint128_t decimal string vs. literal: %s\n", (char*)(v2 - v1));
+    uint128_t u1 = 0x1234567890abcdef1234567890abcdef_uint128;
+    uint128_t u2 = "0x1234567890abcdef1234567890abcdef";
+    printf("uint128_t hex string vs. literal: %s\n", (u2 - u1).hex());
+    u1 = 24197857200151252728969465429440056815_uint128;
+    u2 = "24197857200151252728969465429440056815";
+    printf("uint128_t decimal string vs. literal: %s\n", (char*)(u2 - u1));
+
+    printf("int128_t:\n");
+    int128_t i1 = 0x1234567890abcdef1234567890abcdef_int128;
+    int128_t i2 = "0x1234567890abcdef1234567890abcdef";
+    printf("int128_t hex string vs. literal: %s\n", (i2 - i1).hex());
+    i1 = -24197857200151252728969465429440056815_int128;
+    i2 = "-24197857200151252728969465429440056815";
+    printf("int128_t decimal string vs. literal: %s\n", (i2 - i1).to_string());
+    i1 = -700;
+
 }
 
 void test()
