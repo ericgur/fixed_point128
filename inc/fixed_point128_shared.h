@@ -51,6 +51,31 @@
 static constexpr bool FP128_CPP_STYLE_MODULO = true; // set to false to test python style modulo
 static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 
+// clang/Apple implementations
+#if defined (__GNUC__) || defined(__clang__)
+#define __lzcnt __lzcnt32
+FP128_INLINE constexpr uint32_t _udiv64(uint32_t dividend, uint32_t divisor, uint32_t* remainder)
+{
+    uint32_t quot = dividend / divisor;
+    if (remainder) {
+        *remainder = dividend % divisor;
+    }
+    return quot;
+}
+
+FP128_INLINE constexpr uint64_t _udiv128(uint64_t hi_dividend, uint64_t lo_dividend, uint64_t divisor, uint64_t* remainder)
+{
+    // simple implementation for non-MSVC compilers
+    __uint128_t dividend = (static_cast<__uint128_t>(hi_dividend) << 64) | lo_dividend;
+    uint64_t quot = static_cast<uint64_t>(dividend / divisor);
+    if (remainder) {
+        *remainder = static_cast<uint64_t>(dividend % divisor);
+    }
+    return quot;
+
+}
+#endif //#if defined (__GNUC__) || defined(__clang__)
+
 /***********************************************************************************
 *                                  Macros
 ************************************************************************************/
@@ -78,6 +103,7 @@ static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 #define FP128_THROW_ONLY_IN_DEBUG noexcept
 #endif // _DEBUG
 
+
 namespace fp128 {
 
 /***********************************************************************************
@@ -92,8 +118,11 @@ static constexpr int32_t dbl_exp_bits = 11;   // exponent bit count of a double 
 /***********************************************************************************
 *                                  Containers
 ************************************************************************************/
+#if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable: 4201) // nameless union/structs
+#endif
+
 struct Double {
     Double(double v = 0) noexcept: val(v) {}
     union {
@@ -119,7 +148,10 @@ struct Float {
 static_assert(sizeof(Double) == sizeof(double), "The Double union should have the same size as a double variable!");
 static_assert(sizeof(Float) == sizeof(float), "The Float union should have the same size as a float variable!");
 
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#endif
+
 /***********************************************************************************
 *                                  Functions
 ************************************************************************************/
@@ -177,7 +209,7 @@ FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 }
 
 /**
-    * @brief Right shift a 128 bit signed integer (inplace).
+    * @brief Right shift a 128 bit unsigned integer (inplace).
     * Limited range, inplace and no paramter checks.
     * @param l Low QWORD
     * @param h High QWORD
@@ -399,6 +431,7 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
     int32_t i, j;                                 // Indexes
     // disable various warnings, some are bogus in VS2022.
     // the below code relies on the implied truncation (to 32 bit) of several expressions.
+#if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable: 6255)
 #pragma warning(disable: 4244)
@@ -408,6 +441,7 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
 #pragma warning(disable: 26451)
 #pragma warning(disable: 26493)
 #pragma warning(disable: 26438)
+#endif
 
     // shrink the arrays to avoid extra work on small numbers
     while (m > 0 && u[m - 1] == 0) --m;
@@ -484,7 +518,10 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
         r[n - 1] = un[n - 1] >> s;
     }
     return 0;
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#endif
+
 }
 /**
     * @brief 64 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.

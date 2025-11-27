@@ -38,13 +38,15 @@
 #pragma once
 
 // override some static analysis checks
+#if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable: 26472) // Don't use a static_cast for arithmetic conversions. Use brace initialization
 #pragma warning(disable: 26485) // No array to pointer decay
 #pragma warning(disable: 26481) // Don't use pointer arithmetic. Use span instead
 #pragma warning(disable: 26446) // Prefer to use gsl::at() instead of unchecked subscript operator
 #pragma warning(disable: 26482) // Only index into arrays using constant expressions
-
+#pragma warning(disable: 26408) // Avoid malloc() and free(), prefer the nothrow version of new with delete
+#endif
 
 #include "fixed_point128_shared.h"
 
@@ -1767,7 +1769,7 @@ private:
      * @param x Input value
      * @param res Result of the function
     */
-    [[nodiscard]] friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
+    friend FP128_INLINE void fact_reciprocal(int x, fixed_point128& res) noexcept
     {
         static const fixed_point128 c[] = {
             "1",                                         // 1 /  0!
@@ -1859,7 +1861,7 @@ private:
      * @param sin_x
      * @param cos_x
     */
-    [[nodiscard]] friend FP128_INLINE void _sincos_cordic(fixed_point128 x, fixed_point128& sin_x, fixed_point128& cos_x, bool apply_scale_factor) noexcept
+    friend FP128_INLINE void _sincos_cordic(fixed_point128 x, fixed_point128& sin_x, fixed_point128& cos_x, bool apply_scale_factor) noexcept
     {
         static const fixed_point128 angles[] = {
             "0.7853981633974483096156608458198757210492", // arctan(2^-0)
@@ -2733,4 +2735,6 @@ private:
 
 } //namespace fp128
 
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#endif
