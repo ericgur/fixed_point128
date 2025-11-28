@@ -84,12 +84,12 @@ template<int32_t I> fixed_point128<I> acos(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
 template<int32_t I> fixed_point128<I> atan2(fixed_point128<I> y, fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> sinh(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> asinh(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> cosh(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> acosh(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> tanh(fixed_point128<I> x) noexcept;
-template<int32_t I> fixed_point128<I> atanh(fixed_point128<I> x) noexcept;
+template<int32_t I> fixed_point128<I> sinh(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> asinh(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> cosh(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> acosh(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> tanh(const fixed_point128<I>& x) noexcept;
+template<int32_t I> fixed_point128<I> atanh(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> exp(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> exp2(const fixed_point128<I>& x) noexcept;
 template<int32_t I> fixed_point128<I> expm1(const fixed_point128<I>& x) noexcept;
@@ -152,9 +152,9 @@ public:
 private:
     static constexpr int32_t upper_frac_bits = F - 64;                  // how many bits of the fraction exist in the upper QWORD
     static constexpr uint64_t unity = 1ull << upper_frac_bits;          // upper QWORD value equal to '1'
-    static inline const double upper_unity = ::pow(2, 64 - F);     // convert upper QWORD to floating point
-    static inline const double lower_unity_l = ::pow(2, -F);         // convert lower QWORD to floating point
-    static inline const double lower_unity_h = ::pow(2, 32-F);         // convert lower QWORD to floating point
+    static inline const double upper_unity = ::pow(2, 64 - F);          // convert upper QWORD to floating point
+    static inline const double lower_unity_l = ::pow(2, -F);            // convert lower QWORD to floating point
+    static inline const double lower_unity_h = ::pow(2, 32-F);          // convert lower QWORD to floating point
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits; // mask of the integer bits in the upper QWORD
     static constexpr int32_t max_frac_digits = (int)(F / 3.3);          // meaningful base 10 digits for the fraction
 public:
@@ -373,8 +373,7 @@ public:
         auto str_ptr = std::make_unique_for_overwrite<char[]>(x_len);
         char* p = str_ptr.get();
         if (p == nullptr) return;
-        memcpy(p, x, x_len);
-        _strlwr_s(p, x_len);
+        strnlwr(p, x, x_len);
 
         // skip white space
         while (*p == ' ') ++p;
@@ -632,7 +631,7 @@ public:
         while (digits++ < max_frac_digits && temp) {
             if constexpr (I < 4) {
 
-                res[0] = _mulx_u64(high, 10ull, &res[1]); // multiply by 10
+                res[0] = mulx_u64(high, 10ull, &res[1]); // multiply by 10
                 // extract the integer part
                 integer = shift_right128_round(res[0], res[1], upper_frac_bits);
                 temp *= 10; // move another digit to the integer area
@@ -675,12 +674,12 @@ public:
      * @param other Right hand side operand
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator+=(const fixed_point128& other) noexcept {
+    FP128_FORCE_INLINE fixed_point128& operator+=(const fixed_point128& other) noexcept {
         // same sign: the simple case
         if (other.sign == sign) {
             //add the other value
-            const uint8_t carry = _addcarryx_u64(0, low, other.low, &low);
-            _addcarryx_u64(carry, high, other.high, &high);
+            const uint8_t carry = addcarryx_u64(0, low, other.low, &low);
+            addcarryx_u64(carry, high, other.high, &high);
         }
         // different sign: invert the sign for other and subtract
         else {
@@ -692,8 +691,8 @@ public:
             twos_complement128(temp.low, temp.high);
 
             //add the other value
-            const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
-            _addcarryx_u64(carry, high, temp.high, &high);
+            const uint8_t carry = addcarryx_u64(0, low, temp.low, &low);
+            addcarryx_u64(carry, high, temp.high, &high);
 
             // if result is with a different sign, invert it along with the sign.
             if (result_has_different_sign) {
@@ -720,12 +719,12 @@ public:
      * @param other Right hand side operand
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator-=(const fixed_point128& other) noexcept {
+    FP128_FORCE_INLINE fixed_point128& operator-=(const fixed_point128& other) noexcept {
 
         // different sign: just add the values
         if (other.sign != sign) {
             //add the other value
-            const uint8_t carry = _addcarryx_u64(0, low, other.low, &low);
+            const uint8_t carry = addcarryx_u64(0, low, other.low, &low);
             high += other.high + carry;
         }
         // same sign: invert the sign for other and subtract
@@ -737,7 +736,7 @@ public:
             twos_complement128(temp.low, temp.high);
 
             //add the other value
-            const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
+            const uint8_t carry = addcarryx_u64(0, low, temp.low, &low);
             high += temp.high + carry;
 
             // if result is with a different sign, invert it along with the sign.
@@ -764,7 +763,7 @@ public:
      * @param other Right hand side operand
      * @return This object.
     */
-    FP128_INLINE fixed_point128& operator*=(const fixed_point128& other) noexcept{
+    FP128_FORCE_INLINE fixed_point128& operator*=(const fixed_point128& other) noexcept{
         // Temporary arrays to store the result. They are uninitialzied to get 10-50% extra performance.
         // Zero initialization is a 10% penalty and using a thread_local static varible lowers
         //  performance by >50%.
@@ -773,20 +772,20 @@ public:
         uint64_t temp1[2], temp2[2];
 
         // multiply low QWORDs
-        res[0] = _mulx_u64(low, other.low, &res[1]);
+        res[0] = mulx_u64(low, other.low, &res[1]);
 
         // multiply high QWORDs (overflow can happen)
-        res[2] = _mulx_u64(high, other.high, &res[3]);
+        res[2] = mulx_u64(high, other.high, &res[3]);
 
         // multiply low this and high other
-        temp1[0] = _mulx_u64(low, other.high, &temp1[1]);
-        uint8_t carry = _addcarryx_u64(0, res[1], temp1[0], &res[1]);
-        res[3] += _addcarryx_u64(carry, res[2], temp1[1], &res[2]);
+        temp1[0] = mulx_u64(low, other.high, &temp1[1]);
+        uint8_t carry = addcarryx_u64(0, res[1], temp1[0], &res[1]);
+        res[3] += addcarryx_u64(carry, res[2], temp1[1], &res[2]);
 
         // multiply high this and low other
-        temp2[0] = _mulx_u64(high, other.low, &temp2[1]);
-        carry = _addcarryx_u64(0, res[1], temp2[0], &res[1]);
-        res[3] += _addcarryx_u64(carry, res[2], temp2[1], &res[2]);
+        temp2[0] = mulx_u64(high, other.low, &temp2[1]);
+        carry = addcarryx_u64(0, res[1], temp2[0], &res[1]);
+        res[3] += addcarryx_u64(carry, res[2], temp2[1], &res[2]);
 
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F
@@ -844,7 +843,7 @@ public:
         uint64_t temp;
 
         // multiply low QWORDs
-        low = _mulx_u64(low, x, &temp);
+        low = mulx_u64(low, x, &temp);
         high = high * x + temp;
         reset_sign_for_zero();
         return *this;
@@ -1719,7 +1718,7 @@ private:
     */
     [[nodiscard]] friend FP128_INLINE uint64_t lzcnt128(const fixed_point128& x) noexcept
     {
-        return (x.high != 0) ? __lzcnt64(x.high) : 64 + __lzcnt64(x.low);
+        return (x.high != 0) ? lzcnt64(x.high) : 64 + lzcnt64(x.low);
     }
     /**
      * @brief Calculates the square root using Newton's method.
@@ -1841,7 +1840,7 @@ private:
         for (; i < max_iterations && (y_prev != y) && (xy < xy_min || xy > xy_max); ++i) {
             y_prev = y;
             xy = x * y;
-            //y = y * (two - xy);
+            //y = y * (two - x * y);
             y *= two - xy;
         }
 
@@ -2665,16 +2664,16 @@ private:
         // bit is on, and shift u left the same amount. We may have to append a
         // high-order digit on the dividend; we do that unconditionally.
 
-        const int32_t s = __lzcnt64(v[n - 1]);             // 0 <= s <= 64.
+        const int32_t s = lzcnt64(v[n - 1]);             // 0 <= s <= 64.
         const int32_t s_comp = 64 - s;
-        vn = (uint64_t*)_alloca(sizeof(uint64_t) * n);
+        vn = (uint64_t*)alloca(sizeof(uint64_t) * n);
         for (i = n - 1; i > 0; --i) {
             vn[i] = shift_left128(v[i - 1], v[i], s);
             //vn[i] = (v[i] << s) | ((uint64_t)v[i - 1] >> s_comp);
         }
         vn[0] = v[0] << s;
 
-        un = (uint64_t*)_alloca(sizeof(uint64_t) * (m + 1));
+        un = (uint64_t*)alloca(sizeof(uint64_t) * (m + 1));
         un[m] = (uint128_t)u[m - 1] >> s_comp;
         for (i = m - 1; i > 0; --i)
             un[i] = (u[i] << s) | (uint64_t)((uint128_t)u[i - 1] >> s_comp);

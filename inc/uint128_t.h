@@ -29,6 +29,7 @@
 
 #pragma once
 
+#if defined(_MSC_VER)
 // override some static analysis checks
 #pragma warning(push)
 #pragma warning(disable: 26472) // Don't use a static_cast for arithmetic conversions. Use brace initialization
@@ -36,7 +37,7 @@
 #pragma warning(disable: 26481) // Don't use pointer arithmetic. Use span instead
 #pragma warning(disable: 26446) // Prefer to use gsl::at() instead of unchecked subscript operator
 #pragma warning(disable: 26482) // Only index into arrays using constant expressions
-
+#endif
 #include "fixed_point128_shared.h"
 
 namespace fp128 {
@@ -68,7 +69,7 @@ uint128_t operator""_uint128(const char*);
  * </UL>
 */
 
-class __declspec(align(16)) uint128_t
+class FP128_ALIGN16 uint128_t
 {
     // build time validation of template parameters
     static_assert(sizeof(void*) == 8, "uint128_t is supported in 64 bit builds only!");
@@ -197,8 +198,8 @@ public:
         auto str_ptr = std::make_unique_for_overwrite<char[]>(x_len);
         char* p = str_ptr.get();
         if (p == nullptr) return;
-        memcpy(p, x, x_len);
-        _strlwr_s(p, x_len);
+
+        strnlwr(p, x, x_len);
 
         // trim leading white space
         while (*p && isspace(*p))
@@ -445,8 +446,8 @@ public:
      * @return This object.
     */
     FP128_INLINE uint128_t& operator+=(const uint128_t& rhs) noexcept {
-        const uint8_t carry = _addcarryx_u64(0, low, rhs.low, &low);
-        _addcarryx_u64(carry, high, rhs.high, &high);
+        const uint8_t carry = addcarryx_u64(0, low, rhs.low, &low);
+        addcarryx_u64(carry, high, rhs.high, &high);
         return *this;
     }
     /**
@@ -468,8 +469,8 @@ public:
     FP128_INLINE uint128_t& operator-=(const uint128_t& rhs) noexcept {
         uint128_t temp = rhs;
         twos_complement128(temp.low, temp.high);
-        const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
-        _addcarryx_u64(carry, high, temp.high, &high);
+        const uint8_t carry = addcarryx_u64(0, low, temp.low, &low);
+        addcarryx_u64(carry, high, temp.high, &high);
         return *this;
     }
     /**
@@ -491,7 +492,7 @@ public:
         uint128_t temp = *this;
 
         // multiply low QWORDs
-        low = _mulx_u64(temp.low, rhs.low, &high);
+        low = mulx_u64(temp.low, rhs.low, &high);
 
         // multiply low this and high rhs; multiply high this and low rhs
         high += temp.low * rhs.high + temp.high * rhs.low;
@@ -513,7 +514,7 @@ public:
         uint64_t temp;
         const uint64_t uval = static_cast<uint64_t>(x);
         // multiply low QWORDs
-        low = _mulx_u64(low, uval, &temp);
+        low = mulx_u64(low, uval, &temp);
         high = high * uval + temp;
 
         return *this;
@@ -593,7 +594,7 @@ public:
         }
 
         // exponent of 2, convert to a much faster shift operation
-        if (1 == __popcnt64(uval)) {
+        if (1 == popcnt64(uval)) {
             return *this >>= (int32_t)log2(uval);
         }
 
@@ -1096,7 +1097,7 @@ public:
     */
     [[nodiscard]] friend FP128_INLINE uint64_t lzcnt128(const uint128_t& x) noexcept
     {
-        return (x.high != 0) ? __lzcnt64(x.high) : 64 + __lzcnt64(x.low);
+        return (x.high != 0) ? lzcnt64(x.high) : 64 + lzcnt64(x.low);
     }
     /**
      * @brief Calculates the square root using Newton's method.
@@ -1337,4 +1338,6 @@ public:
 
 } //namespace fp128
 
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#endif

@@ -44,7 +44,7 @@
 #pragma warning(disable: 26446) // Prefer to use gsl::at() instead of unchecked subscript operator
 #pragma warning(disable: 26482) // Only index into arrays using constant expressions
 #pragma warning(disable: 26408) // Avoid malloc() and free(), prefer the nothrow version of new with delete
-#pragma warning(disable: 6255)  // _alloca indicates failure by raising a stack overflow exception.  Consider using _malloca instead
+#pragma warning(disable: 6255)  // alloca indicates failure by raising a stack overflow exception.  Consider using _malloca instead
 #pragma warning(disable: 4996)  // This function or variable may be unsafe.Consider using strncpy_s instead.To disable deprecation, use _CRT_SECURE_NO_WARNINGS.See online help for details.
 
 
@@ -317,8 +317,8 @@ public:
         auto str_ptr = std::make_unique_for_overwrite<char[]>(x_len);
         char* p = str_ptr.get();
         if (p == nullptr) return;
-        memcpy(p, x, x_len);
-        _strlwr_s(p, x_len);
+        
+        strnlwr(p, x, x_len);
 
         // skip white space
         while (*p == ' ') ++p;
@@ -981,8 +981,8 @@ public:
         // same sign: the simple case
         if (other.get_sign() == get_sign()) {
             //add the other value
-            const uint8_t carry = _addcarryx_u64(0, l1, l2, &l1);
-            _addcarryx_u64(carry, h1, h2, &h1);
+            const uint8_t carry = addcarryx_u64(0, l1, l2, &l1);
+            addcarryx_u64(carry, h1, h2, &h1);
         }
         // different sign: invert the sign for other and subtract
         else {
@@ -994,8 +994,8 @@ public:
                 twos_complement128(l2, h2);
 
             //add the other value, results stored in l1
-            const uint8_t carry = _addcarryx_u64(0, l1, l2, &l1);
-            _addcarryx_u64(carry, h1, h2, &h1);
+            const uint8_t carry = addcarryx_u64(0, l1, l2, &l1);
+            addcarryx_u64(carry, h1, h2, &h1);
 
             // bit 63 is high - got a negative result
             // flip the bits and invert the sign
@@ -1085,20 +1085,20 @@ public:
         uint64_t temp1[2], temp2[2];
 
         // multiply low QWORDs
-        res[0] = _mulx_u64(l1, l2, &res[1]);
+        res[0] = mulx_u64(l1, l2, &res[1]);
 
         // multiply high QWORDs (overflow can happen)
-        res[2] = _mulx_u64(h1, h2, &res[3]);
+        res[2] = mulx_u64(h1, h2, &res[3]);
 
         // multiply low this and high other
-        temp1[0] = _mulx_u64(l1, h2, &temp1[1]);
-        uint8_t carry = _addcarryx_u64(0, res[1], temp1[0], &res[1]);
-        res[3] += _addcarryx_u64(carry, res[2], temp1[1], &res[2]);
+        temp1[0] = mulx_u64(l1, h2, &temp1[1]);
+        uint8_t carry = addcarryx_u64(0, res[1], temp1[0], &res[1]);
+        res[3] += addcarryx_u64(carry, res[2], temp1[1], &res[2]);
 
         // multiply high this and low other
-        temp2[0] = _mulx_u64(h1, l2, &temp2[1]);
-        carry = _addcarryx_u64(0, res[1], temp2[0], &res[1]);
-        res[3] += _addcarryx_u64(carry, res[2], temp2[1], &res[2]);
+        temp2[0] = mulx_u64(h1, l2, &temp2[1]);
+        carry = addcarryx_u64(0, res[1], temp2[0], &res[1]);
+        res[3] += addcarryx_u64(carry, res[2], temp2[1], &res[2]);
 
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F

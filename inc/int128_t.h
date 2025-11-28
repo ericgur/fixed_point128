@@ -210,8 +210,8 @@ public:
         auto str_ptr = std::make_unique_for_overwrite<char[]>(x_len);
         char* p = str_ptr.get();
         if (p == nullptr) return;
-        memcpy(p, x, x_len);
-        _strlwr_s(p, x_len);
+        
+        strnlwr(p, x, x_len);
 
         // trim leading white space
         while (*p && isspace(*p))
@@ -497,8 +497,8 @@ public:
      * @return This object.
     */
     FP128_INLINE int128_t& operator+=(const int128_t& rhs) noexcept {
-        const uint8_t carry = _addcarryx_u64(0, low, rhs.low, &low);
-        _addcarryx_u64(carry, high, rhs.high, &high);
+        const uint8_t carry = addcarryx_u64(0, low, rhs.low, &low);
+        addcarryx_u64(carry, high, rhs.high, &high);
         return *this;
     }
     /**
@@ -520,8 +520,8 @@ public:
     FP128_INLINE int128_t& operator-=(const int128_t& rhs) noexcept {
         int128_t temp = rhs;
         twos_complement128(temp.low, temp.high);
-        const uint8_t carry = _addcarryx_u64(0, low, temp.low, &low);
-        _addcarryx_u64(carry, high, temp.high, &high);
+        const uint8_t carry = addcarryx_u64(0, low, temp.low, &low);
+        addcarryx_u64(carry, high, temp.high, &high);
         return *this;
     }
     /**
@@ -547,7 +547,7 @@ public:
 
 
         // multiply low QWORDs
-        low = _mulx_u64(temp.low, temp_rhs.low, &high);
+        low = mulx_u64(temp.low, temp_rhs.low, &high);
 
         // multiply low this and high rhs; multiply high this and low rhs
         high += temp.low * temp_rhs.high + temp.high * temp_rhs.low;
@@ -676,7 +676,7 @@ public:
         }
 
         // exponent of 2, convert to a much faster shift operation
-        if (1 == __popcnt64(uval)) {
+        if (1 == popcnt64(uval)) {
             return *this >>= (int32_t)log2(uval);
         }
 
@@ -1210,7 +1210,7 @@ public:
     */
     [[nodiscard]] friend FP128_INLINE uint64_t lzcnt128(const int128_t& x) noexcept
     {
-        return (x.high != 0) ? __lzcnt64(x.high) : 64 + __lzcnt64(x.low);
+        return (x.high != 0) ? lzcnt64(x.high) : 64 + lzcnt64(x.low);
     }
     /**
      * @brief Calculates the square root using Newton's method.

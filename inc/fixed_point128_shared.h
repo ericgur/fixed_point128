@@ -23,15 +23,15 @@
 ************************************************************************************/
 #pragma once
 
-#include <intrin.h>
-#include <immintrin.h>
-#include <string>
+//#include <string>
 #include <cstdint>
-#include <cstdlib>
+//#include <cstdlib>
 #include <cassert>
 #include <stdexcept>
-#include <type_traits>
+//#include <type_traits>
 #include <memory>
+//#include <cstring>
+//#include <cctype>
 
 /***********************************************************************************
 *                                  Build Options
@@ -42,19 +42,51 @@
 #endif 
 
 #if FP128_DISABLE_INLINE != FALSE
+#if defined(_MSC_VER)
 #define FP128_INLINE __declspec(noinline)
+#define FP128_FORCE_INLINE __declspec(noinline)
+#else
+#define FP128_INLINE __attribute__((noinline))
+#define FP128_FORCE_INLINE __attribute__((noinline))
+#endif
+#else
+#if defined(_MSC_VER)
+#define FP128_INLINE inline
+#define FP128_FORCE_INLINE __forceinline
 #else
 #define FP128_INLINE inline
+#define FP128_FORCE_INLINE inline __attribute__((always_inline))
+#endif
 #endif
 
 
 static constexpr bool FP128_CPP_STYLE_MODULO = true; // set to false to test python style modulo
 static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 
+//
+// MSVC specific section - keep intrinsics as-is
+//
+#if defined(_MSC_VER)
+#include <intrin.h>
+#include <immintrin.h>
+
+#define lzcnt32            __lzcnt
+#define lzcnt64            __lzcnt64
+#define udiv64             _udiv64
+#define udiv128            _udiv128
+#define mulx_u64           _mulx_u64
+#define addcarryx_u64      _addcarryx_u64
+#define popcnt32           __popcnt32
+#define popcnt64           __popcnt64
+#define alloca             _alloca
+
+//
 // clang/Apple implementations
-#if defined (__GNUC__) || defined(__clang__)
-#define __lzcnt __lzcnt32
-FP128_INLINE constexpr uint32_t _udiv64(uint32_t dividend, uint32_t divisor, uint32_t* remainder)
+//
+#elif defined (__GNUC__) || defined(__clang__)
+
+// Provide portable fallbacks for MSVC-specific intrinsics used throughout the codebase.
+FP128_FORCE_INLINE constexpr uint32_t udiv64(uint32_t dividend, uint32_t divisor, uint32_t* remainder)
 {
     uint32_t quot = dividend / divisor;
     if (remainder) {
@@ -63,7 +95,7 @@ FP128_INLINE constexpr uint32_t _udiv64(uint32_t dividend, uint32_t divisor, uin
     return quot;
 }
 
-FP128_INLINE constexpr uint64_t _udiv128(uint64_t hi_dividend, uint64_t lo_dividend, uint64_t divisor, uint64_t* remainder)
+FP128_FORCE_INLINE constexpr uint64_t udiv128(uint64_t hi_dividend, uint64_t lo_dividend, uint64_t divisor, uint64_t* remainder)
 {
     // simple implementation for non-MSVC compilers
     __uint128_t dividend = (static_cast<__uint128_t>(hi_dividend) << 64) | lo_dividend;
@@ -72,8 +104,58 @@ FP128_INLINE constexpr uint64_t _udiv128(uint64_t hi_dividend, uint64_t lo_divid
         *remainder = static_cast<uint64_t>(dividend % divisor);
     }
     return quot;
-
 }
+
+FP128_FORCE_INLINE static uint64_t mulx_u64(uint64_t a, uint64_t b, uint64_t* hi) noexcept
+{
+    __uint128_t r = ( __uint128_t )a * b;
+    if (hi) *hi = (uint64_t)(r >> 64);
+    return (uint64_t)r;
+}
+
+FP128_FORCE_INLINE static unsigned char addcarryx_u64(unsigned char c, uint64_t a, uint64_t b, uint64_t* out) noexcept
+{
+    __uint128_t r = ( __uint128_t )a + b + c;
+    if (out) *out = (uint64_t)r;
+    return (unsigned char)(r >> 64);
+}
+
+FP128_FORCE_INLINE static uint32_t lzcnt32(uint32_t x) noexcept
+{
+    return (x == 0) ? 32u : (uint32_t)__builtin_clz(x);
+}
+
+FP128_FORCE_INLINE static uint64_t lzcnt64(uint64_t x) noexcept
+{
+    return (x == 0) ? 64u : (uint64_t)__builtin_clzll(x);
+}
+
+FP128_FORCE_INLINE static uint64_t popcnt64(uint64_t x) noexcept
+{
+    return (uint64_t)__builtin_popcountll(x);
+}
+
+FP128_FORCE_INLINE static uint32_t popcnt32(uint32_t x) noexcept
+{
+    return (uint32_t)__builtin_popcount(x);
+}
+
+FP128_FORCE_INLINE static uint64_t __shiftright128(uint64_t lo, uint64_t hi, unsigned int shift) noexcept
+{
+    if (shift == 0) return lo;
+    if (shift < 64) return (lo >> shift) | (hi << (64 - shift));
+    if (shift < 128) return hi >> (shift - 64);
+    return 0;
+}
+FP128_FORCE_INLINE static uint64_t __shiftleft128(uint64_t lo, uint64_t hi, unsigned int shift) noexcept
+{
+    if (shift == 0) return hi;
+    if (shift < 64) return (hi << shift) | (lo >> (64 - shift));
+    if (shift < 128) return lo << (shift - 64);
+    return 0;
+}
+
+
 #endif //#if defined (__GNUC__) || defined(__clang__)
 
 /***********************************************************************************
@@ -103,6 +185,14 @@ FP128_INLINE constexpr uint64_t _udiv128(uint64_t hi_dividend, uint64_t lo_divid
 #define FP128_THROW_ONLY_IN_DEBUG noexcept
 #endif // _DEBUG
 
+// portable alignment macro
+#if defined(_MSC_VER)
+#define FP128_ALIGN(_a) __declspec(align(_a))
+#else
+#define FP128_ALIGN(_a) __attribute__((aligned(_a)))
+#endif
+
+#define FP128_ALIGN16 FP128_ALIGN(16)
 
 namespace fp128 {
 
@@ -155,6 +245,15 @@ static_assert(sizeof(Float) == sizeof(float), "The Float union should have the s
 /***********************************************************************************
 *                                  Functions
 ************************************************************************************/
+
+FP128_INLINE static errno_t strnlwr(char* dest, const char* src, size_t n) noexcept
+{
+    if (src == nullptr || dest == nullptr) return EINVAL;
+    for (size_t i = 0; i < n && src[i] != '\0'; ++i) {
+        dest[i] = static_cast<unsigned char>(::tolower(static_cast<unsigned char>(src[i])));
+    }
+    return 0;
+}
 
 /**
     * @brief Calculates the element count of a C style array at build time
@@ -399,7 +498,7 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
 
     uint32_t k = 0;
     for (auto j = m - 1; j >= 0; --j) {
-        q[j] = _udiv64((((uint64_t)k) << 32) + u[j], v, &k);
+        q[j] = udiv64((((uint64_t)k) << 32) + u[j], v, &k);
     }
 
     if (r != nullptr)
@@ -458,16 +557,16 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
     bit is on, and shift u left the same amount. We may have to append a
     high-order digit on the dividend; we do that unconditionally. */
 
-    const int32_t s = __lzcnt(v[n - 1]);             // 0 <= s <= WORD_WIDTH-1.
+    const int32_t s = lzcnt32(v[n - 1]);             // 0 <= s <= WORD_WIDTH-1.
     const int32_t s_comp = WORD_WIDTH - s;
-    vn = (uint32_t*)_alloca(sizeof(uint32_t) * n);
+    vn = (uint32_t*)alloca(sizeof(uint32_t) * n);
     for (i = n - 1; i > 0; --i) {
         //vn[i] = shift_left64(v[i - 1], v[i], s);
         vn[i] = (v[i] << s) | ((uint64_t)v[i - 1] >> s_comp);
     }
     vn[0] = v[0] << s;
 
-    un = (uint32_t*)_alloca(sizeof(uint32_t) * (m + 1));
+    un = (uint32_t*)alloca(sizeof(uint32_t) * (m + 1));
     un[m] = (uint64_t)u[m - 1] >> s_comp;
     for (i = m - 1; i > 0; --i)
         un[i] = (u[i] << s) | ((uint64_t)u[i - 1] >> s_comp);
@@ -475,7 +574,7 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
 
     for (j = m - n; j >= 0; --j) {       // Main loop.
         // Compute estimate qhat of q[j].
-        qhat = _udiv128(0, ((uint64_t)un[j + n] << WORD_WIDTH) | un[j + n - 1], vn[n - 1], &rhat);
+        qhat = udiv128(0, ((uint64_t)un[j + n] << WORD_WIDTH) | un[j + n - 1], vn[n - 1], &rhat);
         //qhat = (un[j + n] * BASE + un[j + n - 1]) / vn[n - 1];
         //rhat = (un[j + n] * BASE + un[j + n - 1]) - qhat * vn[n - 1];
     again:
@@ -523,7 +622,7 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
 #endif
 
 }
-/**
+ /**
     * @brief 64 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
     * @param q (output) Pointer to receive the quote. Expected to be initialized to zero
     * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
@@ -562,7 +661,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
     uint64_t k[2] = {};
     for (auto j = m - 1; j >= 0; --j) {
         k[0] = u[j];
-        q[j] = _udiv128(k[1], k[0], v, &k[1]);
+        q[j] = udiv128(k[1], k[0], v, &k[1]);
     }
 
     // Remainder
@@ -576,7 +675,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
 */
 FP128_INLINE uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
 {
-    return __popcnt64(l) + __popcnt64(h);
+    return popcnt64(l) + popcnt64(h);
 }
 /**
  * @brief Left zero count 128 bit
@@ -586,7 +685,7 @@ FP128_INLINE uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
 */
 FP128_INLINE uint64_t lzcnt128(uint64_t l, uint64_t h) noexcept
 {
-    return (h != 0) ? __lzcnt64(h) : 64 + __lzcnt64(l);
+    return (h != 0) ? lzcnt64(h) : 64 + lzcnt64(l);
 }
 /**
  * @brief Calculates the Log base 2 of x: log2(x)
@@ -607,7 +706,7 @@ FP128_INLINE uint64_t log2(uint64_t l, uint64_t h) noexcept
 */
 FP128_INLINE uint64_t log2(uint64_t x) noexcept
 {
-    return (x) ? 63ull - __lzcnt64(x) : 0;
+    return (x) ? 63ull - lzcnt64(x) : 0;
 }
 /**
  * @brief Calculates the Log base 2 of x: log2(x)
@@ -617,7 +716,7 @@ FP128_INLINE uint64_t log2(uint64_t x) noexcept
 */
 FP128_INLINE uint32_t log2(uint32_t x) noexcept
 {
-    return (x) ? 31ull - __lzcnt(x) : 0;
+    return (x) ? 31ull - lzcnt32(x) : 0;
 }
 
 } //namespace fp128 {
