@@ -27,17 +27,9 @@
 
 ************************************************************************************/
 
-#pragma once
+#ifndef FP128_UINT128_T_H
+#define FP128_UINT128_T_H
 
-#if defined(_MSC_VER)
-// override some static analysis checks
-#pragma warning(push)
-#pragma warning(disable: 26472) // Don't use a static_cast for arithmetic conversions. Use brace initialization
-#pragma warning(disable: 26485) // No array to pointer decay
-#pragma warning(disable: 26481) // Don't use pointer arithmetic. Use span instead
-#pragma warning(disable: 26446) // Prefer to use gsl::at() instead of unchecked subscript operator
-#pragma warning(disable: 26482) // Only index into arrays using constant expressions
-#endif
 #include "fixed_point128_shared.h"
 
 namespace fp128 {
@@ -1338,6 +1330,4 @@ public:
 
 } //namespace fp128
 
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
+#endif // FP128_UINT128_T_H

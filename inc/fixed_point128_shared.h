@@ -21,28 +21,32 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 ************************************************************************************/
-#pragma once
+#ifndef FP128_FIXED_POINT128_SHARED_H
+#define FP128_FIXED_POINT128_SHARED_H
 
-//#include <string>
 #include <cstdint>
-//#include <cstdlib>
 #include <cassert>
 #include <stdexcept>
-//#include <type_traits>
 #include <memory>
-//#include <cstring>
-//#include <cctype>
 
 /***********************************************************************************
 *                                  Build Options
 ************************************************************************************/
+#if defined (__GNUC__) || defined(__clang__)
+#define FP128_CLANG
+#elif defined(_MSC_VER)
+// Note that under VS 2022, both __clang__ and _MSC_VER are defined when using the Clang toolset
+#define FP128_MSVC
+#endif
+
+
 // Set to TRUE to disable function inlining - useful for profiling a specific function
 #ifndef FP128_DISABLE_INLINE
-#define FP128_DISABLE_INLINE FALSE
+#define FP128_DISABLE_INLINE false
 #endif 
 
-#if FP128_DISABLE_INLINE != FALSE
-#if defined(_MSC_VER)
+#if FP128_DISABLE_INLINE != false
+#if defined(FP128_MSVC)
 #define FP128_INLINE __declspec(noinline)
 #define FP128_FORCE_INLINE __declspec(noinline)
 #else
@@ -50,7 +54,8 @@
 #define FP128_FORCE_INLINE __attribute__((noinline))
 #endif
 #else
-#if defined(_MSC_VER)
+
+#if defined(FP128_MSVC)
 #define FP128_INLINE inline
 #define FP128_FORCE_INLINE __forceinline
 #else
@@ -64,9 +69,11 @@ static constexpr bool FP128_CPP_STYLE_MODULO = true; // set to false to test pyt
 static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 
 //
-// MSVC specific section - keep intrinsics as-is
+// MSVC specific section - use intrinsics as-is
 //
-#if defined(_MSC_VER)
+#if defined(FP128_MSVC)
+#pragma warning(disable: 4996)
+
 #include <intrin.h>
 #include <immintrin.h>
 
@@ -83,7 +90,9 @@ static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
 //
 // clang/Apple implementations
 //
-#elif defined (__GNUC__) || defined(__clang__)
+#elif defined (FP128_CLANG)
+#define __shiftright128 shift_right128
+#define __shiftleft128  shift_left128
 
 // Provide portable fallbacks for MSVC-specific intrinsics used throughout the codebase.
 FP128_FORCE_INLINE constexpr uint32_t udiv64(uint32_t dividend, uint32_t divisor, uint32_t* remainder)
@@ -140,23 +149,7 @@ FP128_FORCE_INLINE static uint32_t popcnt32(uint32_t x) noexcept
     return (uint32_t)__builtin_popcount(x);
 }
 
-FP128_FORCE_INLINE static uint64_t __shiftright128(uint64_t lo, uint64_t hi, unsigned int shift) noexcept
-{
-    if (shift == 0) return lo;
-    if (shift < 64) return (lo >> shift) | (hi << (64 - shift));
-    if (shift < 128) return hi >> (shift - 64);
-    return 0;
-}
-FP128_FORCE_INLINE static uint64_t __shiftleft128(uint64_t lo, uint64_t hi, unsigned int shift) noexcept
-{
-    if (shift == 0) return hi;
-    if (shift < 64) return (hi << shift) | (lo >> (64 - shift));
-    if (shift < 128) return lo << (shift - 64);
-    return 0;
-}
-
-
-#endif //#if defined (__GNUC__) || defined(__clang__)
+#endif //#if defined (FP128_CLANG)
 
 /***********************************************************************************
 *                                  Macros
@@ -185,10 +178,15 @@ FP128_FORCE_INLINE static uint64_t __shiftleft128(uint64_t lo, uint64_t hi, unsi
 #define FP128_THROW_ONLY_IN_DEBUG noexcept
 #endif // _DEBUG
 
-// portable alignment macro
-#if defined(_MSC_VER)
+//
+// MSVC specific macros
+//
+#if defined(FP128_MSVC)
 #define FP128_ALIGN(_a) __declspec(align(_a))
-#else
+//
+// Clang/GCC specific macros
+//
+#elif defined (FP128_CLANG)
 #define FP128_ALIGN(_a) __attribute__((aligned(_a)))
 #endif
 
@@ -208,7 +206,7 @@ static constexpr int32_t dbl_exp_bits = 11;   // exponent bit count of a double 
 /***********************************************************************************
 *                                  Containers
 ************************************************************************************/
-#if defined(_MSC_VER)
+#if defined(FP128_MSVC)
 #pragma warning(push)
 #pragma warning(disable: 4201) // nameless union/structs
 #endif
@@ -224,6 +222,8 @@ struct Double {
         double val;
     };
 };
+static_assert(sizeof(Double) == sizeof(double), "The Double union should have the same size as a double variable!");
+
 struct Float {
     Float(float v = 0) noexcept : val(v) {}
     union {
@@ -235,10 +235,9 @@ struct Float {
         float val;
     };
 };
-static_assert(sizeof(Double) == sizeof(double), "The Double union should have the same size as a double variable!");
 static_assert(sizeof(Float) == sizeof(float), "The Float union should have the same size as a float variable!");
 
-#if defined(_MSC_VER)
+#if defined(FP128_MSVC)
 #pragma warning(pop)
 #endif
 
@@ -530,7 +529,7 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
     int32_t i, j;                                 // Indexes
     // disable various warnings, some are bogus in VS2022.
     // the below code relies on the implied truncation (to 32 bit) of several expressions.
-#if defined(_MSC_VER)
+#if defined(FP128_MSVC)
 #pragma warning(push)
 #pragma warning(disable: 6255)
 #pragma warning(disable: 4244)
@@ -617,7 +616,7 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
         r[n - 1] = un[n - 1] >> s;
     }
     return 0;
-#if defined(_MSC_VER)
+#if defined(FP128_MSVC)
 #pragma warning(pop)
 #endif
 
@@ -720,3 +719,5 @@ FP128_INLINE uint32_t log2(uint32_t x) noexcept
 }
 
 } //namespace fp128 {
+
+#endif // FP128_FIXED_POINT128_SHARED_H

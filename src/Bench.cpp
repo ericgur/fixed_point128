@@ -22,53 +22,40 @@
     SOFTWARE.
 ************************************************************************************/
 
-// bench.cpp : benchamrk and profile for fixed_point128 and uint128_t classes
+// bench.cpp : benchmark and profile for fixed_point128 and uint128_t classes
 //
 
 //#define FP128_DISABLE_INLINE TRUE
 
-#include <windows.h>
-#include <profileapi.h>
 #include <cstdio>
-#include <cassert>
 #include <chrono>
+#include <format>
 #include "../inc/fixed_point128.h" 
 #include "../inc/uint128_t.h" 
 
 
-#pragma warning(disable: 26493) // Don't use C-style casts.
-#pragma warning(disable: 26467) 
-#pragma warning(disable: 26485) 
-#pragma warning(disable: 26440) 
-#pragma warning(disable: 26482) 
-#pragma warning(disable: 26446) 
-#pragma warning(disable: 26496) 
-
+using namespace std;
 using namespace fp128;
 constexpr uint64_t BENCH_ITERATIONS = 5000;
-constexpr double TIME_PER_FUNCTION = 1.0;
+constexpr double TIME_PER_FUNCTION = 0.5;  // in seconds
 
 struct Duration
 {
-    Duration() : t1(), t2() {
-        if (frequency == 0) {
-            LARGE_INTEGER li;
-            QueryPerformanceFrequency(&li);
-            frequency = double(li.QuadPart);
-        }
-    }
-    void start(){ QueryPerformanceCounter(&t1); }
+    using time_point=std::chrono::high_resolution_clock::time_point;
+    Duration() = default;
+
+    void start() { t1 = std::chrono::high_resolution_clock::now(); }
     double cur_duration() { 
-        QueryPerformanceCounter(&t2);
-        return (t2.QuadPart - t1.QuadPart) / frequency;
+        t2 = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<double>(t2- t1).count();
     }
     double duration() {
-        return (t2.QuadPart - t1.QuadPart) / frequency;
+        return std::chrono::duration<double>(t2- t1).count();
     }
     void clear() {
-        t2.QuadPart = t1.QuadPart = 0;
+        t1 = t2 = time_point{};
     }
-    LARGE_INTEGER t1, t2;
+    time_point t1{}, t2{};
     inline static double frequency;
 };
 
@@ -129,19 +116,6 @@ void bench_comparison_operators(double time_per_function = 1.0)
     }
 
     print_ips("Operators >, >=, <, <= (average of all 4)", (uint64_t)(total_iterations / dur.duration()));
-
-    //dur.start();
-    //while (dur.cur_duration() < time_per_function) {
-    //    for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-    //        dummy -= (f1 == f2) || (f1 != f2);
-    //    }
-    //    total_iterations += BENCH_ITERATIONS;
-    //}
-    //if (dummy <  5) { // trick the compiler to not optimize out the above loop
-    //    printf("");
-    //}
-
-    //print_ips("Operators ==, !=> (both in one line)", (uint64_t)(total_iterations / dur.duration()));
 }
 
 void bench_addition(double time_per_function = 1.0)
@@ -859,6 +833,16 @@ void bench_hyperbolic_trig_functions(double time_per_function = 1.0)
 */
 void bench() 
 {
+#ifdef __clang__
+    auto compiler = format("Clang {}", __clang_version__);
+#elif defined(__GNUC__) || defined(__GNUG__)
+    auto compiler = "GCC";
+#elif defined(_MSC_VER)
+    auto compiler = format("MSVC {}.{}", _MSC_VER / 100, _MSC_VER - 100 * (_MSC_VER / 100));
+#else
+    auto compiler = "an unknown compiler";
+#endif
+    printf("Compiled with %s\n", compiler.c_str());
     printf("=========================\n");
     printf("Single threaded benchmark\n");
     printf("=========================\n");
@@ -871,4 +855,10 @@ void bench()
     bench_trig_functions(TIME_PER_FUNCTION);
     bench_hyperbolic_trig_functions(TIME_PER_FUNCTION);
     bench_special_functions(TIME_PER_FUNCTION);
+}
+
+int main()
+{
+    bench();
+    return 0;
 }

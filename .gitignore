@@ -9,3 +9,6 @@ html
 gtest/build
 gtest/external
 *.bak
+bin/
+build/
+

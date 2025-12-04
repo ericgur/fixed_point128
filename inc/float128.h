@@ -1,4 +1,4 @@
-﻿/***********************************************************************************
+/***********************************************************************************
     MIT License
 
     Copyright (c) 2025 Eric Gur (ericgur@iname.com)
@@ -35,20 +35,10 @@
 
 ************************************************************************************/
 
+#ifndef FP128_FLOAT128_H
+#define FP128_FLOAT128_H
 
-// override some static analysis checks
-#pragma warning(push)
-#pragma warning(disable: 26472) // Don't use a static_cast for arithmetic conversions. Use brace initialization
-#pragma warning(disable: 26485) // No array to pointer decay
-#pragma warning(disable: 26481) // Don't use pointer arithmetic. Use span instead
-#pragma warning(disable: 26446) // Prefer to use gsl::at() instead of unchecked subscript operator
-#pragma warning(disable: 26482) // Only index into arrays using constant expressions
-#pragma warning(disable: 26408) // Avoid malloc() and free(), prefer the nothrow version of new with delete
-#pragma warning(disable: 6255)  // alloca indicates failure by raising a stack overflow exception.  Consider using _malloca instead
-#pragma warning(disable: 4996)  // This function or variable may be unsafe.Consider using strncpy_s instead.To disable deprecation, use _CRT_SECURE_NO_WARNINGS.See online help for details.
-
-
-#include "fixed_point128_shared.h"
+#include "uint128_.h"
 
 namespace fp128 {
 /***********************************************************************************
@@ -152,8 +142,7 @@ class __declspec(align(16)) float128
     static constexpr uint64_t UPPER_FRAC_MASK = FP128_MAX_VALUE_64(FRAC_BITS - 64);
     static constexpr uint64_t FRAC_UNITY = FP128_ONE_SHIFT(FRAC_BITS - 64);
     static constexpr uint64_t SIGN_MASK = 1ull << 63;
-#pragma warning(push)
-#pragma warning(disable: 4201) // nameless union/structs
+
     struct _float128_bits {
         uint64_t f : 48;
         uint64_t e : 15;
@@ -180,7 +169,7 @@ class __declspec(align(16)) float128
             _float128_bits high_bits; 
         };
     };
-#pragma warning(pop)
+
 public:
     /**
      * @brief Default constructor, creates an instance with a value of zero.
@@ -1379,14 +1368,14 @@ public:
     /**
      * @brief Inverts the sign
     */
-    [[nodiscard]] FP128_INLINE void invert_sign() noexcept
+    FP128_INLINE void invert_sign() noexcept
     {
         high_bits.s ^= 1;
     }
     /**
      * @brief Sets the sign
     */
-    [[nodiscard]] FP128_INLINE void set_sign(uint64_t s) noexcept
+    FP128_INLINE void set_sign(uint64_t s) noexcept
     {
         high_bits.s = s;
     }
@@ -2268,7 +2257,7 @@ public:
      * @param x Input value
      * @param res Result of the function
     */
-    [[nodiscard]] friend void fact_reciprocal(int x, float128& res) noexcept
+    friend void fact_reciprocal(int x, float128& res) noexcept
     {
         static const float128 c[] = {
             "1.0", // 1 / 0!
@@ -2962,7 +2951,7 @@ public:
      * @param a pointer to array that receives the results. The array must be preallocated.
      * @param count Element count in the array
     */
-    [[nodiscard]] friend void erf_constants(float128* a, int32_t count) {
+    friend void erf_constants(float128* a, int32_t count) {
         if (a == nullptr) return;
         
         a[0] = 1;
@@ -3176,3 +3165,5 @@ public:
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);
 
 } //namespace fp128
+
+#endif // FP128_FLOAT128_H

@@ -1,18 +1,24 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.2.32616.157
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11222.15 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fixed_point128", "fixed_point128.vcxproj", "{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug Clang|x64 = Debug Clang|x64
 		Debug|x64 = Debug|x64
+		Release Clang|x64 = Release Clang|x64
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}.Debug Clang|x64.ActiveCfg = Debug Clang x64|x64
+		{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}.Debug Clang|x64.Build.0 = Debug Clang x64|x64
 		{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}.Debug|x64.ActiveCfg = Debug|x64
 		{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}.Debug|x64.Build.0 = Debug|x64
+		{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}.Release Clang|x64.ActiveCfg = Release Clang x64|x64
+		{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}.Release Clang|x64.Build.0 = Release Clang x64|x64
 		{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}.Release|x64.ActiveCfg = Release|x64
 		{16BA4EFF-3569-418B-82BF-F2B5DEB3D612}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection

@@ -35,18 +35,8 @@
 
 ************************************************************************************/
 
-#pragma once
-
-// override some static analysis checks
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable: 26472) // Don't use a static_cast for arithmetic conversions. Use brace initialization
-#pragma warning(disable: 26485) // No array to pointer decay
-#pragma warning(disable: 26481) // Don't use pointer arithmetic. Use span instead
-#pragma warning(disable: 26446) // Prefer to use gsl::at() instead of unchecked subscript operator
-#pragma warning(disable: 26482) // Only index into arrays using constant expressions
-#pragma warning(disable: 26408) // Avoid malloc() and free(), prefer the nothrow version of new with delete
-#endif
+#ifndef FP128_FIXED_POINT128_T_H
+#define FP128_FIXED_POINT128_T_H
 
 #include "fixed_point128_shared.h"
 
@@ -2641,13 +2631,6 @@ private:
         int32_t i, j;                      // Indexes
         // disable various warnings, some are bogus in VS2022.
         // the below code relies on the implied truncation (to 32 bit) of several expressions.
-    #pragma warning(push)
-    #pragma warning(disable: 6255)
-    #pragma warning(disable: 4244)
-    #pragma warning(disable: 6297)
-    #pragma warning(disable: 6385)
-    #pragma warning(disable: 6386)
-    #pragma warning(disable: 26451)
 
     // shrink the arrays to avoid extra work on small numbers
         while (m > 0 && u[m - 1] == 0) --m;
@@ -2725,7 +2708,6 @@ private:
             r[n - 1] = un[n - 1] >> s;
         }
         return 0;
-    #pragma warning(pop)
     }
     */
 
@@ -2734,6 +2716,4 @@ private:
 
 } //namespace fp128
 
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
+#endif // FP128_FIXED_POINT128_T_H
