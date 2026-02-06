@@ -25,42 +25,38 @@
 // bench.cpp : benchmark and profile for fixed_point128 and uint128_t classes
 //
 
-//#define FP128_DISABLE_INLINE TRUE
+// #define FP128_DISABLE_INLINE TRUE
 
 #include <cstdio>
 #include <chrono>
 #include <format>
-#include "../inc/fixed_point128.h" 
-#include "../inc/uint128_t.h" 
-
+#include "../inc/fixed_point128.h"
+#include "../inc/uint128_t.h"
 
 using namespace std;
 using namespace fp128;
 constexpr uint64_t BENCH_ITERATIONS = 5000;
 constexpr double TIME_PER_FUNCTION = 0.5;  // in seconds
 
-struct Duration
-{
-    using time_point=std::chrono::high_resolution_clock::time_point;
+struct Duration {
+    using time_point = std::chrono::high_resolution_clock::time_point;
     Duration() = default;
 
     void start() { t1 = std::chrono::high_resolution_clock::now(); }
-    double cur_duration() { 
+    double cur_duration()
+    {
         t2 = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration<double>(t2- t1).count();
+        return std::chrono::duration<double>(t2 - t1).count();
     }
-    double duration() {
-        return std::chrono::duration<double>(t2- t1).count();
-    }
-    void clear() {
-        t1 = t2 = time_point{};
-    }
-    time_point t1{}, t2{};
+    double duration() { return std::chrono::duration<double>(t2 - t1).count(); }
+    void clear() { t1 = t2 = time_point {}; }
+    time_point t1 {}, t2 {};
     inline static double frequency;
 };
 
 // get a value that makes the complier not optimize away certain expressions.
-template<typename T> __declspec(noinline) T get_const(T val) {
+template <typename T> __declspec(noinline) T get_const(T val)
+{
     return val;
 }
 
@@ -68,16 +64,13 @@ void print_ips(const char* name, int64_t ips)
 {
     if (ips < 1000) {
         printf("%s: %lld/s\n", name, ips);
-    }
-    else if (ips < 1000000) {
+    } else if (ips < 1000000) {
         const double dips = ips / 1000.0;
         printf("%s: %0.3lfK/s\n", name, dips);
-    }
-    else if (ips < 1000000000) {
+    } else if (ips < 1000000000) {
         const double dips = ips / 1000000.0;
         printf("%s: %0.3lfM/s\n", name, dips);
-    }
-    else {
+    } else {
         const double dips = ips / 1000000000.0;
         printf("%s: %0.3lfG/s\n", name, dips);
     }
@@ -86,7 +79,7 @@ void print_ips(const char* name, int64_t ips)
 /**
  * @brief Benches all comparison functions
  * @param time_per_function Time spent in each sub-test
-*/
+ */
 void bench_comparison_operators(double time_per_function = 1.0)
 {
     printf("\n");
@@ -111,7 +104,7 @@ void bench_comparison_operators(double time_per_function = 1.0)
         }
         total_iterations += 4 * BENCH_ITERATIONS;
     }
-    if (dummy > 5) { // trick the compiler to not optimize out the above loop
+    if (dummy > 5) {  // trick the compiler to not optimize out the above loop
         printf("");
     }
 
@@ -134,7 +127,9 @@ void bench_addition(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    if (f3) {
+        f3++;
+    }  // fool the complier into not optimizing away the benchmark
     print_ips("Addition", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -154,7 +149,9 @@ void bench_subtraction(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    if (f3) {
+        f3++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("Subtraction", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -178,7 +175,9 @@ void bench_multiplication(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    if (f3) {
+        f3++;
+    }  // fool the complier into not optimizing away the benchmark
     print_ips("Multiplication by fixed_point128", (uint64_t)(total_iterations / dur.duration()));
 
     fixed_point128<32> f10;
@@ -191,7 +190,9 @@ void bench_multiplication(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f10) { f10++; } // fool the complier into not optimizing away the benchmark
+    if (f10) {
+        f10++;
+    }  // fool the complier into not optimizing away the benchmark
     print_ips("Multiplication by int32_t", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -210,11 +211,13 @@ void bench_division(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f1 / dval; // fix 
+            f3 = f1 / dval;  // fix
         }
         total_iterations += 2 * BENCH_ITERATIONS;
     }
-    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    if (f3) {
+        f3++;
+    }  // fool the complier into not optimizing away the benchmark
     print_ips("Division by double (exponent of 2)", (uint64_t)(total_iterations / dur.duration()));
 
     total_iterations = 0;
@@ -225,9 +228,10 @@ void bench_division(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    if (f3) {
+        f3++;
+    }  // fool the complier into not optimizing away the benchmark
     print_ips("Division by int64", (uint64_t)(total_iterations / dur.duration()));
-
 
     fixed_point128<10> f4 = 5;
     total_iterations = 0;
@@ -238,7 +242,9 @@ void bench_division(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    if (f3) {
+        f3++;
+    }  // fool the complier into not optimizing away the benchmark
     print_ips("Division by fixed_point128 (int)", (uint64_t)(total_iterations / dur.duration()));
 
     total_iterations = 0;
@@ -249,7 +255,9 @@ void bench_division(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    if (f3) {
+        f3++;
+    }  // fool the complier into not optimizing away the benchmark
     print_ips("Division by fixed_point128 (float)", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -268,7 +276,9 @@ void bench_reciprocal(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("reciprocal", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -288,7 +298,9 @@ void bench_sqrt(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("sqrt", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -308,7 +320,9 @@ void bench_exp(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("exp", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -328,7 +342,9 @@ void bench_exp2(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("exp2", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -348,7 +364,9 @@ void bench_expm1(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("expm1", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -360,7 +378,7 @@ void bench_pow(double time_per_function = 1.0)
     // setup
     fixed_point128<10> f1 = fixed_point128<10>::e();
     fixed_point128<10> f2 = fixed_point128<10>::golden_ratio();
-    fixed_point128<10> f3; 
+    fixed_point128<10> f3;
     // start the clock
     dur.start();
     while (dur.cur_duration() < time_per_function) {
@@ -369,11 +387,12 @@ void bench_pow(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) { f3++; } // fool the complier into not optimizing away the benchmark
+    if (f3) {
+        f3++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("pow", (uint64_t)(total_iterations / dur.duration()));
 }
-
 
 void bench_log(double time_per_function = 1.0)
 {
@@ -390,7 +409,9 @@ void bench_log(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("log", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -410,7 +431,9 @@ void bench_log2(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("log2", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -430,7 +453,9 @@ void bench_log10(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("log10", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -450,7 +475,9 @@ void bench_log1p(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("log1p", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -470,7 +497,9 @@ void bench_sin(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("sin", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -490,7 +519,9 @@ void bench_asin(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("asin", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -510,7 +541,9 @@ void bench_cos(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("cos", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -530,7 +563,9 @@ void bench_acos(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("acos", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -550,7 +585,9 @@ void bench_tan(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("tan", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -570,7 +607,9 @@ void bench_atan(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("atan", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -590,7 +629,9 @@ void bench_sinh(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("sinh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -610,7 +651,9 @@ void bench_asinh(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("asinh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -630,7 +673,9 @@ void bench_cosh(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("cosh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -650,7 +695,9 @@ void bench_acosh(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("acosh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -670,7 +717,9 @@ void bench_tanh(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("tanh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -680,7 +729,7 @@ void bench_atanh(double time_per_function = 1.0)
     Duration dur;
     uint64_t total_iterations = 0;
     // setup
-    fixed_point128<10> f1 = fixed_point128<10>::e() / 4; // abs(v) < 1
+    fixed_point128<10> f1 = fixed_point128<10>::e() / 4;  // abs(v) < 1
     fixed_point128<10> f2;
     // start the clock
     dur.start();
@@ -690,7 +739,9 @@ void bench_atanh(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) { f2++; } // fool the complier into not optimizing away the benchmark
+    if (f2) {
+        f2++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("atanh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -719,18 +770,19 @@ void bench_mandelbrot(double time_per_function = 1.0)
             vsq = v * v;
             // check uv vector amplitude is smaller than 2
             modulus = usq + vsq;
-
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (modulus) { modulus++; } // fool the complier into not optimizing away the benchmark
+    if (modulus) {
+        modulus++;
+    }  // fool the complier into not optimizing away the benchmark
 
     print_ips("Mandelbrot", (uint64_t)(total_iterations / dur.duration()));
 }
 /**
  * @brief Benches all simple arithmatic functions
  * @param time_per_function Time spent in each sub-test
-*/
+ */
 
 void bench_arithmatic(double time_per_function = 1.0)
 {
@@ -749,7 +801,7 @@ void bench_arithmatic(double time_per_function = 1.0)
 /**
  * @brief Benches all exponent functions
  * @param time_per_function Time spent in each sub-test
-*/
+ */
 
 void bench_exponents(double time_per_function = 1.0)
 {
@@ -767,7 +819,7 @@ void bench_exponents(double time_per_function = 1.0)
 /**
  * @brief Benches all log functions
  * @param time_per_function Time spent in each sub-test
-*/
+ */
 void bench_log_functions(double time_per_function = 1.0)
 {
     printf("\n");
@@ -784,7 +836,7 @@ void bench_log_functions(double time_per_function = 1.0)
 /**
  * @brief Benches all trig functions
  * @param time_per_function Time spent in each sub-test
-*/
+ */
 void bench_trig_functions(double time_per_function = 1.0)
 {
     printf("\n");
@@ -803,7 +855,7 @@ void bench_trig_functions(double time_per_function = 1.0)
 /**
  * @brief Benches all special functions
  * @param time_per_function Time spent in each sub-test
-*/
+ */
 void bench_special_functions(double time_per_function = 1.0)
 {
     printf("\n");
@@ -830,8 +882,8 @@ void bench_hyperbolic_trig_functions(double time_per_function = 1.0)
 }
 /**
  * @brief Main benchmark function
-*/
-void bench() 
+ */
+void bench()
 {
 #ifdef __clang__
     auto compiler = format("Clang {}", __clang_version__);

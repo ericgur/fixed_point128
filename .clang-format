@@ -1,0 +1,144 @@
+---
+# QVisim Code Style Configuration
+# Based on project guidelines in CLAUDE.md
+
+# Base style
+BasedOnStyle: LLVM
+
+# Language settings
+Language: Cpp
+Standard: c++20
+
+# Indentation
+IndentWidth: 4
+UseTab: Never
+TabWidth: 4
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+
+# Braces - no newlines before opening braces, just a single space
+BreakBeforeBraces: Linux
+#BreakBeforeBraces: Stroustrup
+# BraceWrapping:
+#   AfterCaseLabel: false
+#   AfterClass: false
+#   AfterControlStatement: Never
+#   AfterEnum: true
+#   AfterFunction: true
+#   AfterNamespace: true
+#   AfterStruct: false
+#   AfterUnion: false
+#   AfterExternBlock: false
+#   BeforeCatch: true
+#   BeforeElse: true
+#   BeforeLambdaBody: false
+#   BeforeWhile: false
+#   IndentBraces: false
+#   SplitEmptyFunction: false
+#   SplitEmptyRecord: false
+#   SplitEmptyNamespace: false
+
+# Spacing
+SpaceBeforeCpp11BracedList: true
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 2
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInContainerLiterals: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# Line breaks and wrapping
+ColumnLimit: 160
+AlwaysBreakAfterReturnType: None
+AlwaysBreakBeforeMultilineStrings: false
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: AfterColon
+BreakInheritanceList: BeforeColon
+BreakStringLiterals: true
+# BreakBeforeTemplateCloser: false
+
+# Block formatting - require braces for all control statements
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
+
+# Alignment
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: None
+AlignConsecutiveBitFields: None
+AlignConsecutiveDeclarations: None
+AlignConsecutiveMacros: None
+AlignEscapedNewlines: Left
+AlignOperands: Align
+AlignTrailingComments: true
+
+# Pointer and reference alignment
+PointerAlignment: Left
+DerivePointerAlignment: false
+ReferenceAlignment: Left
+
+# Include sorting
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+# Namespaces
+CompactNamespaces: false
+FixNamespaceComments: true
+NamespaceIndentation: None
+
+# Comments
+ReflowComments: true
+
+# Other formatting
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackArguments: true
+BinPackParameters: true
+EmptyLineBeforeAccessModifier: LogicalBlock
+IndentCaseLabels: false
+IndentGotoLabels: false
+IndentPPDirectives: None
+AccessModifierOffset: -4
+IndentExternBlock: NoIndent
+IndentWrappedFunctionNames: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# C++ specific
+Cpp11BracedListStyle: true
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
+SortUsingDeclarations: true
+
+# Penalties for breaking (lower = more likely to break)
+PenaltyBreakAssignment: 2
+PenaltyBreakBeforeFirstCallParameter: 19
+PenaltyBreakComment: 300
+PenaltyBreakFirstLessLess: 160
+PenaltyBreakString: 1000
+PenaltyExcessCharacter: 1000000
+PenaltyReturnTypeOnItsOwnLine: 60
+PenaltyBreakTemplateDeclaration: 10
+
+# Macros
+# Note: clang-format cannot enforce naming conventions (PascalCase vs camelCase)
+# These must be enforced through code review
+AttributeMacros: ['[[nodiscard]]']
+ForEachMacros: ['foreach', 'Q_FOREACH', 'BOOST_FOREACH']
+
+# Qt specific
+# Note: Use with Qt keywords like signals, slots, emit
+SpaceAfterCStyleCast: false
+
+# Disable formatting for specific regions if needed
+# Use // clang-format off and // clang-format on comments
+
+...

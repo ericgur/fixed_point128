@@ -1,7 +1,7 @@
 // remove warnings from gtest itself
 #pragma warning(push)
-#pragma warning(disable: 26439) 
-#pragma warning(disable: 26495) 
+#pragma warning(disable : 26439)
+#pragma warning(disable : 26495)
 #include <gtest/gtest.h>
 #pragma warning(pop)
 #include <ostream>
@@ -9,15 +9,17 @@
 #include "gtest_shared.h"
 
 /**********************************************************************
-* fixed_point128 tests
-***********************************************************************/
+ * fixed_point128 tests
+ ***********************************************************************/
 // Construct fixed_point128 and convert back to/from various elements.
-TEST(float128, DefaultConstructor) {
+TEST(float128, DefaultConstructor)
+{
     float128 f;
     EXPECT_DOUBLE_EQ(static_cast<double>(f), 0.0);
 }
-TEST(float128, ConstructorFromDouble) {
-    srand(RANDOM_SEED); 
+TEST(float128, ConstructorFromDouble)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-1023, 1022);
         float128 f = value;
@@ -25,7 +27,8 @@ TEST(float128, ConstructorFromDouble) {
         EXPECT_DOUBLE_EQ(f_value, value) << "value=" << value;
     }
 }
-TEST(float128, ConstructorFromFloat) {
+TEST(float128, ConstructorFromFloat)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value = (float)get_double_random(-1023, 1022);
@@ -34,39 +37,44 @@ TEST(float128, ConstructorFromFloat) {
         EXPECT_FLOAT_EQ(f_value, value) << "value=" << value;
     }
 }
-TEST(float128, ConstructorFromInt32) {
-    srand(RANDOM_SEED); 
+TEST(float128, ConstructorFromInt32)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         int32_t value = get_int32_random();
         float128 f = value;
         EXPECT_EQ(static_cast<int32_t>(f), value);
     }
 }
-TEST(float128, ConstructorFromUnsignedInt32) {
-    srand(RANDOM_SEED); 
+TEST(float128, ConstructorFromUnsignedInt32)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint32_t value = get_uint32_random();
         float128 f = value;
         EXPECT_EQ(static_cast<uint32_t>(f), value);
     }
 }
-TEST(float128, ConstructorFromInt64) {
-    srand(RANDOM_SEED); 
+TEST(float128, ConstructorFromInt64)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         int64_t value = get_int64_random();
         float128 f = value;
         EXPECT_EQ(static_cast<int64_t>(f), value);
     }
 }
-TEST(float128, ConstructorFromUnsignedInt64) {
-    srand(RANDOM_SEED); 
+TEST(float128, ConstructorFromUnsignedInt64)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint64_t value = get_uint64_random();
         float128 f = value;
         EXPECT_EQ(static_cast<uint64_t>(f), value);
     }
 }
-TEST(float128, ConstructorFromString) {
+TEST(float128, ConstructorFromString)
+{
     char str[128];
     char str2[128];
     srand(RANDOM_SEED);
@@ -114,53 +122,62 @@ TEST(float128, ConstructorFromString) {
             int64_t res_last_digits = strtoll(&res[len - end_char_to_check], nullptr, 10);
             int64_t err = abs(orig_last_digits - res_last_digits);
 
-            EXPECT_LE(err, max_allowed_error) << "error: " << err << ", last digits source: " << &str[len - end_char_to_check] << "last digits result: " << &res[len - end_char_to_check];
-        }
-            catch (...) {
-                EXPECT_NO_THROW(i) << "failed at iteration " << i;
+            EXPECT_LE(err, max_allowed_error) << "error: " << err << ", last digits source: " << &str[len - end_char_to_check]
+                                              << "last digits result: " << &res[len - end_char_to_check];
+        } catch (...) {
+            EXPECT_NO_THROW(i) << "failed at iteration " << i;
         }
     }
 }
-TEST(float128, CopyConstructor) {
-    srand(RANDOM_SEED); 
+TEST(float128, CopyConstructor)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         float128 f1 = value;
         float128 f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
+        ;
     }
 }
-TEST(float128, MoveConstructor) {
-    srand(RANDOM_SEED); 
+TEST(float128, MoveConstructor)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         float128 f1 = value;
         float128 f2(std::move(f1));
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
+        ;
     }
 }
-TEST(float128, AssignmentOperator) {
-    srand(RANDOM_SEED); 
+TEST(float128, AssignmentOperator)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         float128 f1 = value;
         float128 f2;
         f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
+        ;
     }
 }
-TEST(float128, MoveAssignmentOperator) {
-    srand(RANDOM_SEED); 
+TEST(float128, MoveAssignmentOperator)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-1023, 1022);
         float128 f1 = value;
         float128 f2;
         f2 = std::move(f1);
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;;
+        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
+        ;
     }
 }
-TEST(float128, AddSameSign) {
-    srand(RANDOM_SEED); 
+TEST(float128, AddSameSign)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = fabs(get_double_random());
         double value2 = value1 * 2.5;
@@ -170,14 +187,15 @@ TEST(float128, AddSameSign) {
         float128 f3 = f1 + f2;
         double float128_res = static_cast<double>(f3);
         // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        //if (is_similar_double(float128_res, res))
+        // if (is_similar_double(float128_res, res))
         //    continue;
 
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, AddDifferentSign) {
-    srand(RANDOM_SEED); 
+TEST(float128, AddDifferentSign)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = fabs(get_double_random());
         double value2 = value1 * -2.5;
@@ -187,13 +205,14 @@ TEST(float128, AddDifferentSign) {
         float128 f3 = f1 + f2;
         double float128_res = static_cast<double>(f3);
         // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        //if (is_similar_double(float128_res, res))
+        // if (is_similar_double(float128_res, res))
         //    continue;
 
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, AddDouble) {
+TEST(float128, AddDouble)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -203,13 +222,14 @@ TEST(float128, AddDouble) {
         float128 f3 = f1 + value2;
         double float128_res = static_cast<double>(f3);
         // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        //if (is_similar_double(float128_res, res))
+        // if (is_similar_double(float128_res, res))
         //    continue;
 
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, AddFloat) {
+TEST(float128, AddFloat)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value1 = (float)get_double_random();
@@ -221,13 +241,15 @@ TEST(float128, AddFloat) {
         EXPECT_FLOAT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, AddInt32) {
+TEST(float128, AddInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = abs(get_int32_random());
         auto value2 = abs(get_int32_random());
         auto res = value1 + value2;
-        if (res < 0) continue; //wrap around won't happen in uint128_t
+        if (res < 0)
+            continue;  // wrap around won't happen in uint128_t
 
         float128 f1 = value1;
         float128 f3 = f1 + value2;
@@ -235,13 +257,15 @@ TEST(float128, AddInt32) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, AddUnsignedInt32) {
+TEST(float128, AddUnsignedInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_uint32_random();
         auto value2 = get_uint32_random();
         auto res = value1 + value2;
-        if (res < value1 || res < value2) continue; //wrap around
+        if (res < value1 || res < value2)
+            continue;  // wrap around
 
         float128 f1 = value1;
         float128 f3 = f1 + value2;
@@ -249,34 +273,39 @@ TEST(float128, AddUnsignedInt32) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, AddInt64) {
+TEST(float128, AddInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = abs(get_int64_random());
         auto value2 = abs(get_int64_random());
         auto res = value1 + value2;
-        if (res < value1 || res < value2) continue; //wrap around
+        if (res < value1 || res < value2)
+            continue;  // wrap around
         float128 f1 = value1;
         float128 f3 = f1 + value2;
         auto float128_res = static_cast<int64_t>(f3);
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, AddUnsignedInt64) {
+TEST(float128, AddUnsignedInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_uint64_random();
         auto value2 = get_uint64_random();
         auto res = value1 + value2;
-        if (res < value1 || res < value2) continue; //wrap around
+        if (res < value1 || res < value2)
+            continue;  // wrap around
         float128 f1 = value1;
         float128 f3 = f1 + value2;
         auto float128_res = static_cast<uint64_t>(f3);
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, SubtractSameSign) {
-    srand(RANDOM_SEED); 
+TEST(float128, SubtractSameSign)
+{
+    srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = fabs(get_double_random());
         double value2 = value1 * 2.5;
@@ -288,7 +317,8 @@ TEST(float128, SubtractSameSign) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, SubtractDifferentSign) {
+TEST(float128, SubtractDifferentSign)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = fabs(get_double_random());
@@ -301,12 +331,14 @@ TEST(float128, SubtractDifferentSign) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, SubtractInt32) {
+TEST(float128, SubtractInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = abs(get_int32_random());
         auto value2 = abs(get_int32_random());
-        if (value2 > value1) value2 = value1 / 3;
+        if (value2 > value1)
+            value2 = value1 / 3;
 
         auto res = value1 - value2;
 
@@ -316,7 +348,8 @@ TEST(float128, SubtractInt32) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, SubtractUnsignedInt32) {
+TEST(float128, SubtractUnsignedInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_uint32_random();
@@ -331,7 +364,8 @@ TEST(float128, SubtractUnsignedInt32) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, SubtractInt64) {
+TEST(float128, SubtractInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_int64_random();
@@ -345,7 +379,8 @@ TEST(float128, SubtractInt64) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, SubtractUnsignedInt64) {
+TEST(float128, SubtractUnsignedInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_uint64_random();
@@ -360,7 +395,8 @@ TEST(float128, SubtractUnsignedInt64) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, MultiplyByFloat128 ) {
+TEST(float128, MultiplyByFloat128)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -372,13 +408,14 @@ TEST(float128, MultiplyByFloat128 ) {
 
         double float128_res = static_cast<double>(f3);
         // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        //if (is_similar_double(float128_res, res))
+        // if (is_similar_double(float128_res, res))
         //    continue;
 
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, MultiplyByExponentOf2) {
+TEST(float128, MultiplyByExponentOf2)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -393,10 +430,10 @@ TEST(float128, MultiplyByExponentOf2) {
         f3 = f2 * f1;
         float128_res = static_cast<double>(f3);
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
-
     }
 }
-TEST(float128, MultiplyByDouble) {
+TEST(float128, MultiplyByDouble)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -407,13 +444,14 @@ TEST(float128, MultiplyByDouble) {
         float128 f3 = f1 * value2;
         double float128_res = static_cast<double>(f3);
         // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        //if (is_similar_double(float128_res, res))
+        // if (is_similar_double(float128_res, res))
         //    continue;
 
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, MultiplyByFloat) {
+TEST(float128, MultiplyByFloat)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value1 = (float)get_double_random();
@@ -423,13 +461,14 @@ TEST(float128, MultiplyByFloat) {
         float128 f3 = f1 * value2;
         float float128_res = static_cast<float>(f3);
         // note that float128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        //if (is_similar_double(float128_res, res))
+        // if (is_similar_double(float128_res, res))
         //    continue;
 
         EXPECT_FLOAT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, MultiplyByInt32) {
+TEST(float128, MultiplyByInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_int32_random();
@@ -444,7 +483,8 @@ TEST(float128, MultiplyByInt32) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, MultiplyByUnsignedInt32) {
+TEST(float128, MultiplyByUnsignedInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_uint32_random();
@@ -459,7 +499,8 @@ TEST(float128, MultiplyByUnsignedInt32) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, MultiplyByInt64) {
+TEST(float128, MultiplyByInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_int64_random();
@@ -474,7 +515,8 @@ TEST(float128, MultiplyByInt64) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, MultiplyByUnsignedInt64) {
+TEST(float128, MultiplyByUnsignedInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_uint64_random();
@@ -489,7 +531,8 @@ TEST(float128, MultiplyByUnsignedInt64) {
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, DivideByFloat128) {
+TEST(float128, DivideByFloat128)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -504,7 +547,8 @@ TEST(float128, DivideByFloat128) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, DivideByExponentOf2) {
+TEST(float128, DivideByExponentOf2)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -523,7 +567,8 @@ TEST(float128, DivideByExponentOf2) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, DivideByDouble) {
+TEST(float128, DivideByDouble)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -537,7 +582,8 @@ TEST(float128, DivideByDouble) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, DivideByFloat) {
+TEST(float128, DivideByFloat)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value1 = (float)get_double_random();
@@ -551,7 +597,8 @@ TEST(float128, DivideByFloat) {
         EXPECT_FLOAT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, DivideByInt32) {
+TEST(float128, DivideByInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random(-1, 39);
@@ -565,7 +612,8 @@ TEST(float128, DivideByInt32) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, DivideByUnsignedInt32) {
+TEST(float128, DivideByUnsignedInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random(-1, 39);
@@ -580,11 +628,12 @@ TEST(float128, DivideByUnsignedInt32) {
     }
 }
 
-TEST(float128, DivideByInt64) {
+TEST(float128, DivideByInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random(-1, 39);
-        int64_t value2 = get_int32_random(); // on purpose
+        int64_t value2 = get_int32_random();  // on purpose
         double res = value1 / value2;
         if (value2 == 0)
             continue;
@@ -594,11 +643,12 @@ TEST(float128, DivideByInt64) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, DivideByUnsignedInt64) {
+TEST(float128, DivideByUnsignedInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random(-1, 39);
-        uint64_t value2 = get_uint32_random(); // on purpose
+        uint64_t value2 = get_uint32_random();  // on purpose
         double res = value1 / value2;
         if (value2 == 0)
             continue;
@@ -608,7 +658,8 @@ TEST(float128, DivideByUnsignedInt64) {
         EXPECT_DOUBLE_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, CompareFloat128) {
+TEST(float128, CompareFloat128)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random(-1, 39);
@@ -618,22 +669,27 @@ TEST(float128, CompareFloat128) {
         float128 f2 = value2;
 
         bool float128_res = f1 > f2;
-        EXPECT_TRUE(float128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
-        
+        EXPECT_TRUE(float128_res == res) << "operator>: "
+                                         << "value1=" << value1 << ", value2=" << value2;
+
         res = value1 >= value2;
         float128_res = f1 >= f2;
-        EXPECT_TRUE(float128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 < value2;
         float128_res = f1 < f2;
-        EXPECT_TRUE(float128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 <= value2;
         float128_res = f1 <= f2;
-        EXPECT_TRUE(float128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, CompareDouble) {
+TEST(float128, CompareDouble)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -642,22 +698,27 @@ TEST(float128, CompareDouble) {
         float128 f1 = value1;
 
         bool float128_res = f1 > value2;
-        EXPECT_TRUE(float128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 >= value2;
         float128_res = f1 >= value2;
-        EXPECT_TRUE(float128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 < value2;
         float128_res = f1 < value2;
-        EXPECT_TRUE(float128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 <= value2;
         float128_res = f1 <= value2;
-        EXPECT_TRUE(float128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, CompareFloat) {
+TEST(float128, CompareFloat)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         float value1 = (float)get_double_random();
@@ -666,22 +727,27 @@ TEST(float128, CompareFloat) {
         float128 f1 = value1;
 
         bool float128_res = f1 > value2;
-        EXPECT_TRUE(float128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 >= value2;
         float128_res = f1 >= value2;
-        EXPECT_TRUE(float128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 < value2;
         float128_res = f1 < value2;
-        EXPECT_TRUE(float128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 <= value2;
         float128_res = f1 <= value2;
-        EXPECT_TRUE(float128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, CompareInt32) {
+TEST(float128, CompareInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         int32_t value1 = get_int32_random();
@@ -690,22 +756,27 @@ TEST(float128, CompareInt32) {
         float128 f1 = value1;
 
         bool float128_res = f1 > value2;
-        EXPECT_TRUE(float128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 >= value2;
         float128_res = f1 >= value2;
-        EXPECT_TRUE(float128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 < value2;
         float128_res = f1 < value2;
-        EXPECT_TRUE(float128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 <= value2;
         float128_res = f1 <= value2;
-        EXPECT_TRUE(float128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, CompareUnsignedInt32) {
+TEST(float128, CompareUnsignedInt32)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint32_t value1 = get_uint32_random();
@@ -714,22 +785,27 @@ TEST(float128, CompareUnsignedInt32) {
         float128 f1 = value1;
 
         bool float128_res = f1 > value2;
-        EXPECT_TRUE(float128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 >= value2;
         float128_res = f1 >= value2;
-        EXPECT_TRUE(float128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 < value2;
         float128_res = f1 < value2;
-        EXPECT_TRUE(float128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 <= value2;
         float128_res = f1 <= value2;
-        EXPECT_TRUE(float128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, CompareInt64) {
+TEST(float128, CompareInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         int64_t value1 = get_int64_random();
@@ -738,22 +814,27 @@ TEST(float128, CompareInt64) {
         float128 f1 = value1;
 
         bool float128_res = f1 > value2;
-        EXPECT_TRUE(float128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 >= value2;
         float128_res = f1 >= value2;
-        EXPECT_TRUE(float128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 < value2;
         float128_res = f1 < value2;
-        EXPECT_TRUE(float128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 <= value2;
         float128_res = f1 <= value2;
-        EXPECT_TRUE(float128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, CompareUnsignedInt64) {
+TEST(float128, CompareUnsignedInt64)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint64_t value1 = get_uint64_random();
@@ -762,109 +843,133 @@ TEST(float128, CompareUnsignedInt64) {
         float128 f1 = value1;
 
         bool float128_res = f1 > value2;
-        EXPECT_TRUE(float128_res == res) << "operator>: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 >= value2;
         float128_res = f1 >= value2;
-        EXPECT_TRUE(float128_res == res) << "operator>=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator>=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 < value2;
         float128_res = f1 < value2;
-        EXPECT_TRUE(float128_res == res) << "operator<: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<: "
+                                         << "value1=" << value1 << ", value2=" << value2;
 
         res = value1 <= value2;
         float128_res = f1 <= value2;
-        EXPECT_TRUE(float128_res == res) << "operator<=: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(float128_res == res) << "operator<=: "
+                                         << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, OperatorEqual) {
+TEST(float128, OperatorEqual)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
         float128 f1 = value1;
         bool float128_res = f1 == f1;
-        EXPECT_TRUE(float128_res == true) << "operator==: " << "value1=" << value1;
+        EXPECT_TRUE(float128_res == true) << "operator==: "
+                                          << "value1=" << value1;
     }
 }
-TEST(float128, OperatorNotEqual) {
+TEST(float128, OperatorNotEqual)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
         float128 f1 = value1;
         bool float128_res = f1 != f1;
-        EXPECT_TRUE(float128_res == false) << "operator!=: " << "value1=" << value1;
+        EXPECT_TRUE(float128_res == false) << "operator!=: "
+                                           << "value1=" << value1;
     }
 }
-TEST(float128, TemplateOperatorNotEqual) {
+TEST(float128, TemplateOperatorNotEqual)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
         float128 f1 = value1;
         bool float128_res = f1 != value1;
-        EXPECT_TRUE(float128_res == false) << "operator!=<double>: " << "value1=" << value1;
+        EXPECT_TRUE(float128_res == false) << "operator!=<double>: "
+                                           << "value1=" << value1;
 
         f1 = static_cast<float>(value1);
         float128_res = f1 != static_cast<float>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<float>: " << "value1=" << value1;
+        EXPECT_TRUE(float128_res == false) << "operator!=<float>: "
+                                           << "value1=" << value1;
 
         f1 = static_cast<uint64_t>(value1);
         float128_res = f1 != static_cast<uint64_t>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<uint64_t>: " << "value1=" << value1;
+        EXPECT_TRUE(float128_res == false) << "operator!=<uint64_t>: "
+                                           << "value1=" << value1;
 
         f1 = static_cast<int64_t>(value1);
         float128_res = f1 != static_cast<int64_t>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<int64_t>: " << "value1=" << value1;
+        EXPECT_TRUE(float128_res == false) << "operator!=<int64_t>: "
+                                           << "value1=" << value1;
 
         f1 = static_cast<uint32_t>(value1);
         float128_res = f1 != static_cast<uint32_t>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<uint32_t>: " << "value1=" << value1;
+        EXPECT_TRUE(float128_res == false) << "operator!=<uint32_t>: "
+                                           << "value1=" << value1;
 
         f1 = static_cast<int32_t>(value1);
         float128_res = f1 != static_cast<int32_t>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<int32_t>: " << "value1=" << value1;
+        EXPECT_TRUE(float128_res == false) << "operator!=<int32_t>: "
+                                           << "value1=" << value1;
     }
 }
-TEST(float128, floor) {
+TEST(float128, floor)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         double res = ::floor(value);
         float128 f1 = value;
         float128 float128_res = floor(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "floor: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "floor: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, ceil) {
+TEST(float128, ceil)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         double res = ::ceil(value);
         float128 f1 = value;
         float128 float128_res = ceil(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "ceil: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "ceil: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, trunc) {
+TEST(float128, trunc)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         double res = trunc(value);
         float128 f1 = value;
         float128 float128_res = trunc(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "trunc: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "trunc: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, round) {
+TEST(float128, round)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         double res = round(value);
         float128 f1 = value;
         float128 float128_res = round(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "round: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "round: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, copysign) {
+TEST(float128, copysign)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -873,10 +978,12 @@ TEST(float128, copysign) {
         float128 f1 = value1;
         float128 f2 = value2;
         float128 float128_res = copysign(f1, f2);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "copysign: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "copysign: "
+                                            << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, fmod_fraction) {
+TEST(float128, fmod_fraction)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -888,10 +995,12 @@ TEST(float128, fmod_fraction) {
         float128 f1 = value1;
         float128 f2 = value2;
         float128 float128_res = fmod(f1, f2);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "fmod: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "fmod: "
+                                            << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, fmod_integer) {
+TEST(float128, fmod_integer)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_int32_random();
@@ -900,10 +1009,12 @@ TEST(float128, fmod_integer) {
         float128 f1 = value1;
         float128 f2 = value2;
         float128 float128_res = fmod(f1, f2);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "fmod: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "fmod: "
+                                            << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, modf) {
+TEST(float128, modf)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
@@ -912,31 +1023,38 @@ TEST(float128, modf) {
         float128 f1 = value;
         float128 float128_res_int;
         float128 float128_res_frac = modf(f1, &float128_res_int);
-        EXPECT_DOUBLE_EQ(float128_res_frac, res) << "modf fraction: " << "value=" << value;
-        EXPECT_DOUBLE_EQ(float128_res_int, res_int) << "modf integer: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res_frac, res) << "modf fraction: "
+                                                 << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res_int, res_int) << "modf integer: "
+                                                    << "value=" << value;
     }
 }
-TEST(float128, sqrt) {
+TEST(float128, sqrt)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = fabs(get_double_random());
         double res = ::sqrt(value);
         float128 f1 = value;
         float128 float128_res = sqrt(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "sqrt: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "sqrt: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, cbrt) {
+TEST(float128, cbrt)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = fabs(get_double_random());
         double res = ::cbrt(value);
         float128 f1 = value;
         float128 float128_res = cbrt(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "cbrt: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "cbrt: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, frexp) {
+TEST(float128, frexp)
+{
     int res_exp, float128_exp;
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -944,11 +1062,14 @@ TEST(float128, frexp) {
         double res = ::frexp(value, &res_exp);
         float128 f1 = value;
         float128 float128_res = frexp(f1, &float128_exp);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "frexp mantissa: " << "value=" << value;
-        EXPECT_EQ(float128_exp, res_exp) << "frexp exp: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "frexp mantissa: "
+                                            << "value=" << value;
+        EXPECT_EQ(float128_exp, res_exp) << "frexp exp: "
+                                         << "value=" << value;
     }
 }
-TEST(float128, ldexp) {
+TEST(float128, ldexp)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
@@ -956,40 +1077,48 @@ TEST(float128, ldexp) {
         double res = ::ldexp(value, value_exp);
         float128 f1 = value;
         float128 float128_res = ldexp(f1, value_exp);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "ldexp: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "ldexp: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, erf) {
+TEST(float128, erf)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 5);
         double res = ::erf(value);
         float128 f1 = value;
         float128 float128_res = erf(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "erf: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "erf: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, erfc) {
+TEST(float128, erfc)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 4);
         double res = ::erfc(value);
         float128 f1 = value;
         float128 float128_res = erfc(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "erfc: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "erfc: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, reciprocal) {
+TEST(float128, reciprocal)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         double res = 1.0 / value;
         float128 f1 = value;
         float128 float128_res = reciprocal(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "reciprocal: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "reciprocal: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, hypot) {
+TEST(float128, hypot)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
@@ -997,74 +1126,88 @@ TEST(float128, hypot) {
         double res = hypot(value1, value2);
         float128 f1 = value1;
         float128 f2 = value2;
-        //float128 t = f1 * f1;
-        //float128 t2 = sqrt(t);
+        // float128 t = f1 * f1;
+        // float128 t2 = sqrt(t);
 
         float128 float128_res = hypot(f1, f2);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "hypot: " << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "hypot: "
+                                            << "value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, ilogb) {
+TEST(float128, ilogb)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random();
         int32_t res = ::ilogb(value);
         float128 f1 = value;
         int32_t float128_res = ilogb(f1);
-        EXPECT_EQ(float128_res, res) << "ilogb: " << "value=" << value;
+        EXPECT_EQ(float128_res, res) << "ilogb: "
+                                     << "value=" << value;
     }
 }
-TEST(float128, log) {
+TEST(float128, log)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = fabs(get_double_random()); 
+        double value = fabs(get_double_random());
         double res = log(value);
         float128 f1 = value;
         float128 float128_res = log(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "log: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "log: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, log2) {
+TEST(float128, log2)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = fabs(get_double_random());
         double res = log2(value);
         float128 f1 = value;
         float128 float128_res = log2(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "log2: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "log2: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, log10) {
+TEST(float128, log10)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = fabs(get_double_random());
         double res = log10(value);
         float128 f1 = value;
         float128 float128_res = log10(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "log10: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "log10: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, log1p) {
+TEST(float128, log1p)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = fabs(get_double_random());
         double res = log1p(value);
         float128 f1 = value;
         float128 float128_res = log1p(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "log1p: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "log1p: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, logb) {
+TEST(float128, logb)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = fabs(get_double_random(-40, 15)); // lower exponent results in lost bits
+        double value = fabs(get_double_random(-40, 15));  // lower exponent results in lost bits
         double res = logb(value);
         float128 f1 = value;
         float128 float128_res = logb(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "logb: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "logb: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, exp) {
+TEST(float128, exp)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-16, 16);
@@ -1072,42 +1215,39 @@ TEST(float128, exp) {
         float128 f1 = value;
         float128 float128_res = exp(f1);
         double float128_res_ = (double)float128_res;
-        EXPECT_DOUBLE_EQ(float128_res, res) << "exp: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "exp: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, exp2) {
+TEST(float128, exp2)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-16, 16); // lower exponent results in lost bits
+        double value = get_double_random(-16, 16);  // lower exponent results in lost bits
         double res = exp2(value);
         float128 f1 = value;
         float128 float128_res = exp2(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "exp2: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "exp2: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, expm1) {
+TEST(float128, expm1)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-16, 16); // lower exponent results in lost bits
+        double value = get_double_random(-16, 16);  // lower exponent results in lost bits
         double res = expm1(value);
         float128 f1 = value;
         float128 float128_res_ = expm1(f1);
         double float128_res = (double)float128_res_;
-        EXPECT_DOUBLE_EQ(float128_res, res) << "expm1: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "expm1: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, pow) {
+TEST(float128, pow)
+{
     // test special values
-    double values[][2] = {
-        {0, 1},
-        {1, INFINITY},
-        {1.1, INFINITY},
-        {INFINITY, 1},
-        {NAN, 1},
-        {1, NAN},
-        {-2, 5},
-        {-2, 5.5}
-    };
+    double values[][2] = {{0, 1}, {1, INFINITY}, {1.1, INFINITY}, {INFINITY, 1}, {NAN, 1}, {1, NAN}, {-2, 5}, {-2, 5.5}};
     constexpr auto value_count = array_length(values);
     for (auto i = 0u; i < value_count; ++i) {
         double value1 = values[i][0];
@@ -1120,151 +1260,179 @@ TEST(float128, pow) {
         if (isnan(res) && isnan(float128_res))
             continue;
 
-        EXPECT_DOUBLE_EQ(float128_res, res) << "pow: " << " value1=" << value1 << ", value2=" << value2;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "pow: "
+                                            << " value1=" << value1 << ", value2=" << value2;
     }
 
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        //double value1 = fabs(get_double_random());
+        // double value1 = fabs(get_double_random());
         double value1 = fabs(get_double_random());
-        double value2 = get_double_random(-16, 16); // lower exponent results in lost bits
+        double value2 = get_double_random(-16, 16);  // lower exponent results in lost bits
         double res = pow(value1, value2);
         float128 f1 = value1;
         float128 f2 = value2;
         float128 float128_res = pow(f1, f2);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "pow: " << " value1=" << value1 << ", value2=" << value2;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "pow: "
+                                            << " value1=" << value1 << ", value2=" << value2;
     }
 }
 
-TEST(float128, sin) {
+TEST(float128, sin)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 3);
         double res = ::sin(value);
         float128 f1 = value;
         float128 float128_res = sin(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "sin: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "sin: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, cos) {
+TEST(float128, cos)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 3);
         double res = ::cos(value);
         float128 f1 = value;
         float128 float128_res = cos(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "cos: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "cos: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, tan) {
+TEST(float128, tan)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 3);
         double res = ::tan(value);
         float128 f1 = value;
         float128 float128_res = tan(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "tan: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "tan: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, asin) {
+TEST(float128, asin)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, -1);
         double res = ::asin(value);
         float128 f1 = value;
         float128 float128_res = asin(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "asin: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "asin: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, acos) {
+TEST(float128, acos)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, -1);
         double res = acos(value);
         float128 f1 = value;
         float128 float128_res = acos(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "acos: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "acos: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, atan) {
+TEST(float128, atan)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 14);
         double res = atan(value);
         float128 f1 = value;
         float128 float128_res = atan(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "atan: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "atan: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, atan2) {
+TEST(float128, atan2)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random(-10, 14); //lower exponent results in lost bits
-        double value2 = get_double_random(-10, 14); //lower exponent results in lost bits
+        double value1 = get_double_random(-10, 14);  // lower exponent results in lost bits
+        double value2 = get_double_random(-10, 14);  // lower exponent results in lost bits
         double res = atan2(value1, value2);
         float128 f1 = value1;
         float128 f2 = value2;
         float128 float128_res = atan2(f1, f2);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "atan2: " << " value1=" << value1 << ", value2=" << value2;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "atan2: "
+                                            << " value1=" << value1 << ", value2=" << value2;
     }
 }
-TEST(float128, sinh) {
+TEST(float128, sinh)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 2);
         double res = ::sinh(value);
         float128 f1 = value;
         float128 float128_res = sinh(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "sinh: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "sinh: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, asinh) {
+TEST(float128, asinh)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 2);
         double res = ::asinh(value);
         float128 f1 = value;
         float128 float128_res = asinh(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "asinh: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "asinh: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, cosh) {
+TEST(float128, cosh)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 2);
         double res = ::cosh(value);
         float128 f1 = value;
         float128 float128_res = cosh(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "cosh: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "cosh: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, acosh) {
+TEST(float128, acosh)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = 1.0 + fabs(get_double_random(-60, 2)); // must be >= 1
+        double value = 1.0 + fabs(get_double_random(-60, 2));  // must be >= 1
         double res = ::acosh(value);
         float128 f1 = value;
         float128 float128_res = acosh(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "acosh: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "acosh: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, tanh) {
+TEST(float128, tanh)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value = get_double_random(-60, 2);
         double res = ::tanh(value);
         float128 f1 = value;
         float128 float128_res = tanh(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "tanh: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "tanh: "
+                                            << "value=" << value;
     }
 }
-TEST(float128, atanh) {
+TEST(float128, atanh)
+{
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-60, -1); // must be: -1 < value < 1
+        double value = get_double_random(-60, -1);  // must be: -1 < value < 1
         double res = ::atanh(value);
         float128 f1 = value;
         float128 float128_res = atanh(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "atanh: " << "value=" << value;
+        EXPECT_DOUBLE_EQ(float128_res, res) << "atanh: "
+                                            << "value=" << value;
     }
 }

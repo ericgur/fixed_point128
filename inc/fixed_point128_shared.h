@@ -24,26 +24,37 @@
 #ifndef FP128_FIXED_POINT128_SHARED_H
 #define FP128_FIXED_POINT128_SHARED_H
 
+/**
+ * @file fixed_point128_shared.h
+ * @brief Shared definitions, intrinsics, and helper functions for 128-bit fixed-point arithmetic.
+ *
+ * Provides compiler-specific intrinsic wrappers (MSVC and GCC/Clang), bit
+ * manipulation utilities (128-bit shifts, leading zero counts, population counts),
+ * multi-word division algorithms (32-bit and 64-bit word-based, derived from
+ * Hacker's Delight), IEEE 754 bit-layout unions, and build configuration macros.
+ *
+ * This header is consumed by fixed_point128.h and should not be included directly.
+ */
+
 #include <cstdint>
 #include <cassert>
 #include <stdexcept>
 #include <memory>
 
 /***********************************************************************************
-*                                  Build Options
-************************************************************************************/
-#if defined (__GNUC__) || defined(__clang__)
+ *                                  Build Options
+ ************************************************************************************/
+#if defined(__GNUC__) || defined(__clang__)
 #define FP128_CLANG
 #elif defined(_MSC_VER)
 // Note that under VS 2022, both __clang__ and _MSC_VER are defined when using the Clang toolset
 #define FP128_MSVC
 #endif
 
-
 // Set to TRUE to disable function inlining - useful for profiling a specific function
 #ifndef FP128_DISABLE_INLINE
 #define FP128_DISABLE_INLINE false
-#endif 
+#endif
 
 #if FP128_DISABLE_INLINE != false
 #if defined(FP128_MSVC)
@@ -64,37 +75,46 @@
 #endif
 #endif
 
+static constexpr bool FP128_CPP_STYLE_MODULO = true;             ///< Use C++ modulo semantics (false = Python-style).
+static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;  ///< Use reciprocal approximation for division.
 
-static constexpr bool FP128_CPP_STYLE_MODULO = true; // set to false to test python style modulo
-static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;
+/// @name Platform-Specific Intrinsics
+/// @brief Compiler-specific intrinsic wrappers for bit manipulation and extended arithmetic.
+/// @{
 
 //
-// MSVC specific section - use intrinsics as-is
+// MSVC specific section - keep intrinsics as-is
 //
 #if defined(FP128_MSVC)
-#pragma warning(disable: 4996)
+#pragma warning(disable : 4996)
 
 #include <intrin.h>
 #include <immintrin.h>
 
-#define lzcnt32            __lzcnt
-#define lzcnt64            __lzcnt64
-#define udiv64             _udiv64
-#define udiv128            _udiv128
-#define mulx_u64           _mulx_u64
-#define addcarryx_u64      _addcarryx_u64
-#define popcnt32           __popcnt32
-#define popcnt64           __popcnt64
-#define alloca             _alloca
+#define lzcnt32 __lzcnt
+#define lzcnt64 __lzcnt64
+#define udiv64 _udiv64
+#define udiv128 _udiv128
+#define mulx_u64 _mulx_u64
+#define addcarryx_u64 _addcarryx_u64
+#define popcnt32 __popcnt32
+#define popcnt64 __popcnt64
+#define alloca _alloca
 
 //
-// clang/Apple implementations
+// GCC/Clang portable fallback implementations
 //
-#elif defined (FP128_CLANG)
+#elif defined(FP128_CLANG)
 #define __shiftright128 shift_right128
-#define __shiftleft128  shift_left128
+#define __shiftleft128 shift_left128
 
-// Provide portable fallbacks for MSVC-specific intrinsics used throughout the codebase.
+/**
+ * @brief Portable 32-bit unsigned division with remainder (GCC/Clang fallback).
+ * @param dividend Numerator.
+ * @param divisor Denominator.
+ * @param remainder Pointer to receive the remainder (may be nullptr).
+ * @return Quotient.
+ */
 FP128_FORCE_INLINE constexpr uint32_t udiv64(uint32_t dividend, uint32_t divisor, uint32_t* remainder)
 {
     uint32_t quot = dividend / divisor;
@@ -104,9 +124,16 @@ FP128_FORCE_INLINE constexpr uint32_t udiv64(uint32_t dividend, uint32_t divisor
     return quot;
 }
 
+/**
+ * @brief Portable 128-bit by 64-bit unsigned division (GCC/Clang fallback).
+ * @param hi_dividend Upper 64 bits of the 128-bit dividend.
+ * @param lo_dividend Lower 64 bits of the 128-bit dividend.
+ * @param divisor 64-bit divisor.
+ * @param remainder Pointer to receive the 64-bit remainder (may be nullptr).
+ * @return 64-bit quotient.
+ */
 FP128_FORCE_INLINE constexpr uint64_t udiv128(uint64_t hi_dividend, uint64_t lo_dividend, uint64_t divisor, uint64_t* remainder)
 {
-    // simple implementation for non-MSVC compilers
     __uint128_t dividend = (static_cast<__uint128_t>(hi_dividend) << 64) | lo_dividend;
     uint64_t quot = static_cast<uint64_t>(dividend / divisor);
     if (remainder) {
@@ -115,59 +142,83 @@ FP128_FORCE_INLINE constexpr uint64_t udiv128(uint64_t hi_dividend, uint64_t lo_
     return quot;
 }
 
+/**
+ * @brief 64x64 -> 128-bit unsigned multiply (GCC/Clang fallback for _mulx_u64).
+ * @param a First operand.
+ * @param b Second operand.
+ * @param hi Pointer to receive the upper 64 bits of the product.
+ * @return Lower 64 bits of the product.
+ */
 FP128_FORCE_INLINE static uint64_t mulx_u64(uint64_t a, uint64_t b, uint64_t* hi) noexcept
 {
-    __uint128_t r = ( __uint128_t )a * b;
-    if (hi) *hi = (uint64_t)(r >> 64);
+    __uint128_t r = (__uint128_t)a * b;
+    if (hi)
+        *hi = (uint64_t)(r >> 64);
     return (uint64_t)r;
 }
 
+/**
+ * @brief 64-bit add with carry (GCC/Clang fallback for _addcarryx_u64).
+ * @param c Input carry (0 or 1).
+ * @param a First operand.
+ * @param b Second operand.
+ * @param out Pointer to receive the 64-bit sum.
+ * @return Output carry (0 or 1).
+ */
 FP128_FORCE_INLINE static unsigned char addcarryx_u64(unsigned char c, uint64_t a, uint64_t b, uint64_t* out) noexcept
 {
-    __uint128_t r = ( __uint128_t )a + b + c;
-    if (out) *out = (uint64_t)r;
+    __uint128_t r = (__uint128_t)a + b + c;
+    if (out)
+        *out = (uint64_t)r;
     return (unsigned char)(r >> 64);
 }
 
+/** @brief Count leading zeros in a 32-bit value (GCC/Clang fallback). */
 FP128_FORCE_INLINE static uint32_t lzcnt32(uint32_t x) noexcept
 {
     return (x == 0) ? 32u : (uint32_t)__builtin_clz(x);
 }
 
+/** @brief Count leading zeros in a 64-bit value (GCC/Clang fallback). */
 FP128_FORCE_INLINE static uint64_t lzcnt64(uint64_t x) noexcept
 {
     return (x == 0) ? 64u : (uint64_t)__builtin_clzll(x);
 }
 
+/** @brief Count set bits in a 64-bit value (GCC/Clang fallback). */
 FP128_FORCE_INLINE static uint64_t popcnt64(uint64_t x) noexcept
 {
     return (uint64_t)__builtin_popcountll(x);
 }
 
+/** @brief Count set bits in a 32-bit value (GCC/Clang fallback). */
 FP128_FORCE_INLINE static uint32_t popcnt32(uint32_t x) noexcept
 {
     return (uint32_t)__builtin_popcount(x);
 }
 
-#endif //#if defined (FP128_CLANG)
+#endif  // #if defined (FP128_CLANG)
 
 /***********************************************************************************
-*                                  Macros
-************************************************************************************/
+ *                                  Macros
+ ***********************************************************************************/
+/** @name Utility Macros
+ *  @brief Bit manipulation and exception macros for fixed-point arithmetic.
+ *  @{
+ */
 #ifndef max
-#define max(a,b)            (((a) > (b)) ? (a) : (b))
+#define max(a, b) (((a) > (b)) ? (a) : (b))
 #endif
 
 #ifndef min
-#define min(a,b)            (((a) < (b)) ? (a) : (b))
+#define min(a, b) (((a) < (b)) ? (a) : (b))
 #endif
 
-
-#define FP128_ONE_SHIFT(x)          (1ull << (x))
-#define FP128_MAX_VALUE_64(x)       (UINT64_MAX >> (64 - (x)))
-#define FP128_GET_BIT(x, n)         (((x) >> (n)) & 1)
+#define FP128_ONE_SHIFT(x) (1ull << (x))
+#define FP128_MAX_VALUE_64(x) (UINT64_MAX >> (64 - (x)))
+#define FP128_GET_BIT(x, n) (((x) >> (n)) & 1)
 #define FP128_GET_BITS(x, b, count) (((x) >> (b)) & FP128_MAX_VALUE_64(count))
-#define FP128_INT_DIVIDE_BY_ZERO_EXCEPTION   throw std::logic_error("Integer divide by zero!")
+#define FP128_INT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Integer divide by zero!")
 #define FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION throw std::logic_error("Floating point divide by zero!")
 #define FP128_NOT_IMPLEMENTED_EXCEPTION throw std::exception("Not implemented!")
 #if defined _DEBUG || defined DEBUG
@@ -176,63 +227,80 @@ FP128_FORCE_INLINE static uint32_t popcnt32(uint32_t x) noexcept
 #else
 #define FP128_ASSERT(x)
 #define FP128_THROW_ONLY_IN_DEBUG noexcept
-#endif // _DEBUG
+#endif  // _DEBUG
 
-//
-// MSVC specific macros
-//
+// portable alignment macro
 #if defined(FP128_MSVC)
 #define FP128_ALIGN(_a) __declspec(align(_a))
 //
 // Clang/GCC specific macros
 //
-#elif defined (FP128_CLANG)
+#elif defined(FP128_CLANG)
 #define FP128_ALIGN(_a) __attribute__((aligned(_a)))
 #endif
 
 #define FP128_ALIGN16 FP128_ALIGN(16)
+/** @} */  // end Utility Macros
 
-namespace fp128 {
-
-/***********************************************************************************
-*                                  Constants
-************************************************************************************/
-// useful const calculations
-static constexpr int32_t flt_frac_bits = 23;  // mantisa bit count of a float variable
-static constexpr int32_t flt_exp_bits = 8;    // exponent bit count of a float variable
-static constexpr int32_t dbl_frac_bits = 52;  // mantisa bit count of a double variable
-static constexpr int32_t dbl_exp_bits = 11;   // exponent bit count of a double variable
+namespace fp128
+{
 
 /***********************************************************************************
-*                                  Containers
-************************************************************************************/
+ *                                  Constants
+ ************************************************************************************/
+
+/// @name IEEE 754 Layout Constants
+/// @{
+static constexpr int32_t flt_frac_bits = 23;  ///< Mantissa bit count of an IEEE 754 float.
+static constexpr int32_t flt_exp_bits = 8;    ///< Exponent bit count of an IEEE 754 float.
+static constexpr int32_t dbl_frac_bits = 52;  ///< Mantissa bit count of an IEEE 754 double.
+static constexpr int32_t dbl_exp_bits = 11;   ///< Exponent bit count of an IEEE 754 double.
+/// @}
+
+/***********************************************************************************
+ *                                  Containers
+ ************************************************************************************/
 #if defined(FP128_MSVC)
 #pragma warning(push)
-#pragma warning(disable: 4201) // nameless union/structs
+#pragma warning(disable : 4201)  // nameless union/structs
 #endif
 
+/**
+ * @struct Double
+ * @brief Union for accessing IEEE 754 double-precision bit fields.
+ *
+ * Allows direct access to the mantissa, exponent, and sign of a double
+ * without manual bit shifting.
+ */
 struct Double {
-    Double(double v = 0) noexcept: val(v) {}
+    Double(double v = 0) noexcept : val(v) {}
     union {
         struct {
-            uint64_t f : dbl_frac_bits; // mantisa/fraction
-            uint64_t e : dbl_exp_bits; // exponent 
-            uint64_t s : 1;  // sign
+            uint64_t f : dbl_frac_bits;  ///< Mantissa (fraction) bits.
+            uint64_t e : dbl_exp_bits;   ///< Biased exponent bits.
+            uint64_t s : 1;              ///< Sign bit (0 = positive, 1 = negative).
         };
-        double val;
+        double val;  ///< The raw double value.
     };
 };
 static_assert(sizeof(Double) == sizeof(double), "The Double union should have the same size as a double variable!");
 
+/**
+ * @struct Float
+ * @brief Union for accessing IEEE 754 single-precision bit fields.
+ *
+ * Allows direct access to the mantissa, exponent, and sign of a float
+ * without manual bit shifting.
+ */
 struct Float {
     Float(float v = 0) noexcept : val(v) {}
     union {
         struct {
-            uint32_t f : flt_frac_bits; // mantisa/fraction
-            uint32_t e : flt_exp_bits;  // exponent 
-            uint32_t s : 1;  // sign
+            uint32_t f : flt_frac_bits;  ///< Mantissa (fraction) bits.
+            uint32_t e : flt_exp_bits;   ///< Biased exponent bits.
+            uint32_t s : 1;              ///< Sign bit (0 = positive, 1 = negative).
         };
-        float val;
+        float val;  ///< The raw float value.
     };
 };
 static_assert(sizeof(Float) == sizeof(float), "The Float union should have the same size as a float variable!");
@@ -242,12 +310,20 @@ static_assert(sizeof(Float) == sizeof(float), "The Float union should have the s
 #endif
 
 /***********************************************************************************
-*                                  Functions
-************************************************************************************/
+ *                                  Functions
+ ************************************************************************************/
 
+/**
+ * @brief Copy a string to lowercase, up to n characters.
+ * @param dest Destination buffer.
+ * @param src Source string.
+ * @param n Maximum number of characters to copy.
+ * @return 0 on success, EINVAL if dest or src is nullptr.
+ */
 FP128_INLINE static errno_t strnlwr(char* dest, const char* src, size_t n) noexcept
 {
-    if (src == nullptr || dest == nullptr) return EINVAL;
+    if (src == nullptr || dest == nullptr)
+        return EINVAL;
     for (size_t i = 0; i < n && src[i] != '\0'; ++i) {
         dest[i] = static_cast<unsigned char>(::tolower(static_cast<unsigned char>(src[i])));
     }
@@ -255,50 +331,52 @@ FP128_INLINE static errno_t strnlwr(char* dest, const char* src, size_t n) noexc
 }
 
 /**
-    * @brief Calculates the element count of a C style array at build time
-    * Example:
-    * int a[5];
-    * constexpr int len = array_length(a); // returns 5 at build time
-    * @tparam T array type
-    * @param a array instance
-    * @return Element count in array
-*/
-template<typename T>
-constexpr uint32_t array_length(const T& a) {
+ * @brief Calculates the element count of a C style array at build time
+ * Example:
+ * int a[5];
+ * constexpr int len = array_length(a); // returns 5 at build time
+ * @tparam T array type
+ * @param a array instance
+ * @return Element count in array
+ */
+template <typename T> constexpr uint32_t array_length(const T& a)
+{
     static_assert(sizeof(a[0]) != 0, "Requires an array of non-zero sized elements!");
     return sizeof(a) / sizeof(a[0]);
 }
 /**
-    * @brief shift right by 'shift' bits
-    * Undefined behavior when shift is outside the range [0, 31]
-    * @param x value to shift
-    * @param shift how many bits to shift
-    * @return result of 'x' the combined 64 bit element right shifted by 'shift' bits.
-*/
+ * @brief shift right by 'shift' bits
+ * Undefined behavior when shift is outside the range [0, 31]
+ * @param x value to shift
+ * @param shift how many bits to shift
+ * @return result of 'x' the combined 64 bit element right shifted by 'shift' bits.
+ */
 FP128_INLINE uint32_t shift_right64(uint32_t l, uint32_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 32);
     return (shift > 0) ? (l >> shift) | (h << (32 - shift)) : l;
 }
 /**
-    * @brief shift left by 'shift' bits
-    * Undefined behavior when shift is outside the range [0, 31]
-    * @param x value to shift
-    * @param shift how many bits to shift
-    * @return result of the combined 64 bit element left shifted by 'shift' bits.
-*/
+ * @brief shift left by 'shift' bits
+ * Undefined behavior when shift is outside the range [0, 31]
+ * @param x value to shift
+ * @param shift how many bits to shift
+ * @return result of the combined 64 bit element left shifted by 'shift' bits.
+ */
 FP128_INLINE uint32_t shift_left64(uint32_t l, uint32_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 32);
-    return (shift > 0) ?  (h << shift) | (l >> (32 - shift)) : h;
+    return (shift > 0) ? (h << shift) | (l >> (32 - shift)) : h;
 }
 /**
-    * @brief shift right 'x' by 'shift' bits with rounding
-    * Undefined behavior when shift is outside the range [0, 63]
-    * @param x value to shift
-    * @param shift how many bits to shift
-    * @return result of 'x' right shifted by 'shift' bits.
-*/
+ * @brief Right-shift a 64-bit value with rounding.
+ *
+ * Undefined behavior when shift is outside the range [1, 63].
+ *
+ * @param x Value to shift.
+ * @param shift Number of bits to shift.
+ * @return The rounded result of x >> shift.
+ */
 FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 {
     assert(shift > 0 && shift < 64);
@@ -307,13 +385,13 @@ FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 }
 
 /**
-    * @brief Right shift a 128 bit unsigned integer (inplace).
-    * Limited range, inplace and no paramter checks.
-    * @param l Low QWORD
-    * @param h High QWORD
-    * @param shift Bits to shift, between 1-63
-    * @return void
-*/
+ * @brief Right shift a 128 bit unsigned integer (inplace).
+ * Limited range, inplace and no paramter checks.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @param shift Bits to shift, between 1-63
+ * @return void
+ */
 FP128_INLINE void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     assert(shift > 0 && shift < 64);
@@ -321,13 +399,13 @@ FP128_INLINE void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) no
     h >>= shift;
 }
 /**
-    * @brief Left shift a 128 bit integer (inplace).
-    * Limited range, inplace and no parameter checks.
-    * @param l Low QWORD
-    * @param h High QWORD
-    * @param shift Bits to shift, between 1-63
-    * @return void
-*/
+ * @brief Left shift a 128 bit integer (inplace).
+ * Limited range, inplace and no parameter checks.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @param shift Bits to shift, between 1-63
+ * @return void
+ */
 FP128_INLINE void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     assert(shift > 0 && shift < 64);
@@ -335,31 +413,32 @@ FP128_INLINE void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) noe
     l <<= shift;
 }
 /**
-    * @brief Right shift a 128 bit integer (inplace) with rounding.
-    * Handles any positive shift value.
-    * @param l Low QWORD
-    * @param h High QWORD
-    * @param shift Bits to shift, between 1-inf
-    * @return void
-*/
+ * @brief Right shift a 128 bit integer (inplace) with rounding.
+ * Handles any positive shift value.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @param shift Bits to shift, between 1-inf
+ * @return void
+ */
 FP128_INLINE void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     assert(shift >= 0);
-    if (shift == 0) return;
+    if (shift == 0)
+        return;
     uint64_t lsb = 0;
     switch (shift >> 6) {
-    case 0: // 1-63 bit
-        lsb = (shift == 1)  ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
+    case 0:  // 1-63 bit
+        lsb = (shift == 1) ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
         l = (l >> shift) | (h << (64 - shift));
         h >>= shift;
         break;
-    case 1: // 64-127 bit
+    case 1:  // 64-127 bit
         shift -= 64;
         lsb = (shift == 1) ? (h & 3) << 1 : (h >> (shift - 2)) & 7;
         l = h >> (shift - 64);
         h = 0;
         break;
-    default: // >127 bit or negative
+    default:  // >127 bit or negative
         h = l = 0;
     }
 
@@ -369,79 +448,80 @@ FP128_INLINE void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shif
     //   1) The 2 rightmost bits are b11 (lsb == 3 or 7), this equal to 0.75
     //   2) The value's msb is 1 (odd number) and the right bits are b10 (0.5) so the result will be an even number
     if (lsb > 6 || lsb == 3) {
-        ++l; // low will wrap around to zero if overflowed
+        ++l;  // low will wrap around to zero if overflowed
         h += l == 0;
     }
 }
 /**
-    * @brief Left shift a 128 bit integer (inplace).
-    * Handles any positive shift value.
-    * @param l Low QWORD
-    * @param h High QWORD
-    * @param shift Bits to shift, between 1-inf
-    * @return void
-*/
+ * @brief Left shift a 128 bit integer (inplace).
+ * Handles any positive shift value.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @param shift Bits to shift, between 1-inf
+ * @return void
+ */
 FP128_INLINE void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     assert(shift >= 0);
-    if (shift == 0) return;
+    if (shift == 0)
+        return;
 
     switch (shift >> 6) {
-
-    case 0: // 1-63 bit
+    case 0:  // 1-63 bit
         h = (h << shift) | (l >> (64 - shift));
         l <<= shift;
         break;
-    case 1: // 64-127 bit
+    case 1:  // 64-127 bit
         h = l << (shift - 64);
         l = 0;
         break;
-    default: // >127 bit or negative
+    default:  // >127 bit or negative
         h = l = 0;
     }
 }
 
 /**
-    * @brief Right shift a 128 bit integer.
-    * @param l Low QWORD
-    * @param h High QWORD
-    * @param shift Bits to shift, between 0-127
-    * @return Lower 64 bit of the result
-*/
+ * @brief Right shift a 128 bit integer.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @param shift Bits to shift, between 0-127
+ * @return Lower 64 bit of the result
+ */
 FP128_INLINE uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
     assert(shift >= 0 && shift < 128);
-    if (shift == 0) return l;
-    if (shift < 64) return (l >> shift) | (h << (64 - shift));
-    if (shift < 128) return h >> (shift ^ 64);
+    if (shift == 0)
+        return l;
+    if (shift < 64)
+        return (l >> shift) | (h << (64 - shift));
+    if (shift < 128)
+        return h >> (shift ^ 64);
     return 0;
 }
 /**
-    * @brief Right shift a 128 bit integer with rounding.
-    * @param l Low QWORD
-    * @param h High QWORD
-    * @param shift Bits to shift, between 0-127
-    * @return Lower 64 bit of the result
-*/
+ * @brief Right shift a 128 bit integer with rounding.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @param shift Bits to shift, between 0-127
+ * @return Lower 64 bit of the result
+ */
 FP128_INLINE uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
     assert(shift >= 0 && shift < 128);
-    if (shift == 0) return l;
+    if (shift == 0)
+        return l;
 
     uint64_t lsb = 0;
 
     if (shift < 64) {
         lsb = (shift == 1) ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
         l = ((l >> shift) | (h << (64 - shift)));
-    }
-    else if (shift < 128) {
+    } else if (shift < 128) {
         shift ^= 64;
         lsb = (shift == 1) ? (h & 3) << 1 : (h >> (shift - 2)) & 7;
         l = h >> shift;
-    }
-    else
+    } else
         return 0;
-
 
     // Use rounding half to even
     // Middle bit is the bit that got shifted away.
@@ -449,51 +529,55 @@ FP128_INLINE uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) no
     //   1) The 2 rightmost bits are b11 (lsb == 3 or 7), this equal to 0.75
     //   2) The value's msb is 1 (odd number) and the right bits are b10 (0.5) so the result will be an even number
     if (lsb > 6 || lsb == 3) {
-        ++l; // low will wrap around to zero if overflowed
+        ++l;  // low will wrap around to zero if overflowed
     }
     return l;
 }
 /**
-    * @brief Left shift a 128 bit integer.
-    * @param l Low QWORD
-    * @param h High QWORD
-    * @param shift Bits to shift, between 0-127
-    * @return Upper 64 bit of the result
-*/
+ * @brief Left shift a 128 bit integer.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @param shift Bits to shift, between 0-127
+ * @return Upper 64 bit of the result
+ */
 FP128_INLINE uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
     assert(shift >= 0 && shift < 128);
-    if (shift == 0) return h;
-    if (shift < 64) return (h << shift) | (l >> (64 - shift));
-    if (shift < 128) return l << (shift - 64);
+    if (shift == 0)
+        return h;
+    if (shift < 64)
+        return (h << shift) | (l >> (64 - shift));
+    if (shift < 128)
+        return l << (shift - 64);
     return 0;
 }
 /**
-    * @brief converts a 128 integer to negative via 2's complement.
-    * @param l Low QWORD (ref)
-    * @param h High QWORD (ref)
-    * @return void
-*/
+ * @brief converts a 128 integer to negative via 2's complement.
+ * @param l Low QWORD (ref)
+ * @param h High QWORD (ref)
+ * @return void
+ */
 FP128_INLINE void twos_complement128(uint64_t& l, uint64_t& h) noexcept
 {
     l = ~l + 1ull;
     h = ~h + (l == 0);
 }
 /**
-    * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
-    * @param q (output) Pointer to receive the quote
-    * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
-    * @param u Pointer Numerator, an array of uint32_t
-    * @param v denominator (uint32_t)
-    * @param m Count of elements in u
-    * @return 0 for success
-*/
+ * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
+ * @param q (output) Pointer to receive the quote
+ * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
+ * @param u Pointer Numerator, an array of uint32_t
+ * @param v denominator (uint32_t)
+ * @param m Count of elements in u
+ * @return 0 for success
+ */
 FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, uint32_t v, int64_t m) noexcept
 {
     if (u == nullptr || q == nullptr || v == 0)
         return 1;
 
-    while (m > 0 && u[m - 1] == 0) --m;
+    while (m > 0 && u[m - 1] == 0)
+        --m;
 
     uint32_t k = 0;
     for (auto j = m - 1; j >= 0; --j) {
@@ -505,48 +589,51 @@ FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* 
     return 0;
 }
 /**
-    * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
-    * @param q (output) Pointer to receive the quote
-    * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
-    * @param u Pointer numerator, an array of uint32_t
-    * @param v Pointer denominator, an array of uint32_t
-    * @param m Count of elements in u
-    * @param n Count of elements in v
-    * @return 0 for success
-*/
+ * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
+ * @param q (output) Pointer to receive the quote
+ * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
+ * @param u Pointer numerator, an array of uint32_t
+ * @param v Pointer denominator, an array of uint32_t
+ * @param m Count of elements in u
+ * @param n Count of elements in v
+ * @return 0 for success
+ */
 inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
 {
-    if (q == nullptr || u == nullptr || v == nullptr) return 1;
+    if (q == nullptr || u == nullptr || v == nullptr)
+        return 1;
 
-    constexpr uint64_t WORD_WIDTH = 32ull;        // bit width of a word
-    constexpr uint64_t BASE = 1ull << WORD_WIDTH; // Number base (32 bits).
-    constexpr uint64_t MASK = BASE - 1;           // 32 bit mask
-    uint32_t *un, *vn;                            // Normalized form of u, v.
-    uint64_t qhat;                                // Estimated quotient digit.
-    uint64_t rhat;                                // A remainder.
-    uint64_t p;                                   // Product of two digits.
-    int64_t t, k;                                 // Temporary variables
-    int32_t i, j;                                 // Indexes
+    constexpr uint64_t WORD_WIDTH = 32ull;         // bit width of a word
+    constexpr uint64_t BASE = 1ull << WORD_WIDTH;  // Number base (32 bits).
+    constexpr uint64_t MASK = BASE - 1;            // 32 bit mask
+    uint32_t *un, *vn;                             // Normalized form of u, v.
+    uint64_t qhat;                                 // Estimated quotient digit.
+    uint64_t rhat;                                 // A remainder.
+    uint64_t p;                                    // Product of two digits.
+    int64_t t, k;                                  // Temporary variables
+    int32_t i, j;                                  // Indexes
     // disable various warnings, some are bogus in VS2022.
     // the below code relies on the implied truncation (to 32 bit) of several expressions.
 #if defined(FP128_MSVC)
 #pragma warning(push)
-#pragma warning(disable: 6255)
-#pragma warning(disable: 4244)
-#pragma warning(disable: 6297)
-#pragma warning(disable: 6385)
-#pragma warning(disable: 6386)
-#pragma warning(disable: 26451)
-#pragma warning(disable: 26493)
-#pragma warning(disable: 26438)
+#pragma warning(disable : 6255)
+#pragma warning(disable : 4244)
+#pragma warning(disable : 6297)
+#pragma warning(disable : 6385)
+#pragma warning(disable : 6386)
+#pragma warning(disable : 26451)
+#pragma warning(disable : 26493)
+#pragma warning(disable : 26438)
 #endif
 
     // shrink the arrays to avoid extra work on small numbers
-    while (m > 0 && u[m - 1] == 0) --m;
-    while (n > 0 && v[n - 1] == 0) --n;
+    while (m > 0 && u[m - 1] == 0)
+        --m;
+    while (n > 0 && v[n - 1] == 0)
+        --n;
 
     if (m < n || n <= 0 || v[n - 1] == 0)
-        return 1; // Return if invalid param.
+        return 1;  // Return if invalid param.
 
     // Take care of the case of a single-digit divisor here.
     if (n == 1)
@@ -556,11 +643,11 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
     bit is on, and shift u left the same amount. We may have to append a
     high-order digit on the dividend; we do that unconditionally. */
 
-    const int32_t s = lzcnt32(v[n - 1]);             // 0 <= s <= WORD_WIDTH-1.
+    const int32_t s = lzcnt32(v[n - 1]);  // 0 <= s <= WORD_WIDTH-1.
     const int32_t s_comp = WORD_WIDTH - s;
     vn = (uint32_t*)alloca(sizeof(uint32_t) * n);
     for (i = n - 1; i > 0; --i) {
-        //vn[i] = shift_left64(v[i - 1], v[i], s);
+        // vn[i] = shift_left64(v[i - 1], v[i], s);
         vn[i] = (v[i] << s) | ((uint64_t)v[i - 1] >> s_comp);
     }
     vn[0] = v[0] << s;
@@ -571,16 +658,16 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
         un[i] = (u[i] << s) | ((uint64_t)u[i - 1] >> s_comp);
     un[0] = u[0] << s;
 
-    for (j = m - n; j >= 0; --j) {       // Main loop.
+    for (j = m - n; j >= 0; --j) {  // Main loop.
         // Compute estimate qhat of q[j].
         qhat = udiv128(0, ((uint64_t)un[j + n] << WORD_WIDTH) | un[j + n - 1], vn[n - 1], &rhat);
-        //qhat = (un[j + n] * BASE + un[j + n - 1]) / vn[n - 1];
-        //rhat = (un[j + n] * BASE + un[j + n - 1]) - qhat * vn[n - 1];
-    again:
+        // qhat = (un[j + n] * BASE + un[j + n - 1]) / vn[n - 1];
+        // rhat = (un[j + n] * BASE + un[j + n - 1]) - qhat * vn[n - 1];
+again:
         if (qhat >= BASE || qhat * vn[n - 2] > ((rhat << WORD_WIDTH) | un[j + n - 2])) {
             --qhat;
             rhat += vn[n - 1];
-            if (rhat < BASE) 
+            if (rhat < BASE)
                 goto again;
         }
 
@@ -606,43 +693,43 @@ inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const u
             }
             un[j + n] = un[j + n] + k;
         }
-        } // End j.
-        // If the caller wants the remainder, unnormalize
-        // it and pass it back.
+    }  // End j.
+    // If the caller wants the remainder, unnormalize
+    // it and pass it back.
     if (r != nullptr) {
         for (i = 0; i < n - 1; ++i)
             r[i] = (un[i] >> s) | ((uint64_t)un[i + 1] << s_comp);
-        
+
         r[n - 1] = un[n - 1] >> s;
     }
     return 0;
 #if defined(FP128_MSVC)
 #pragma warning(pop)
 #endif
-
 }
- /**
-    * @brief 64 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
-    * @param q (output) Pointer to receive the quote. Expected to be initialized to zero
-    * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
-    * @param u Pointer to Numerator, an array of uint64_t
-    * @param v denominator (uint64_t)
-    * @param m Count of elements in u
-    * @return 0 for success
-*/
+/**
+ * @brief 64 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
+ * @param q (output) Pointer to receive the quote. Expected to be initialized to zero
+ * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
+ * @param u Pointer to Numerator, an array of uint64_t
+ * @param v denominator (uint64_t)
+ * @param m Count of elements in u
+ * @return 0 for success
+ */
 FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* u, uint64_t v, int64_t m) noexcept
 {
     if (u == nullptr || q == nullptr)
         return 1;
-    uint64_t dummy_reminder{};
+    uint64_t dummy_reminder {};
     if (r == nullptr) {
         r = &dummy_reminder;
     }
 
-    if (v == 0) // error case
+    if (v == 0)  // error case
         return 1;
 
-    while (m > 0 && u[m - 1] == 0) --m;
+    while (m > 0 && u[m - 1] == 0)
+        --m;
 
     // Trivial cases
     if (m < 2) {
@@ -671,7 +758,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
  * @param x input value.
  * @return Number of 1 bits in x.
-*/
+ */
 FP128_INLINE uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
 {
     return popcnt64(l) + popcnt64(h);
@@ -681,7 +768,7 @@ FP128_INLINE uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
  * @param l Low QWORD
  * @param h High QWORD
  * @return Left zero count
-*/
+ */
 FP128_INLINE uint64_t lzcnt128(uint64_t l, uint64_t h) noexcept
 {
     return (h != 0) ? lzcnt64(h) : 64 + lzcnt64(l);
@@ -692,7 +779,7 @@ FP128_INLINE uint64_t lzcnt128(uint64_t l, uint64_t h) noexcept
  * @param l Lower QWORD of the value
  * @param h Jigh QWORD of the value
  * @return log2(x). Returns zero when x is zero.
-*/
+ */
 FP128_INLINE uint64_t log2(uint64_t l, uint64_t h) noexcept
 {
     return (h != 0 || l != 0) ? 127 - lzcnt128(l, h) : 0;
@@ -702,7 +789,7 @@ FP128_INLINE uint64_t log2(uint64_t l, uint64_t h) noexcept
  * Rounding is always towards zero so the maximum error is close to 1.
  * @param x The number to perform log2 on.
  * @return log2(x). Returns zero when x is zero.
-*/
+ */
 FP128_INLINE uint64_t log2(uint64_t x) noexcept
 {
     return (x) ? 63ull - lzcnt64(x) : 0;
@@ -712,12 +799,12 @@ FP128_INLINE uint64_t log2(uint64_t x) noexcept
  * Rounding is always towards zero so the maximum error is close to 1.
  * @param x The number to perform log2 on.
  * @return log2(x). Returns zero when x is zero.
-*/
+ */
 FP128_INLINE uint32_t log2(uint32_t x) noexcept
 {
     return (x) ? 31ull - lzcnt32(x) : 0;
 }
 
-} //namespace fp128 {
+}  // namespace fp128
 
-#endif // FP128_FIXED_POINT128_SHARED_H
+#endif  // FP128_FIXED_POINT128_SHARED_H
