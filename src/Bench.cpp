@@ -94,19 +94,22 @@ void bench_comparison_operators(double time_per_function = 1.0)
     fixed_point128<10> f2 = fixed_point128<10>::golden_ratio();
     int64_t dummy = 0;
     // start the clock
+    // get_const on both operands each iteration prevents LICM from hoisting the
+    // loop-invariant comparisons. get_const(dummy) as a sink forces dummy to be
+    // live, preventing dead-code elimination of the loop body.
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            dummy += (f1 > f2);
-            dummy += (f1 >= f2);
-            dummy += (f1 < f2);
-            dummy += (f1 <= f2);
+            const auto v1 = get_const(f1);
+            const auto v2 = get_const(f2);
+            dummy += (v1 > v2);
+            dummy += (v1 >= v2);
+            dummy += (v1 < v2);
+            dummy += (v1 <= v2);
         }
         total_iterations += 4 * BENCH_ITERATIONS;
     }
-    if (dummy > 5) {  // trick the compiler to not optimize out the above loop
-        printf("");
-    }
+    dummy = get_const(dummy);  // opaque sink: forces the loop to actually execute
 
     print_ips("Operators >, >=, <, <= (average of all 4)", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -118,18 +121,20 @@ void bench_addition(double time_per_function = 1.0)
     // setup
     fixed_point128<10> f1 = fabs(fixed_point128<10>::pi());
     fixed_point128<10> f2 = fixed_point128<10>::e();
-    fixed_point128<10> f3;
+    // f3 accumulates each iteration, creating a loop-carried dependency that
+    // prevents LICM from hoisting the addition out of the loop. get_const(f3)
+    // after the loop is an opaque noinline call that forces f3 to be live,
+    // preventing dead-code elimination of the entire loop body.
+    fixed_point128<10> f3 = f2;
     // start the clock
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f2 + f1;
+            f3 = f3 + f1;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) {
-        f3++;
-    }  // fool the complier into not optimizing away the benchmark
+    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
     print_ips("Addition", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -140,19 +145,20 @@ void bench_subtraction(double time_per_function = 1.0)
     // setup
     fixed_point128<10> f1 = fabs(fixed_point128<10>::pi());
     fixed_point128<10> f2 = fixed_point128<10>::e();
-    fixed_point128<10> f3;
+    // f3 accumulates each iteration, creating a loop-carried dependency that
+    // prevents LICM from hoisting the subtraction out of the loop. get_const(f3)
+    // after the loop is an opaque noinline call that forces f3 to be live,
+    // preventing dead-code elimination of the entire loop body.
+    fixed_point128<10> f3 = f1;
     // start the clock
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f1 - f2;
+            f3 = f3 - f2;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) {
-        f3++;
-    }  // fool the complier into not optimizing away the benchmark
-
+    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
     print_ips("Subtraction", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -171,16 +177,15 @@ void bench_multiplication(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f1 * f2;
+            f3 = get_const(f1) * f2;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) {
-        f3++;
-    }  // fool the complier into not optimizing away the benchmark
+    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
     print_ips("Multiplication by fixed_point128", (uint64_t)(total_iterations / dur.duration()));
 
-    fixed_point128<32> f10;
+    // Initialize to 1 so the compiler cannot prove f10 is always 0 and eliminate the loop.
+    fixed_point128<32> f10 = 1;
     uint32_t int_val = 123456789;
     total_iterations = 0;
     dur.start();
@@ -190,9 +195,7 @@ void bench_multiplication(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f10) {
-        f10++;
-    }  // fool the complier into not optimizing away the benchmark
+    f10 = get_const(f10);  // opaque sink: forces the loop to actually execute
     print_ips("Multiplication by int32_t", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -207,30 +210,29 @@ void bench_division(double time_per_function = 1.0)
     total_iterations = 0;
 
     // start the clock
+    // get_const on the dividend each iteration prevents LICM from hoisting the
+    // loop-invariant division out of the loop, without causing value accumulation
+    // that would produce degenerate (zero/overflow) inputs.
     double dval = get_const(64.0);
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f1 / dval;  // fix
+            f3 = get_const(f1) / dval;
         }
         total_iterations += 2 * BENCH_ITERATIONS;
     }
-    if (f3) {
-        f3++;
-    }  // fool the complier into not optimizing away the benchmark
+    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
     print_ips("Division by double (exponent of 2)", (uint64_t)(total_iterations / dur.duration()));
 
     total_iterations = 0;
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f1 / 5ll;
+            f3 = get_const(f1) / 5ll;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) {
-        f3++;
-    }  // fool the complier into not optimizing away the benchmark
+    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
     print_ips("Division by int64", (uint64_t)(total_iterations / dur.duration()));
 
     fixed_point128<10> f4 = 5;
@@ -238,26 +240,22 @@ void bench_division(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f1 / f4;
+            f3 = get_const(f1) / f4;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) {
-        f3++;
-    }  // fool the complier into not optimizing away the benchmark
+    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
     print_ips("Division by fixed_point128 (int)", (uint64_t)(total_iterations / dur.duration()));
 
     total_iterations = 0;
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f1 / f2;
+            f3 = get_const(f1) / f2;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) {
-        f3++;
-    }  // fool the complier into not optimizing away the benchmark
+    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
     print_ips("Division by fixed_point128 (float)", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -909,8 +907,206 @@ void bench()
     bench_special_functions(TIME_PER_FUNCTION);
 }
 
+/**
+ * @brief Forces the compiler to instantiate all public methods and friend functions of fixed_point128<I>.
+ *
+ * Calls every constructor, assignment operator, conversion operator, arithmetic operator,
+ * comparison operator, query method, static constant accessor, and CRT-style friend math
+ * function for the given template parameter I.  Intended to catch compilation errors across
+ * the full range of supported I values (1, 40, 64).
+ *
+ * @tparam I Number of integer bits passed to fixed_point128.
+ */
+template <int32_t I> FP128_NO_INLINE void force_instantiation()
+{
+    using fp = fixed_point128<I>;
+
+    // --- Constructors ---
+    fp def;                                               // default
+    fp from_double(1.5);                                  // double
+    fp copy_ctor(from_double);                            // copy
+    fp move_ctor(std::move(fp(2.0)));                     // move
+    fp from_u64((uint64_t)1);                             // uint64_t
+    fp from_i64((int64_t)1);                              // int64_t
+    fp from_u32((uint32_t)1);                             // uint32_t
+    fp from_i32((int32_t)1);                              // int32_t
+    fp from_cstr("1.5");                                  // const char*
+    fp from_str(std::string("1.5"));                      // std::string
+    fp from_raw(0ull, 1ull, 0u);                          // raw (low, high, sign)
+
+    // cross-template copy constructor (I2 = 10)
+    fixed_point128<10> f10(1.5);
+    fp cross_ctor(f10);
+
+    // --- Assignment operators ---
+    def = copy_ctor;                                      // copy assign
+    def = std::move(fp(3.0));                             // move assign
+    def = f10;                                            // cross-template assign
+
+    // --- Conversion operators ---
+    (void)(uint64_t)from_double;
+    (void)(int64_t)from_double;
+    (void)(uint32_t)from_double;
+    (void)(int32_t)from_double;
+    (void)(float)from_double;
+    (void)(double)from_double;
+    (void)(long double)from_double;
+    (void)(std::string)from_double;
+    (void)(char*)from_double;
+    (void)(bool)from_double;
+
+    // --- Arithmetic compound-assignment operators ---
+    fp a = fp::e();
+    fp b = fp::golden_ratio();
+    fp c;
+
+    c += a;
+    c -= a;
+    c *= a;
+    c /= b;
+    c %= b;
+    c >>= 1;
+    c <<= 1;
+    c &= a;
+    c |= a;
+    c ^= a;
+
+    // compound-assignment with scalar types (exercises template overloads)
+    c += 1.5;
+    c -= 1.5;
+    c *= 2.0;
+    c /= 2.0;
+    c %= 1.5;
+    c *= (uint64_t)2;                                     // operator*=<uint64_t> specialization
+    c /= (uint64_t)2;                                     // operator/=<uint64_t> specialization
+    c /= (double)2.0;                                     // operator/=<double> specialization
+
+    // --- Binary arithmetic operators (friend) ---
+    c = a + b;
+    c = a - b;
+    c = a * b;
+    c = a / b;
+    c = a % b;
+    c = a >> 1;
+    c = a << 1;
+    c = a & b;
+    c = a | b;
+    c = a ^ b;
+
+    // --- Unary operators ---
+    c = -a;
+    c = +a;
+    c = ~a;
+    (void)!a;
+    ++c;
+    --c;
+    c++;
+    c--;
+
+    // --- Comparison operators ---
+    (void)(a == b);
+    (void)(a != b);
+    (void)(a < b);
+    (void)(a <= b);
+    (void)(a > b);
+    (void)(a >= b);
+
+    // comparison overloads with scalar type T
+    (void)(a == 1.5);
+    (void)(1.5 == a);
+    (void)(a != 1.5);
+    (void)(1.5 != a);
+    (void)(a < 1.5);
+    (void)(1.5 < a);
+    (void)(a <= 1.5);
+    (void)(1.5 <= a);
+    (void)(a > 1.5);
+    (void)(1.5 > a);
+    (void)(a >= 1.5);
+    (void)(1.5 >= a);
+
+    // --- Query methods ---
+    (void)a.is_int();
+    (void)a.is_positive();
+    (void)a.is_negative();
+    (void)a.is_zero();
+    (void)a.get_bit(0);
+    (void)a.get_exponent();
+
+    // --- Static constant accessors ---
+    (void)fp::pi();
+    (void)fp::pi2();
+    (void)fp::half_pi();
+    (void)fp::golden_ratio();
+    (void)fp::e();
+    (void)fp::sqrt_2();
+    (void)fp::one();
+    (void)fp::half();
+    (void)fp::epsilon();
+
+    // --- Friend math functions (CRT-style) ---
+    fp val = fp::e();
+    fp half_val = fp::half();
+
+    (void)fabs(val);
+    (void)floor(val);
+    (void)ceil(val);
+    (void)trunc(val);
+    (void)round(val);
+    (void)ilogb(val);
+    (void)copysign(val, val);
+    (void)fmod(val, val);
+    fp iptr;
+    (void)modf(val, &iptr);
+    (void)fdim(val, val);
+    (void)fmin(val, val);
+    (void)fmax(val, val);
+    (void)hypot(val, val);
+    (void)sqrt(val);
+    (void)exp(val);
+    (void)exp2(val);
+    (void)expm1(val);
+    (void)pow(val, val);
+    (void)log(val);
+    (void)log2(val);
+    (void)log10(val);
+    (void)logb(val);
+    (void)log1p(val);
+    (void)lzcnt128(val);
+    (void)reciprocal(val);
+    fp fact_res;
+    fact_reciprocal(5, fact_res);
+    // friend trigonometric functions (require minimum template parameter I >= 4)
+    if constexpr (I >= 4) {
+        (void)sin(val);
+        (void)asin(half_val);                                 // |x| <= 1 required
+        (void)cos(val);
+        (void)acos(half_val);                                 // |x| <= 1 required
+        (void)tan(val);
+        (void)atan(val);
+        (void)atan2(val, val);
+        (void)sinh(val);
+        (void)asinh(val);
+        (void)cosh(val);
+        (void)acosh(fp::e());  // x >= 1 required
+        (void)tanh(val);
+        (void)atanh(half_val);  // |x| < 1 required
+    }
+    
+    // suppress unused-variable warnings
+    (void)def; (void)from_double; (void)copy_ctor; (void)move_ctor;
+    (void)from_u64; (void)from_i64; (void)from_u32; (void)from_i32;
+    (void)from_cstr; (void)from_str; (void)from_raw; (void)cross_ctor;
+    (void)a; (void)b; (void)c; (void)f10; (void)fact_res;
+}
+
 int main()
 {
+    // Force instantiation of all public methods and friend functions for I=1, 40 and 64.
+    force_instantiation<1>();
+    force_instantiation<40>();
+    force_instantiation<64>();
+
     bench();
     return 0;
 }

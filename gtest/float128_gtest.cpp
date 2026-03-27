@@ -114,7 +114,7 @@ TEST(float128, ConstructorFromString)
             strcpy(str2, str);
             float128 f = str;
             char* res = static_cast<char*>(f);
-            size_t len = min(strlen(res), strlen(str));
+            size_t len = std::min(strlen(res), strlen(str));
             // clip both string based on the shortest one.
             str[len] = '\0';
             res[len] = '\0';

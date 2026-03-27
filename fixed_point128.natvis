@@ -1,17 +1,81 @@
-<?xml version="1.0" encoding="utf-8"?> 
+<?xml version="1.0" encoding="utf-8"?>
 <!-- local schema path: C:\Program Files\Microsoft Visual Studio\2022\Professional\Xml\Schemas\1033\natvis.xsd -->
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
-	<Type Name="fp128::fixed_point128&lt;*&gt;">
-    <Intrinsic Name="low_fraction" Expression="(double)(low &gt;&gt; 32) * lower_unity_h + (double)(low &amp; 0xFFFFFFFF) * lower_unity_l" />
-    <DisplayString>{((sign) ? -1.0 : 1.0) * (double)high * upper_unity + low_fraction()}</DisplayString>
-    <Expand HideRawView="true" >
-      <Item Name="[sign]" ExcludeView="simple">sign,d</Item>
-			<Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
-			<Item Name="[high (hex)]" ExcludeView="simple">high,h</Item>
-			<Item Name="[low]"  ExcludeView="simple">low,d</Item>
-			<Item Name="[high]" ExcludeView="simple">high,d</Item>
-		</Expand>
-	</Type>
+  <Type Name="fp128::fixed_point128&lt;*&gt;">
+    <!--
+      Exact integer part via integer bit-shift.
+      Avoids the precision loss that occurs when the full 64-bit 'high' is cast to double
+      before scaling: double has only a 53-bit mantissa, so casting a large 64-bit value
+      discards the lower 11 bits before the multiplication happens.
+      'upper_frac_bits = 64 - I' is the number of fractional bits stored in 'high'.
+    -->
+    <Intrinsic Name="int_part" Expression="(uint64_t)(high >> upper_frac_bits)" />
+    <!--
+      Fractional contribution from the upper QWORD, split into two 32-bit halves.
+      Each half has at most 32 significant bits, which fits exactly into a double mantissa
+      (53 bits), giving lossless conversion for all valid template parameters including
+      the extreme case I=1 where upper_frac_bits=63 (> 53, so a direct cast would lose bits).
+    -->
+    <Intrinsic Name="high_frac_h" Expression="(double)(((high &amp; ((1ULL &lt;&lt; upper_frac_bits) - 1)) &gt;&gt; 32) &amp; 0xFFFFFFFF) * (upper_unity * 4294967296.0)" />
+    <Intrinsic Name="high_frac_l" Expression="(double)((high &amp; ((1ULL &lt;&lt; upper_frac_bits) - 1)) &amp; 0xFFFFFFFF) * upper_unity" />
+    <!--
+      Fractional contribution from the lower QWORD, split into two 32-bit halves.
+      Each half fits exactly in a double mantissa.
+    -->
+    <Intrinsic Name="low_frac_h"   Expression="(double)(low &gt;&gt; 32) * lower_unity_h" />
+    <Intrinsic Name="low_frac_l"   Expression="(double)(low &amp; 0xFFFFFFFF) * lower_unity_l" />
+    <!--
+      Combined fractional value as a double.
+      Reading all four 32-bit chunks together covers the full 128-bit fractional range,
+      but when summed here the result is limited to ~15 significant decimal digits.
+    -->
+    <Intrinsic Name="frac_value"   Expression="high_frac_h() + high_frac_l() + low_frac_h() + low_frac_l()" />
+    <!-- Backward-compatible alias for the lower-QWORD fraction. -->
+    <Intrinsic Name="low_fraction" Expression="low_frac_h() + low_frac_l()" />
+
+    <!--
+      DisplayString conditions:
+        - When int_part fits in a double mantissa (< 2^53 = 9007199254740992): display as a
+          single combined double — integer and fraction merge without precision loss.
+        - When int_part exceeds double precision (>= 2^53): display the integer and fractional
+          parts separately so the fractional component is not silently swallowed by the large
+          integer (this occurs for I >= 54 with large values).
+    -->
+    <DisplayString Condition="sign == 0 &amp;&amp; int_part() &lt;= 9007199254740992ULL">{(double)int_part() + frac_value()}</DisplayString>
+    <DisplayString Condition="sign != 0 &amp;&amp; int_part() &lt;= 9007199254740992ULL">-{(double)int_part() + frac_value()}</DisplayString>
+    <DisplayString Condition="sign == 0">{int_part(),u} + {frac_value()}</DisplayString>
+    <DisplayString Condition="sign != 0">-{int_part(),u} - {frac_value()}</DisplayString>
+
+    <Expand HideRawView="true">
+      <!--
+        Quick combined double approximation (sign × (integer + fraction)).
+        Useful for a single-glance value. Limited to ~15 significant decimal digits.
+      -->
+      <Item Name="[double approx]"    ExcludeView="simple">((sign) ? -1.0 : 1.0) * ((double)int_part() + frac_value())</Item>
+      <!--
+        Exact integer component extracted from 'high' via integer bit-shift.
+        Precise for all valid I values including I=64 where the integer can reach 2^64-1,
+        which cannot be represented exactly in a double.
+      -->
+      <Item Name="[integer (exact)]"  ExcludeView="simple">int_part(), u</Item>
+      <!--
+        Fractional contributions broken into four independent 32-bit precision chunks.
+        Together these four values cover the full 128-bit fractional precision of the type.
+        high frac msb + high frac lsb accounts for the (64-I) fractional bits in 'high'.
+        low  frac msb + low  frac lsb accounts for all 64 fractional bits in 'low'.
+      -->
+      <Item Name="[high frac (msb)]"  ExcludeView="simple">high_frac_h()</Item>
+      <Item Name="[high frac (lsb)]"  ExcludeView="simple">high_frac_l()</Item>
+      <Item Name="[low frac (msb)]"   ExcludeView="simple">low_frac_h()</Item>
+      <Item Name="[low frac (lsb)]"   ExcludeView="simple">low_frac_l()</Item>
+      <!-- Raw fields for bit-level inspection. -->
+      <Item Name="[sign]"             ExcludeView="simple">sign, d</Item>
+      <Item Name="[low (hex)]"        ExcludeView="simple">low, h</Item>
+      <Item Name="[high (hex)]"       ExcludeView="simple">high, h</Item>
+      <Item Name="[low]"              ExcludeView="simple">low, d</Item>
+      <Item Name="[high]"             ExcludeView="simple">high, d</Item>
+    </Expand>
+  </Type>
   <Type Name="fp128::uint128_t">
     <DisplayString>{high,h}{low,hb}</DisplayString>
     <Expand HideRawView="true" >

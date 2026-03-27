@@ -36,6 +36,7 @@
     <None Include="cpp.hint" />
     <None Include="README.md" />
     <None Include=".gitignore" />
+    <None Include="CLAUDE.md" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="fixed_point128.natvis" />

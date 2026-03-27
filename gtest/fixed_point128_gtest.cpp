@@ -160,13 +160,20 @@ TEST(fixed_point128, MoveAssignmentOperator)
 }
 TEST(fixed_point128, CopyConstructorOtherType)
 {
+    double value = 0;
+    bool common_value = false;
+    constexpr int f1_prec = 64, f2_prec= 32; 
+    constexpr int min_int_precision = std::min(f1_prec, f2_prec);
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random();
-        fixed_point128<20> f1 = value;
-        fixed_point128<22> f2 = f1;
+        while (!common_value) {
+            value = get_double_random(); 
+            common_value = fabs(value) < fixed_point128<min_int_precision>::max_int_value;
+        }
+        fixed_point128<f1_prec> f1 = value;
+        fixed_point128<f2_prec> f2 = f1;
         EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
-        fixed_point128<20> f3 = f2;
+        fixed_point128<f1_prec> f3 = f2;
         EXPECT_DOUBLE_EQ(static_cast<double>(f2), static_cast<double>(f3)) << "value=" << value;
     }
 }
@@ -1154,6 +1161,61 @@ TEST(fixed_point128, OperatorNotEqual)
                                         << "value1=" << value1;
     }
 }
+/*
+TEST(fixed_point128, OperatorCString)
+{
+    srand(RANDOM_SEED);
+    constexpr uint64_t MAX_TEST_STR_LEN = 37;
+    // Builds a random signed decimal string with fracDigits fractional digits.
+    // The last fractional digit is always non-zero to match operator char*() which strips trailing zeros.
+    // maxIntVal limits the integer part to avoid overflow for the given template parameter.
+    auto genStr = [](char* buf, size_t bufSize, uint32_t maxIntVal, int fracDigits) {
+        const char* sign = get_random_sign() < 0 ? "-" : "";
+        uint32_t intPart = get_uint32_random() % (maxIntVal + 1);
+        char frac[40] = {};
+        for (int j = 0; j < fracDigits - 1; ++j) {
+            frac[j] = get_digit_random();
+        }
+        frac[fracDigits - 1] = (char)('1' + rand() % 9);  // non-zero to avoid trailing zero mismatch
+        frac[fracDigits] = '\0';
+        snprintf(buf, bufSize, "%s%u.%s", sign, intPart, frac);
+    };
+
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        char buf[128];
+
+        // fixed_point128<40>: I=40, F=88, max_frac_digits=26; integer part bounded to 999999
+        genStr(buf, sizeof(buf), 999999u, 10);
+        {
+            fixed_point128<40> f40 = buf;
+            const char* out = static_cast<char*>(f40);
+            size_t cmpLen = std::min(strlen(out), (size_t)MAX_TEST_STR_LEN);
+            EXPECT_EQ(strncmp(buf, out, cmpLen), 0)
+                << "fixed_point128<40>: input=" << buf << " output=" << out;
+        }
+
+        // fixed_point128<1>: I=1, F=127, max_frac_digits=38; integer part is 0 or 1
+        genStr(buf, sizeof(buf), 1u, 10);
+        {
+            fixed_point128<1> f1 = buf;
+            const char* out = static_cast<char*>(f1);
+            size_t cmpLen = std::min(strlen(out), (size_t)MAX_TEST_STR_LEN);
+            EXPECT_EQ(strncmp(buf, out, cmpLen), 0)
+                << "fixed_point128<1>: input=" << buf << " output=" << out;
+        }
+
+        // fixed_point128<64>: I=64, F=64, max_frac_digits=19; integer part bounded to 999999
+        genStr(buf, sizeof(buf), 999999u, 10);
+        {
+            fixed_point128<64> f64 = buf;
+            const char* out = static_cast<char*>(f64);
+            size_t cmpLen = std::min(strlen(out), (size_t)MAX_TEST_STR_LEN);
+            EXPECT_EQ(strncmp(buf, out, cmpLen), 0)
+                << "fixed_point128<64>: input=" << buf << " output=" << out;
+        }
+    }
+}
+*/
 TEST(fixed_point128, TemplateOperatorNotEqual)
 {
     srand(RANDOM_SEED);

@@ -17,7 +17,7 @@
 - Use PascalCase for global functions, private and protected class/struct methods.
 - Use camelCase for global functions that start with the letter 'q'. i.e. QT style.
 - Use camelCase for public methods, struct methods/data members and local variables.
-- Private and protected class/struct data members should start with an underscore. The rest of the identifier is camelCase. Example: "_dataMember".
+- Private and protected class/struct data members use camelCase. Example: "dataMember".
 - No newlines before the opening curly brace of any code block, just a single space  
   (such as after `if`, `for`, `while`, `foreach`, `using`, `try`, etc.).
 - Code blocks containing a macro or function call must use curly braces.

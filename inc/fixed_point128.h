@@ -88,48 +88,48 @@ template <int32_t I> class fixed_point128;  ///< Forward declaration of the main
 /// @name CRT-Style Math Functions (Forward Declarations)
 /// @brief Free functions providing standard math library equivalents for fixed_point128.
 /// @{
-template <int32_t I> fixed_point128<I> fabs(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> floor(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> ceil(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> trunc(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> round(const fixed_point128<I>& x) noexcept;
-template <int32_t I> int32_t ilogb(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> copysign(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
-template <int32_t I> fixed_point128<I> fmod(const fixed_point128<I>& x, const fixed_point128<I>& y);
-template <int32_t I> fixed_point128<I> modf(const fixed_point128<I>& x, fixed_point128<I>* iptr) noexcept;
-template <int32_t I> fixed_point128<I> fdim(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
-template <int32_t I> fixed_point128<I> fmin(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
-template <int32_t I> fixed_point128<I> fmax(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
-template <int32_t I> fixed_point128<I> hypot(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
-template <int32_t I> fixed_point128<I> sqrt(const fixed_point128<I>& x, uint32_t iterations = 3) noexcept;
-template <int32_t I> fixed_point128<I> sin(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> asin(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> cos(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> acos(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> tan(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> atan(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> atan2(fixed_point128<I> y, fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> sinh(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> asinh(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> cosh(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> acosh(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> tanh(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> atanh(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> exp(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> exp2(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> expm1(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> pow(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
-template <int32_t I> fixed_point128<I> log(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> log2(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> log10(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> logb(fixed_point128<I> x) noexcept;
-template <int32_t I> fixed_point128<I> log1p(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> fabs(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> floor(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> ceil(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> trunc(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> round(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] int32_t ilogb(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> copysign(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> fmod(const fixed_point128<I>& x, const fixed_point128<I>& y);
+template <int32_t I> [[nodiscard]] fixed_point128<I> modf(const fixed_point128<I>& x, fixed_point128<I>* iptr) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> fdim(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> fmin(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> fmax(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> hypot(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> sqrt(const fixed_point128<I>& x, uint32_t iterations = 3) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> sin(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> asin(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> cos(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> acos(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> tan(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> atan(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> atan2(fixed_point128<I> y, fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> sinh(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> asinh(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> cosh(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> acosh(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> tanh(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> atanh(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> exp(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> exp2(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> expm1(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> pow(const fixed_point128<I>& x, const fixed_point128<I>& y) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> log(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> log2(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> log10(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> logb(fixed_point128<I> x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> log1p(fixed_point128<I> x) noexcept;
 /// @}
 
 /// @name Non-CRT Utility Functions (Forward Declarations)
 /// @{
-template <int32_t I> uint64_t lzcnt128(const fixed_point128<I>& x) noexcept;
-template <int32_t I> fixed_point128<I> reciprocal(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] uint64_t lzcnt128(const fixed_point128<I>& x) noexcept;
+template <int32_t I> [[nodiscard]] fixed_point128<I> reciprocal(const fixed_point128<I>& x) noexcept;
 template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcept;
 /// @}
 
@@ -186,6 +186,7 @@ private:
     static inline const double lower_unity_h = ::pow(2, 32 - F);         ///< Scale factor for lower QWORD (high 32 bits) to double.
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits;  ///< Bitmask for integer bits in the upper QWORD.
     static constexpr int32_t max_frac_digits = (int)(F / 3.3);           ///< Maximum meaningful base-10 fractional digits.
+    static constexpr uint64_t max_uint_value = FP128_MAX_VALUE_64(I);    ///< Maximum integer representable value.
     /// @}
 
 public:
@@ -662,7 +663,7 @@ public:
         uint64_t res[2] {};
         while (digits++ < max_frac_digits && temp) {
             if constexpr (I < 4) {
-                res[0] = mulx_u64(high, 10ull, &res[1]);  // multiply by 10
+                res[0] = mulx_u64(temp.high, 10ull, &res[1]);  // multiply by 10
                 // extract the integer part
                 integer = shift_right128_round(res[0], res[1], upper_frac_bits);
                 temp *= 10;  // move another digit to the integer area
@@ -673,7 +674,54 @@ public:
             *p++ = '0' + (char)integer;
             temp.high &= ~int_mask;
         }
+        // round: if we stopped due to max_frac_digits and there's still a remaining
+        // fraction, peek at the next digit and round up if >= 5
+        if (temp) {
+            uint64_t next_digit;
+            if constexpr (I < 4) {
+                res[0] = mulx_u64(temp.high, 10ull, &res[1]);
+                next_digit = shift_right128_round(res[0], res[1], upper_frac_bits);
+            } else {
+                fixed_point128 t = temp;
+                t *= 10;
+                next_digit = FP128_GET_BITS(t.high, upper_frac_bits, 63);
+            }
+            if (next_digit >= 5) {
+                // carry-propagate backwards through the digit string
+                char* q = p - 1;
+                bool carry = true;
+                while (carry && q >= &str[0]) {
+                    if (*q >= '0' && *q <= '9') {
+                        if (*q == '9') {
+                            *q-- = '0';
+                        } else {
+                            ++(*q);
+                            carry = false;
+                        }
+                    } else {
+                        --q;  // skip '.' or '-'
+                    }
+                }
+                if (carry) {
+                    // all digits were 9 (e.g. "9.999" → "10.000")
+                    // insert '1' before the integer digits, after any '-'
+                    char* start = str + (str[0] == '-' ? 1 : 0);
+                    memmove(start + 1, start, p - start + 1);  // +1 for '\0'
+                    *start = '1';
+                    ++p;
+                }
+            }
+        }
         *p = '\0';
+        // remove trailing zeros after the decimal point
+        if (char* dot = strchr(str + (str[0] == '-' ? 1 : 0), '.')) {
+            char* last = p - 1;
+            while (last > dot && *last == '0')
+                --last;
+            if (last == dot)
+                --last;  // remove the dot too if no fraction remains
+            *(last + 1) = '\0';
+        }
         return str;
     }
     /// @}
@@ -742,7 +790,7 @@ public:
      * @param other Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE fixed_point128& operator+=(const T& other) { return operator+=(fixed_point128(other)); }
+    template <typename T> FP128_INLINE fixed_point128& operator+=(const T& other) noexcept { return operator+=(fixed_point128(other)); }
     /**
      * @brief Subtract a value to this object
      * @param other Right hand side operand
@@ -816,9 +864,9 @@ public:
 
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F
-        constexpr int32_t index = F / 64;
-        constexpr int32_t lsb = F & FP128_MAX_VALUE_64(6);  // bit within the 64bit data pointed by res[index]
-        constexpr uint64_t half = 1ull << (lsb - 1);        // used for rounding
+        constexpr int32_t index = (F == 64) ? 0 : F / 64;
+        constexpr int32_t lsb = (F == 64) ? 64 : (F & FP128_MAX_VALUE_64(6)); // bit within the 64bit data pointed by res[index]
+        constexpr uint64_t half = 1ull << (lsb - 1);                          // used for rounding
         const bool need_rounding = (res[index] & half) != 0;
 
         // copy block #1 (lowest)
@@ -993,6 +1041,7 @@ public:
         if (0 == x)
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
         const uint64_t nom[2] = {low, high};
+        // the results is stored in low and high, the function returns non zero if error (divide by zero or overflow)
         if (0 != div_64bit(&low, nullptr, (uint64_t*)nom, x, 2)) {
             *this = 0;
         }
@@ -1225,7 +1274,13 @@ public:
      * @brief Returns true if the value is an int (fraction is zero)
      * @return True when the fraction is zero.
      */
-    [[nodiscard]] FP128_INLINE bool is_int() const noexcept { return 0 == low && 0 == (high << I); }
+    [[nodiscard]] FP128_INLINE bool is_int() const noexcept { 
+        if constexpr (I == 64) {
+            return 0 == low;
+        } else {
+            return 0 == low && 0 == (high << I); 
+        }
+    }
     /**
      * @brief Returns true if the value positive (incuding zero)
      * @return True when the the value positive
@@ -1680,9 +1735,9 @@ private:
      * @param y Second value
      * @return If x > y returns x - y. Otherwise zero.
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 fdim(const fixed_point128& x, const fixed_point128& y) noexcept { return (x > y) ? x - y : 0; }
+    [[nodiscard]] friend FP128_INLINE fixed_point128 fdim(const fixed_point128& x, const fixed_point128& y) noexcept { return (x > y) ? x - y : fixed_point128(0); }
     /**
-     * @brief Returns the mimimun between x and y.
+     * @brief Returns the minimun between x and y.
      * @param x First value
      * @param y Second value
      * @return If x < y returns x. Otherwise y.
@@ -1842,10 +1897,12 @@ private:
         return y;
     }
     /**
-     * @brief Calculate Sine and Cosine using CORDIC usign a limited range of [-pi/2, pi/2]
+     * @brief Calculate Sine and Cosine using CORDIC using a limited range of [-pi/2, pi/2]
      * @param x
-     * @param sin_x
-     * @param cos_x
+     * @param sin_x Result of the Sine of x.
+     * @param cos_x Result of the Cosine of x.
+     * @param apply_scale_factor Apply a scale factor when 60 or more iterations are performed. This is required to get accurate results when the number of
+     * iterations is high, but it can be disabled for performance reasons when the number of iterations is low.
      */
     friend FP128_INLINE void _sincos_cordic(fixed_point128 x, fixed_point128& sin_x, fixed_point128& cos_x, bool apply_scale_factor) noexcept
     {
@@ -1989,9 +2046,8 @@ private:
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept requires (I >= 4)
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
         assert(fabs(x) <= fixed_point128::half_pi());
 
         // first part of the series is just 'x'
@@ -2017,9 +2073,8 @@ private:
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Cosine of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 cos1(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 cos1(const fixed_point128& x) noexcept requires (I >= 4)
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin1()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi();
         assert(fabs(x) <= half_pi);
         return (x.is_positive()) ? sin1(half_pi - x) : -sin1(-half_pi - x);
@@ -2030,9 +2085,8 @@ private:
      * @param x value in Radians
      * @return Sine of x
      */
-    [[nodiscard]] friend fixed_point128 sin(fixed_point128 x) noexcept
+    [[nodiscard]] friend fixed_point128 sin(fixed_point128 x) noexcept requires (I >= 4)
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sin()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi();  // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
@@ -2089,9 +2143,8 @@ private:
      * @param x value in Radians
      * @return Cosine of x
      */
-    [[nodiscard]] friend fixed_point128 cos(fixed_point128 x) noexcept
+    [[nodiscard]] friend fixed_point128 cos(fixed_point128 x) noexcept requires (I >= 4)
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cos()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi();  // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
@@ -2145,9 +2198,8 @@ private:
      * @param x value
      * @return Tangent of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 tan(fixed_point128 x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 tan(fixed_point128 x) noexcept requires (I >= 4)
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use tan()!");
         constexpr bool use_cordic = false;  // CORDIC is currently slower and less accurate
         if constexpr (use_cordic) {
             fixed_point128 sin_x, cos_x;
@@ -2216,19 +2268,17 @@ private:
         // constants for segmentation
         static const fixed_point128& pi = fixed_point128::pi();
         static const fixed_point128& half_pi = fixed_point128::half_pi();          // pi / 2
-        static const fixed_point128& quarter_pi = fixed_point128::half_pi() >> 1;  // pi / 4
-        static const fixed_point128 eps = fixed_point128::epsilon() << 1;
 
         // x == 0
         if (!x) {
             if (!y)
-                return 0;
+                return fixed_point128(0);
 
             return (y.is_negative()) ? -half_pi : half_pi;
         }
         // y == 0
         if (!y)
-            return (x.is_negative()) ? -pi : pi;
+            return (x.is_negative()) ? pi : fixed_point128(0);
 
         fixed_point128 res;
         // save the signs of x, y
@@ -2257,9 +2307,8 @@ private:
      * @param x value
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept requires (I >= 4)
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use sinh()!");
         return (exp(x) - exp(-x)) >> 1;
         // the below code while faster, produces lower precision results
         //    if (fabs(x) > 1) {
@@ -2310,11 +2359,10 @@ private:
      * cosh(x) = ------------
      *                2
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
-     * @return Sine of x
+     * @return Cosine of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept requires (I >= 4)
     {
-        static_assert(I >= 4, "fixed_point128 must have at least 4 integer bits to use cosh()!");
         return (exp(x) + exp(-x)) >> 1;
 
         // Using the Maclaurin series expansion, the formula is:

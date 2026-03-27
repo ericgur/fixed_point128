@@ -17,6 +17,7 @@ add_executable(
   uint128_t_gtest.cpp
   int128_t_gtest.cpp
   float128_gtest.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../fixed_point128.natvis
 )
 
 target_link_libraries(

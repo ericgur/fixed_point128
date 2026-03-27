@@ -53,7 +53,9 @@
 #ifndef FP128_FLOAT128_H
 #define FP128_FLOAT128_H
 
-#include "uint128_.h"
+#include <algorithm>
+#include "fixed_point128_shared.h"
+#include "uint128_t.h"
 
 namespace fp128
 {
@@ -396,7 +398,7 @@ public:
             uint64_t* frac_bits = &low;  // fill the internal data structure directly
             // start at the leftmost digit and iterate right
 
-            int32_t digits_consumed = min(int_digits, max_digits);
+            int32_t digits_consumed = std::min(int_digits, max_digits);
             char* cur_digit = int_start;
             char* const end_digit = int_start + digits_consumed;
 
@@ -493,7 +495,7 @@ public:
         // compute the integer part
         if (base == 10) {
             uint128_t int_part;
-            int32_t digits_consumed = min(int_digits, max_digits);
+            int32_t digits_consumed = std::min(int_digits, max_digits);
             char* const end_digit = int_start + digits_consumed;
             *end_digit = '\0';
             int_part = int_start;
@@ -545,7 +547,7 @@ public:
         float128 frac_part;
         if (frac_digits > 0) {
             // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
-            int32_t digits = min(frac_digits, max_digits - int_digits);
+            int32_t digits = std::min(frac_digits, max_digits - int_digits);
             constexpr int32_t digit_group = 9;
             static_assert(digit_group <= 9);  // must fit in 32 bit
             int32_t i = 0;
@@ -854,7 +856,7 @@ public:
             float128 base = 100000;
             char fmt[20];
             sprintf(fmt, "%%0%ii", digit_group);
-            int32_t groups = min(max_frac_digits, (buff_size - int_digits - 1)) / digit_group;
+            int32_t groups = std::min(max_frac_digits, (buff_size - int_digits - 1)) / digit_group;
             while (groups-- > 0) {
                 frac_part *= base;
                 frac_part = modf(frac_part, &int_part);
@@ -2043,7 +2045,7 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 fdim(const float128& x, const float128& y) noexcept { return (x > y) ? x - y : float128(); }
     /**
-     * @brief Returns the mimimun between x and y.
+     * @brief Returns the minimun between x and y.
      * @param x First value
      * @param y Second value
      * @return If x < y returns x. Otherwise y.
