@@ -202,7 +202,7 @@ TEST(fixed_point128, AddDifferentSign)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = fabs(get_double_random());
+        double value1 = fabs(get_double_random(-10, 35));
         double value2 = value1 * -2.5;
         double res = value1 + value2;
         fixed_point128<40> f1 = value1;

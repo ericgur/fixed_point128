@@ -466,7 +466,46 @@ FP128_INLINE void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift
         h = l = 0;
     }
 }
-
+/**
+ * @brief Right shift a 128 bit integer. When shift is a compile time constant, this function generates optimal code for all shift values.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @
+ * @return Lower 64 bit of the result
+ */
+template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t l, uint64_t h) noexcept
+{
+    FP128_ASSERT(shift >= 0 && shift < 128);
+    if constexpr (shift == 0) {
+        return l;
+    } else if constexpr (shift < 64) {
+        return (l >> shift) | (h << (64 - shift));
+    } else if constexpr (shift < 128) {
+        return h >> (shift - 64);
+    } else {
+        return 0;
+    }
+ }
+/**
+ * @brief Left shift a 128 bit integer. When shift is a compile time constant, this function generates optimal code for all shift values.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @
+ * @return Upper 64 bit of the result
+ */
+template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_left128(uint64_t l, uint64_t h) noexcept
+{
+    FP128_ASSERT(shift >= 0 && shift < 128);
+    if constexpr (shift == 0) {
+        return h;
+    } else if constexpr (shift < 64) {
+        return (h << shift) | (l >> (64 - shift));
+    } else if constexpr (shift < 128) {
+        return l << (shift - 64);
+    } else {
+        return 0;
+    }
+}
 /**
  * @brief Right shift a 128 bit integer.
  * @param l Low QWORD
@@ -477,13 +516,14 @@ FP128_INLINE void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift
 [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 128);
-    if (shift == 0)
-        return l;
-    if (shift < 64)
+    switch (shift >> 6) {
+    case 0:  // 0-63 bit
         return (l >> shift) | (h << (64 - shift));
-    if (shift < 128)
+    case 1:  // 64-127 bit
         return h >> (shift ^ 64);
-    return 0;
+    default:
+        return 0;
+    }
 }
 /**
  * @brief Right shift a 128 bit integer with rounding.
@@ -492,7 +532,7 @@ FP128_INLINE void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift
  * @param shift Bits to shift, between 0-127
  * @return Lower 64 bit of the result
  */
-[[nodiscard]] FP128_INLINE uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
+[[nodiscard]] FP128_FORCE_INLINE uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
     shift_right128_inplace_safe(l, h, shift);
     return l;
@@ -504,16 +544,17 @@ FP128_INLINE void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift
  * @param shift Bits to shift, between 0-127
  * @return Upper 64 bit of the result
  */
-[[nodiscard]] FP128_INLINE uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
+[[nodiscard]] FP128_FORCE_INLINE uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 128);
-    if (shift == 0)
-        return h;
-    if (shift < 64)
-        return (h << shift) | (l >> (64 - shift));
-    if (shift < 128)
-        return l << (shift - 64);
-    return 0;
+    switch (shift >> 6) {
+        case 0:  // 1-63 bit
+            return (h << shift) | (l >> (64 - shift));
+        case 1:
+            return l << (shift - 64);
+        default:
+            return 0;
+    }
 }
 /**
  * @brief converts a 128 integer to negative via 2's complement.
