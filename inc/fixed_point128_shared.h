@@ -40,6 +40,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <memory>
+#include <type_traits>
 
 /***********************************************************************************
  *                                  Build Options
@@ -49,6 +50,12 @@
 #define FP128_CLANG
 #elif defined(_MSC_VER)
 #define FP128_MSVC
+#endif
+
+// Detect AArch64 (ARMv8 64 bit, e.g. Apple Silicon). Used to select hand written
+// assembly implementations of the x86 intrinsics emulated in the Clang/GCC section below.
+#if defined(FP128_CLANG) && (defined(__aarch64__) || defined(_M_ARM64))
+#define FP128_ARM64
 #endif
 
 // Set to TRUE to disable function inlining - useful for profiling a specific function. Default 0
@@ -134,8 +141,18 @@ static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;  ///< Use recipr
 #define __shiftright128 shift_right128
 #define __shiftleft128 shift_left128
 
+#if defined(FP128_ARM64)
+#include <arm_neon.h>  // for the uint8x8_t type used as an operand of the NEON population count assembly
+#endif
+
 /**
  * @brief Portable 32-bit unsigned division with remainder (GCC/Clang fallback).
+ *
+ * On AArch64 this is a single UDIV followed by an MSUB (multiply-subtract) which computes
+ * the remainder without a second division. Both operands are widened to 64 bit, matching the
+ * x86 _udiv64 semantics of a 64 bit numerator; unlike x86 there is no trap when the quotient
+ * exceeds 32 bits, the value is simply truncated.
+ *
  * @param dividend Numerator.
  * @param divisor Denominator.
  * @param remainder Pointer to receive the remainder (may be nullptr).
@@ -143,6 +160,23 @@ static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;  ///< Use recipr
  */
 FP128_FORCE_INLINE constexpr uint32_t udiv64(uint64_t dividend, uint32_t divisor, uint32_t* remainder)
 {
+#if defined(FP128_ARM64)
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        const uint64_t divisor64 = divisor;
+        uint64_t quot64 = 0, rem64 = 0;
+        // quot64 = dividend / divisor64
+        // rem64  = dividend - quot64 * divisor64
+        __asm__("udiv %[q], %[n], %[d]\n\t"
+                "msub %[r], %[q], %[d], %[n]"
+                : [q] "=&r"(quot64), [r] "=r"(rem64)  // q is early-clobber: MSUB reads n and d after q was written
+                : [n] "r"(dividend), [d] "r"(divisor64));
+        if (remainder) {
+            *remainder = static_cast<uint32_t>(rem64);
+        }
+        return static_cast<uint32_t>(quot64);
+    }
+#endif
     uint32_t quot = dividend / divisor;
     if (remainder) {
         *remainder = dividend % divisor;
@@ -152,6 +186,13 @@ FP128_FORCE_INLINE constexpr uint32_t udiv64(uint64_t dividend, uint32_t divisor
 
 /**
  * @brief Portable 128-bit by 64-bit unsigned division (GCC/Clang fallback).
+ *
+ * @note AArch64 has no 128/64 bit divide instruction (UDIV is at most 64/64), so there is no
+ *       assembly variant of this function. The __uint128_t expression below lowers to a call to
+ *       the compiler runtime helper (__udivti3 / __umodti3) which is faster than any short
+ *       hand written long division. Callers on ARM64 should prefer the reciprocal based
+ *       division path (see FP128_USE_RECIPROCAL_FOR_DIVISION) built on mulx_u64.
+ *
  * @param hi_dividend Upper 64 bits of the 128-bit dividend.
  * @param lo_dividend Lower 64 bits of the 128-bit dividend.
  * @param divisor 64-bit divisor.
@@ -170,6 +211,10 @@ FP128_FORCE_INLINE constexpr uint64_t udiv128(uint64_t hi_dividend, uint64_t lo_
 
 /**
  * @brief 64x64 -> 128-bit unsigned multiply (GCC/Clang fallback for _mulx_u64).
+ *
+ * The AArch64 variant uses the MUL/UMULH instruction pair, the direct equivalent of the x86
+ * MULX instruction. The two instructions are independent and dual issue on Apple Silicon.
+ *
  * @param a First operand.
  * @param b Second operand.
  * @param hi Pointer to receive the upper 64 bits of the product.
@@ -177,14 +222,29 @@ FP128_FORCE_INLINE constexpr uint64_t udiv128(uint64_t hi_dividend, uint64_t lo_
  */
 FP128_FORCE_INLINE static uint64_t mulx_u64(uint64_t a, uint64_t b, uint64_t* hi) noexcept
 {
-    __uint128_t r = (__uint128_t)a * b;
     FP128_ASSERT(hi != nullptr);  // Caller must provide a valid pointer for the high part. Compatibility with MSVC intrinsic.
+#if defined(FP128_ARM64)
+    uint64_t lo_res = 0, hi_res = 0;
+    __asm__("umulh %[hi], %[a], %[b]\n\t"
+            "mul   %[lo], %[a], %[b]"
+            : [hi] "=&r"(hi_res), [lo] "=r"(lo_res)  // hi is early-clobber: MUL reads a and b after hi was written
+            : [a] "r"(a), [b] "r"(b));
+    *hi = hi_res;
+    return lo_res;
+#else
+    __uint128_t r = (__uint128_t)a * b;
     *hi = (uint64_t)(r >> 64);
     return (uint64_t)r;
+#endif
 }
 
 /**
  * @brief 64-bit add with carry (GCC/Clang fallback for _addcarryx_u64).
+ *
+ * The AArch64 variant mirrors the x86 ADCX sequence: CMP materializes the incoming carry into
+ * the C flag (the unsigned compare c - 1 sets C when c is non zero), ADCS performs the addition
+ * with that carry and updates the flags, and CSET extracts the outgoing carry.
+ *
  * @param c Input carry (0 or 1).
  * @param a First operand.
  * @param b Second operand.
@@ -193,34 +253,103 @@ FP128_FORCE_INLINE static uint64_t mulx_u64(uint64_t a, uint64_t b, uint64_t* hi
  */
 FP128_FORCE_INLINE static unsigned char addcarryx_u64(unsigned char c, uint64_t a, uint64_t b, uint64_t* out) noexcept
 {
-    __uint128_t r = (__uint128_t)a + b + c;
     FP128_ASSERT(out != nullptr);  // Caller must provide a valid pointer for the result. Compatibility with MSVC intrinsic.
+#if defined(FP128_ARM64)
+    uint64_t sum = 0;
+    uint32_t carry_out = 0;
+    __asm__("cmp  %w[cin], #1\n\t"      // C = (cin != 0)
+            "adcs %[sum], %[a], %[b]\n\t"
+            "cset %w[cout], cs"
+            : [sum] "=&r"(sum), [cout] "=&r"(carry_out)  // both outputs are early-clobber, they must not alias the inputs
+            : [cin] "r"((uint32_t)c), [a] "r"(a), [b] "r"(b)
+            : "cc");
+    *out = sum;
+    return (unsigned char)carry_out;
+#else
+    __uint128_t r = (__uint128_t)a + b + c;
     *out = (uint64_t)r;
     return (unsigned char)(r >> 64);
+#endif
 }
 
-/** @brief Count leading zeros in a 32-bit value (GCC/Clang fallback). */
+/**
+ * @brief Count leading zeros in a 32-bit value (GCC/Clang fallback).
+ *
+ * The AArch64 CLZ instruction is defined for a zero operand (it returns the operand width),
+ * so unlike the x86 BSR based lowering no zero test is needed.
+ */
 FP128_FORCE_INLINE static uint32_t lzcnt32(uint32_t x) noexcept
 {
+#if defined(FP128_ARM64)
+    uint32_t res = 0;
+    __asm__("clz %w[res], %w[val]" : [res] "=r"(res) : [val] "r"(x));
+    return res;
+#else
     return (x == 0) ? 32u : (uint32_t)__builtin_clz(x);
+#endif
 }
 
-/** @brief Count leading zeros in a 64-bit value (GCC/Clang fallback). */
+/**
+ * @brief Count leading zeros in a 64-bit value (GCC/Clang fallback).
+ *
+ * The AArch64 CLZ instruction returns 64 for a zero operand, no zero test is needed.
+ */
 FP128_FORCE_INLINE static uint64_t lzcnt64(uint64_t x) noexcept
 {
+#if defined(FP128_ARM64)
+    uint64_t res = 0;
+    __asm__("clz %[res], %[val]" : [res] "=r"(res) : [val] "r"(x));
+    return res;
+#else
     return (x == 0) ? 64u : (uint64_t)__builtin_clzll(x);
+#endif
 }
 
-/** @brief Count set bits in a 64-bit value (GCC/Clang fallback). */
+/**
+ * @brief Count set bits in a 64-bit value (GCC/Clang fallback).
+ *
+ * AArch64 has no general purpose register population count before ARMv8.9 (FEAT_CSSC), which
+ * Apple Silicon does not implement. The value is moved to a NEON register, CNT counts the bits
+ * of each of the 8 bytes in parallel and ADDV sums the 8 byte lanes into a single byte.
+ */
 FP128_FORCE_INLINE static uint64_t popcnt64(uint64_t x) noexcept
 {
+#if defined(FP128_ARM64)
+    uint32_t res = 0;
+    uint8x8_t tmp;
+    __asm__("fmov %d[tmp], %[val]\n\t"
+            "cnt  %[tmp].8b, %[tmp].8b\n\t"
+            "addv %b[tmp], %[tmp].8b\n\t"
+            "fmov %w[res], %s[tmp]"
+            : [res] "=r"(res), [tmp] "=&w"(tmp)
+            : [val] "r"(x));
+    return res;
+#else
     return (uint64_t)__builtin_popcountll(x);
+#endif
 }
 
-/** @brief Count set bits in a 32-bit value (GCC/Clang fallback). */
+/**
+ * @brief Count set bits in a 32-bit value (GCC/Clang fallback).
+ *
+ * Same NEON sequence as popcnt64. FMOV of a W register zeroes the upper lanes of the NEON
+ * register, so the 4 unused bytes contribute nothing to the ADDV sum.
+ */
 FP128_FORCE_INLINE static uint32_t popcnt32(uint32_t x) noexcept
 {
+#if defined(FP128_ARM64)
+    uint32_t res = 0;
+    uint8x8_t tmp;
+    __asm__("fmov %s[tmp], %w[val]\n\t"
+            "cnt  %[tmp].8b, %[tmp].8b\n\t"
+            "addv %b[tmp], %[tmp].8b\n\t"
+            "fmov %w[res], %s[tmp]"
+            : [res] "=r"(res), [tmp] "=&w"(tmp)
+            : [val] "r"(x));
+    return res;
+#else
     return (uint32_t)__builtin_popcount(x);
+#endif
 }
 
 #endif  // #if defined (FP128_CLANG)
