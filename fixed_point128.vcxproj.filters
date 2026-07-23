@@ -41,4 +41,7 @@
   <ItemGroup>
     <Natvis Include="fixed_point128.natvis" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="CMakeLists.txt" />
+  </ItemGroup>
 </Project>
