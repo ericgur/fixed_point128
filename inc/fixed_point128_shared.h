@@ -36,10 +36,15 @@
  * This header is consumed by fixed_point128.h and should not be included directly.
  */
 
+#include <array>
 #include <cstdint>
 #include <cassert>
+#include <cctype>   // tolower, isspace
+#include <cstdio>   // snprintf
+#include <cstring>  // strlen, strncmp
 #include <stdexcept>
 #include <memory>
+#include <string>
 #include <type_traits>
 
 /***********************************************************************************
@@ -134,12 +139,24 @@ static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;  ///< Use recipr
 #define popcnt64 __popcnt64
 #define alloca _alloca
 
+// The 128 bit funnel shifts, which map to a single SHRD/SHLD instruction here.
+// See the note on the naming in the Clang section below.
+#define FP128_SHIFTRIGHT128 __shiftright128
+#define FP128_SHIFTLEFT128 __shiftleft128
+
 //
 // GCC/Clang portable fallback implementations
 //
 #elif defined(FP128_CLANG)
-#define __shiftright128 shift_right128
-#define __shiftleft128 shift_left128
+// The funnel shifts fall back to this library's own implementations.
+//
+// These deliberately do NOT reuse the __shiftright128 / __shiftleft128 spelling. Those names
+// belong to the implementation, and Microsoft's STL calls them for real inside __msvc_int128.hpp,
+// which <algorithm> and friends pull in. Defining them as macros here rewrites those calls to an
+// unqualified name that is not visible at that point, so any translation unit that reached an
+// fp128 header before <algorithm> failed to compile. Prefixing the macro keeps the two apart.
+#define FP128_SHIFTRIGHT128 shift_right128
+#define FP128_SHIFTLEFT128 shift_left128
 
 #if defined(FP128_ARM64)
 #include <arm_neon.h>  // for the uint8x8_t type used as an operand of the NEON population count assembly
@@ -622,8 +639,8 @@ template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t
  * @
  * @return Upper 64 bit of the result
  */
-template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_left128(uint64_t l, uint64_t h) noexcept
-{
+ template <int shift> [[nodiscard]] FP128_FORCE_INLINE uint64_t shift_left128(uint64_t l, uint64_t h) noexcept
+ {
     FP128_ASSERT(shift >= 0 && shift < 128);
     if constexpr (shift == 0) {
         return h;
@@ -642,7 +659,7 @@ template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_left128(uint64_t 
  * @param shift Bits to shift, between 0-127
  * @return Lower 64 bit of the result
  */
-[[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
+[[nodiscard]] FP128_FORCE_INLINE uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 128);
     switch (shift >> 6) {

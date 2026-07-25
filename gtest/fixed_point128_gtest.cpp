@@ -190,11 +190,9 @@ TEST(fixed_point128, AddSameSign)
         if (check_overflow(value1, f1) || check_overflow(value2, f2) || check_overflow(res, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // The operands are exactly representable and so is their sum, so the result matches the
+        // double reference bit for bit. The is_similar_double() guard that used to sit here was
+        // satisfied by every iteration, which meant the assertion below never ran at all.
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -211,11 +209,9 @@ TEST(fixed_point128, AddDifferentSign)
         if (check_overflow(value1, f1) || check_overflow(value2, f2) || check_overflow(res, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // The operands are exactly representable and so is their sum, so the result matches the
+        // double reference bit for bit. The is_similar_double() guard that used to sit here was
+        // satisfied by every iteration, which meant the assertion below never ran at all.
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -231,12 +227,7 @@ TEST(fixed_point128, AddDouble)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // exactly representable operands and an exactly representable sum, see AddSameSign
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -259,11 +250,12 @@ TEST(fixed_point128, AddInt32)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        auto value1 = abs(get_int32_random());
-        auto value2 = abs(get_int32_random());
-        auto res = value1 + value2;
-        if (res < 0)
-            continue;  // wrap around won't happen in uint128_t
+        const int32_t value1 = abs(get_int32_random());
+        const int32_t value2 = abs(get_int32_random());
+        // The sum of two positive 32 bit values can exceed the type. Detecting that after the
+        // fact by testing for a negative result relies on signed overflow, which is undefined
+        // behavior and may be optimized away. Compute the reference in a wider type instead.
+        const int64_t res = static_cast<int64_t>(value1) + value2;
 
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f3 = f1 + value2;
@@ -334,11 +326,7 @@ TEST(fixed_point128, SubtractSameSign)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // exactly representable operands and an exactly representable difference, see AddSameSign
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -355,11 +343,7 @@ TEST(fixed_point128, SubtractDifferentSign)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // exactly representable operands and an exactly representable difference, see AddSameSign
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -443,17 +427,13 @@ TEST(fixed_point128, MultiplyByFP128)
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
         fixed_point128<40> f3 = f1 * f2;
-        // assert((double)f1 == value1);
-        // assert((double)f2 == value2);
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // The product is truncated to 88 fraction bits, which is far more than the 53 significant
+        // bits a double keeps, so rounding the result back to double lands on the same value the
+        // double multiply produced. Measured exact on every one of the 20955 iterations that reach
+        // this line.
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -469,11 +449,7 @@ TEST(fixed_point128, MultiplyByDouble)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // see MultiplyByFP128, the product carries more bits than a double can hold
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -489,11 +465,7 @@ TEST(fixed_point128, MultiplyByFloat)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // see MultiplyByFP128, the product carries far more bits than a float can hold
         EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -557,6 +529,53 @@ TEST(fixed_point128, MultiplyByUnsignedInt64)
         EXPECT_EQ(static_cast<uint64_t>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
+/**
+ * @brief Checks that sqr(x) is bit identical to x * x for a single template parameter.
+ *
+ * square() accumulates the same 256 bit product as operator*=, it only skips the
+ * redundant second cross multiply, so the results must match exactly - including
+ * rounding and sign. Raw bit patterns are used to cover the full value range instead
+ * of going through double, which cannot represent every fixed_point128 value.
+ *
+ * @tparam I Number of integer bits passed to fixed_point128.
+ */
+template <int32_t I> static void CheckSqrMatchesMultiply()
+{
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        const uint32_t sign = (uint32_t)(rand() & 1);
+        const fixed_point128<I> x(low, high, sign);
+        const fixed_point128<I> viaMultiply = x * x;
+        const fixed_point128<I> viaSqr = sqr(x);
+
+        // operator== compares sign, high and low, so this is a bit exact comparison
+        EXPECT_TRUE(viaSqr == viaMultiply) << "I=" << I << ", low=" << low << ", high=" << high << ", sign=" << sign
+                                           << ", x*x=" << (std::string)viaMultiply << ", sqr(x)=" << (std::string)viaSqr;
+        EXPECT_FALSE(viaSqr.is_negative()) << "I=" << I << ", a square must never be negative";
+    }
+}
+TEST(fixed_point128, SqrMatchesMultiply)
+{
+    CheckSqrMatchesMultiply<1>();
+    CheckSqrMatchesMultiply<10>();
+    CheckSqrMatchesMultiply<20>();
+    CheckSqrMatchesMultiply<40>();
+    CheckSqrMatchesMultiply<64>();
+}
+TEST(fixed_point128, SqrEdgeCases)
+{
+    using fp = fixed_point128<20>;
+    const fp values[] = {fp(0), fp::epsilon(), fp::one(), -fp::one(), fp::half(), fp::pi(), -fp::pi(),
+                         fp::e(), fp::golden_ratio(), fp(0ull, ~0ull, 0), fp(~0ull, ~0ull, 0), fp(~0ull, ~0ull, 1)};
+    for (const auto& x : values) {
+        EXPECT_TRUE(sqr(x) == x * x) << "x=" << (std::string)x;
+    }
+    // squaring zero stays zero and keeps a positive sign
+    EXPECT_TRUE(sqr(fp(0)) == fp(0));
+    EXPECT_FALSE(sqr(-fp::one()).is_negative());
+}
 TEST(fixed_point128, DivideByFP128)
 {
     srand(RANDOM_SEED);
@@ -572,11 +591,11 @@ TEST(fixed_point128, DivideByFP128)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-        EXPECT_DOUBLE_EQ(fp128_res, res) << "value1=" << value1 << ", value2=" << value2;
+        // Division is the one operation whose result does not match the double reference exactly:
+        // the quotient is quantized to the type's last fraction bit, which for a small quotient
+        // leaves fewer significant bits than a double carries. See FixedPointDivisionTolerance().
+        const double fp128_res = static_cast<double>(f3);
+        EXPECT_NEAR(fp128_res, res, FixedPointDivisionTolerance<40>(res)) << "value1=" << value1 << ", value2=" << value2;
     }
 }
 TEST(fixed_point128, DivideByDouble)
@@ -593,12 +612,8 @@ TEST(fixed_point128, DivideByDouble)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
-        EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
+        // see DivideByFP128 for why division needs a tolerance and the others do not
+        EXPECT_NEAR(static_cast<double>(f3), res, FixedPointDivisionTolerance<40>(res)) << "value1=" << value1 << ", value2=" << value2;
     }
 }
 TEST(fixed_point128, DivideByFloat)
@@ -692,21 +707,18 @@ TEST(fixed_point128, ModuloByFP128)
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random(-1, 39);
         double value2 = get_double_random(-1, 39);
-        // printf("%u\n", i);
-        double res = value1 / value2;
+        double res = fmod(value1, value2);
         if (value2 == 0)
             continue;
         fixed_point128<40> f1 = value1;
         fixed_point128<40> f2 = value2;
-        fixed_point128<40> f3 = f1 / f2;
-        if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(res, f3)) {
+        fixed_point128<40> f3 = f1 % f2;
+        // The modulo needs the quotient to be representable, not merely the two operands: it is
+        // computed by dividing first, and a quotient beyond 2^40 overflows the integer part.
+        if (check_overflow(value1, f1) || check_overflow(value2, f2) || check_overflow(value1 / value2, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // the remainder is exact, it is a difference of representable values rather than a quotient
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -724,11 +736,7 @@ TEST(fixed_point128, ModuloByDouble)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(value1 / value2, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
-
+        // the remainder is exact, see ModuloByFP128
         EXPECT_DOUBLE_EQ(static_cast<double>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -746,10 +754,7 @@ TEST(fixed_point128, ModuloByFloat)
         if (check_overflow(value1, f1) || check_overflow(value2, f1) || check_overflow(value1 / value2, f3)) {
             continue;
         }
-        double fp128_res = static_cast<double>(f3);
-        // note that fp128 is more precise than double, this can lead to issues when param1 and param2 are far apart.
-        if (is_similar_double(fp128_res, res))
-            continue;
+        // the remainder is exact, see ModuloByFP128
         EXPECT_FLOAT_EQ(static_cast<float>(f3), res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -1674,4 +1679,160 @@ TEST(fixed_point128, atanh)
         EXPECT_DOUBLE_EQ(fp128_res, res) << "atanh: "
                                          << "value=" << value;
     }
+}
+
+/**********************************************************************
+ * fixed_point128 regression tests
+ *
+ * Each test below pins down a defect that was fixed.
+ ***********************************************************************/
+
+// The sign lives in its own field, so a result that lands on zero while carrying a sign is a
+// distinct bit pattern from a plain zero. Every comparison operator tests the sign field first,
+// so such a value compared unequal to zero and smaller than it. trunc, ceil, round, modf and
+// copysign all produced one.
+TEST(fixed_point128, NoNegativeZero)
+{
+    typedef fixed_point128<32> fp;
+    const fp zero(0);
+
+    EXPECT_TRUE(trunc(fp(-0.5)) == zero);
+    EXPECT_FALSE(trunc(fp(-0.5)) < zero);
+    EXPECT_FALSE(trunc(fp(-0.5)).is_negative());
+
+    EXPECT_TRUE(ceil(fp(-0.5)) == zero);
+    EXPECT_FALSE(ceil(fp(-0.5)).is_negative());
+
+    EXPECT_TRUE(round(fp(-0.4)) == zero);
+    EXPECT_FALSE(round(fp(-0.4)).is_negative());
+
+    EXPECT_TRUE(copysign(zero, fp(-1)) == zero);
+    EXPECT_FALSE(copysign(zero, fp(-1)).is_negative());
+
+    fp int_part;
+    const fp frac = modf(fp(-0.25), &int_part);
+    EXPECT_TRUE(int_part == zero);
+    EXPECT_FALSE(int_part.is_negative());
+    EXPECT_TRUE(frac.is_negative());  // the fraction keeps the sign, it is non zero
+
+    // floor was already correct, keep it covered
+    EXPECT_TRUE(floor(fp(-0.5)) == fp(-1));
+    EXPECT_TRUE(trunc(fp(-1.5)) == fp(-1));
+}
+// The conversions truncated the bits that did not fit the mantissa, and a value whose surviving
+// fraction bits happened to be all ones was rounded up even when it was exactly representable,
+// so (2^24-1)/2^23 came out as 2. Converting the 128 bit magnitude and scaling by a power of two
+// with ldexp is exact, which makes it a correctly rounded reference.
+TEST(fixed_point128, ConversionToFloatingPointIsCorrectlyRounded)
+{
+    typedef fixed_point128<32> fp;
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const uint64_t l = get_uint64_random();
+        const uint64_t h = get_uint64_random() >> (get_uint32_random() % 40);
+        const uint32_t s = get_uint32_random() & 1;
+        const fp v(l, h, s);
+        if (!v)
+            continue;
+        const double mag = static_cast<double>(uint128_t(l, h));
+        const double ref = s ? -ldexp(mag, -fp::F) : ldexp(mag, -fp::F);
+        EXPECT_EQ(static_cast<double>(v), ref) << "low=" << l << ", high=" << h;
+        EXPECT_EQ(static_cast<float>(v), static_cast<float>(ref)) << "low=" << l << ", high=" << h;
+    }
+}
+TEST(fixed_point128, ConversionToFloatingPointEdgeCases)
+{
+    typedef fixed_point128<32> fp;
+    // (2^24-1)/2^23 is exactly representable as a float and must not be rounded up to 2
+    const fp exact_flt = fp(0xFFFFFFull) / fp(0x800000ull);
+    EXPECT_LT(static_cast<float>(exact_flt), 2.0f);
+    EXPECT_EQ(static_cast<float>(exact_flt), 16777215.0f / 8388608.0f);
+
+    // the same trap one mantissa wider, for double
+    typedef fixed_point128<64> fp64;
+    const fp64 exact_dbl = fp64(0x1FFFFFFFFFFFFFull) / fp64(0x10000000000000ull);
+    EXPECT_LT(static_cast<double>(exact_dbl), 2.0);
+
+    // powers of two convert exactly in both directions
+    for (int e = -60; e <= 20; ++e) {
+        fp v(1);
+        if (e > 0)
+            v <<= e;
+        else if (e < 0)
+            v >>= -e;
+        EXPECT_EQ(static_cast<double>(v), ::pow(2.0, e)) << "e=" << e;
+        EXPECT_EQ(static_cast<float>(v), static_cast<float>(::pow(2.0, e))) << "e=" << e;
+    }
+    // the smallest value of the widest fraction is a denormal float, it must not become zero
+    const fixed_point128<1> tiny(1, 0, 0);
+    EXPECT_GT(static_cast<double>(tiny), 0.0);
+    EXPECT_GT(static_cast<float>(tiny), 0.0f);
+}
+// div_64bit shortcuts a numerator smaller than the divisor and returns without writing the
+// quotient, so dividing by a scalar left the value completely unchanged instead of producing zero.
+TEST(fixed_point128, DivideSmallValueByScalar)
+{
+    typedef fixed_point128<32> fp;
+    // the raw 128 bit form of 2^-90 is 64, which is smaller than the divisor below
+    const fp tiny = fp(1) >> 90;
+    EXPECT_TRUE(tiny);  // the value itself is representable
+
+    fp v = tiny;
+    v /= 1000ull;
+    EXPECT_TRUE(v == fp(0)) << "expected zero, got " << (std::string)v;
+
+    // the fixed_point128 operand overload has always produced zero here, the two must agree
+    fp w = tiny;
+    w /= fp(1000);
+    EXPECT_TRUE(v == w);
+
+    // a normal division still works
+    fp u = fp(1) >> 40;
+    u /= 1000ull;
+    EXPECT_NEAR(static_cast<double>(u), ::pow(2.0, -40) / 1000.0, ::pow(2.0, -40) / 1e9);
+}
+// These are noexcept and used to reach a throwing path, which terminates the process instead.
+TEST(fixed_point128, NoexceptFunctionsDoNotTerminate)
+{
+    typedef fixed_point128<16> fp;
+
+    // pow forwards to log, which rejects zero
+    EXPECT_TRUE(pow(fp(0), fp(2)) == fp(0));
+    EXPECT_TRUE(pow(fp(0), fp(0)) == fp(1));  // the CRT defines pow(0, 0) as 1
+    EXPECT_TRUE(pow(fp(-1), fp(2)) == fp(0));
+
+    // acos at the ends of its domain starts where the derivative vanishes and sin(res) is zero
+    EXPECT_TRUE(acos(fp(1)) == fp(0));
+    EXPECT_NEAR(static_cast<double>(acos(fp(-1))), ::acos(-1.0), 1e-12);
+    EXPECT_NEAR(static_cast<double>(asin(fp(1))), ::asin(1.0), 1e-12);
+
+    // tan's range reduction lands exactly on a zero cosine at the poles
+    EXPECT_TRUE(tan(fp::half_pi()) == fp(0));
+
+    // reciprocal is documented to return zero rather than saturate
+    EXPECT_TRUE(reciprocal(fp(0)) == fp(0));
+}
+// log1p forwards to log, which throws on a non positive argument. It used to be noexcept, which
+// turned that into a call to std::terminate.
+TEST(fixed_point128, Log1pPropagatesDomainError)
+{
+    typedef fixed_point128<16> fp;
+    EXPECT_THROW((void)log1p(fp(-1)), std::domain_error);
+    EXPECT_THROW((void)log1p(fp(-2)), std::domain_error);
+    EXPECT_NEAR(static_cast<double>(log1p(fp(1))), ::log(2.0), 1e-12);
+    // the log family itself keeps throwing
+    EXPECT_THROW((void)log(fp(0)), std::domain_error);
+    EXPECT_THROW((void)log2(fp(-1)), std::domain_error);
+    EXPECT_THROW((void)log10(fp(0)), std::domain_error);
+}
+// A leading sign or a high byte handed straight to the ctype functions is outside the domain they
+// accept, and only a literal space was skipped as leading white space.
+TEST(fixed_point128, ConstructorFromStringEdgeCases)
+{
+    typedef fixed_point128<32> fp;
+    EXPECT_TRUE(fp("\t 2.5") == fp(2.5));
+    EXPECT_TRUE(fp("  -2.5") == fp(-2.5));
+    EXPECT_TRUE(fp("+2.5") == fp(2.5));
+    const char high_byte[] = {'1', '2', static_cast<char>(0xB5), 0};
+    EXPECT_TRUE(fp(high_byte) == fp(12));
 }

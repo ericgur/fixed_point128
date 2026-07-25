@@ -17,12 +17,15 @@ using namespace fp128;
 
 static constexpr int RANDOM_TEST_COUNT = 1 << 16;
 static constexpr int RANDOM_SEED = 0x12345678;  // must have a repeatable seed for debugging
-static constexpr double DOUBLE_REL_EPS = 1.0e-10;
 
-uint64_t get_uint64_random();
-int64_t get_int64_random();
-uint32_t get_uint32_random();
-int32_t get_int32_random();
+// These are defined below with internal linkage, and the definitions have to be preceded by a
+// declaration because get_double_random() calls them. The 'static' has to appear here as well:
+// a first declaration without it gives the name external linkage, which the later definition
+// keeps, and every translation unit including this header then emits the same external symbol.
+static uint64_t get_uint64_random();
+static int64_t get_int64_random();
+static uint32_t get_uint32_random();
+static int32_t get_int32_random();
 
 // friend class to all containers to simplify test cases
 namespace fp128
@@ -113,14 +116,108 @@ bool static check_overflow_int128(double value)
     return floor(log2(abs(value))) > 126;
 }
 
-bool static is_similar_double(double v1, double v2)
+// Exact check that r is the integer square root of x, i.e. sqrt(x) rounded down.
+//
+// floor(sqrt(double)) cannot serve as the reference once x goes above 2^106: the root then needs
+// more than the 53 bits a double's mantissa holds, so sqrt() hands back a rounded value and the
+// reference is the thing that is wrong. The defining property r^2 <= x < (r+1)^2 has no such
+// ceiling and only needs a 128 bit multiply to verify.
+//
+// @tparam T uint128_t or int128_t
+// @param r Candidate root
+// @param x Value the root was taken of, must not be negative
+// @return True when r is exactly floor(sqrt(x)).
+template <typename T> bool static is_exact_isqrt(uint64_t r, const T& x)
 {
-    if (v1 == 0.0 || v2 == 0.0) {
-        v1 += 1.0e-30;
-        v2 += 1.0e-30;
+    uint64_t l = 0, h = 0;
+    x.get_components(l, h);
+    const uint128_t value(l, h);
+
+    uint64_t sqr_high = 0;
+    const uint64_t sqr_low = mulx_u64(r, r, &sqr_high);
+    if (uint128_t(sqr_low, sqr_high) > value)
+        return false;
+
+    // (r+1)^2 is 2^128 here, which is above every 128 bit value
+    if (r == UINT64_MAX)
+        return true;
+
+    uint64_t next_high = 0;
+    const uint64_t next_low = mulx_u64(r + 1, r + 1, &next_high);
+    return uint128_t(next_low, next_high) > value;
+}
+
+// Reference implementation of the truncated 128 bit product, for use as a test oracle.
+//
+// Multiplies with the schoolbook algorithm over 32 bit limbs, using nothing but native 64 bit
+// arithmetic. No partial product can overflow: the largest intermediate is
+// (2^32-1)^2 + 2*(2^32-1), which is 2^64-1. The carry out of the top limb is dropped, which is
+// the truncation the operators under test perform.
+//
+// The same computation serves both instantiations. A truncated 128 bit product is a multiplication
+// modulo 2^128, and in that ring the two's complement bit pattern of a negative value is its value,
+// so the signed product is the same bit pattern as the unsigned one.
+//
+// Deliberately shares no code with int128_base: it reaches for neither mulx_u64 nor any other
+// intrinsic the implementation uses, so a defect in those cannot cancel out against it.
+//
+// @tparam T uint128_t or int128_t
+// @param a Left hand side operand
+// @param b Right hand side operand
+// @return The low 128 bit of a * b.
+template <typename T> T static ReferenceMultiply(const T& a, const T& b)
+{
+    uint64_t al = 0, ah = 0, bl = 0, bh = 0;
+    a.get_components(al, ah);
+    b.get_components(bl, bh);
+
+    const uint32_t x[4] = {static_cast<uint32_t>(al), static_cast<uint32_t>(al >> 32), static_cast<uint32_t>(ah), static_cast<uint32_t>(ah >> 32)};
+    const uint32_t y[4] = {static_cast<uint32_t>(bl), static_cast<uint32_t>(bl >> 32), static_cast<uint32_t>(bh), static_cast<uint32_t>(bh >> 32)};
+    uint32_t r[4] {};
+
+    for (auto i = 0u; i < 4u; ++i) {
+        uint64_t carry = 0;
+        for (auto j = 0u; i + j < 4u; ++j) {
+            const uint64_t t = static_cast<uint64_t>(x[i]) * y[j] + r[i + j] + carry;
+            r[i + j] = static_cast<uint32_t>(t);
+            carry = t >> 32;
+        }
     }
-    double ratio = fabs(v1 / v2 - 1.0);
-    return ratio < DOUBLE_REL_EPS;
+
+    return T((static_cast<uint64_t>(r[1]) << 32) | r[0], (static_cast<uint64_t>(r[3]) << 32) | r[2]);
+}
+
+// The high QWORD produced when a signed 64 bit value is sign extended to 128 bit. Mirrors what the
+// integral constructor does, so a reference value can be assembled from the two QWORDs without
+// going through the type under test.
+uint64_t static SignExtension(int64_t x)
+{
+    return (x < 0) ? UINT64_MAX : 0ull;
+}
+
+// Absolute tolerance for comparing a fixed_point128<I> division result against a double reference.
+//
+// Every other fixed_point128 operation reproduces the double reference bit for bit, so only
+// division needs a tolerance. Two independent error sources contribute to it, and neither one can
+// stand in for the other:
+//
+//   - The type quantizes absolutely. fixed_point128<I> holds 128-I fraction bits and the division
+//     leaves the result within a few units of that last place whatever its magnitude. This term
+//     dominates for a small quotient, which keeps few fraction bits: a result near 2^-50 has only
+//     38 of them left, a relative error near 1e-12 that no sane relative bound would allow.
+//   - The double reference is rounded to 53 significant bits, and so is the conversion of the
+//     result back to double. This term is relative and dominates for a large quotient.
+//
+// Both were measured at exactly 8 units of their respective error, so the 16 below is a factor of
+// two of margin rather than a fitted constant. The resulting bound is around 28000 times tighter
+// than the DOUBLE_REL_EPS comparison it replaced.
+//
+// @tparam I Integer bit count of the fixed_point128 type under test
+// @param reference The double the result is being compared against
+// @return Largest absolute difference to accept.
+template <int32_t I> double static FixedPointDivisionTolerance(double reference)
+{
+    return 16.0 * (ldexp(1.0, I - 128) + fabs(reference) * ldexp(1.0, -52));
 }
 
 #endif  // #ifndef GTEST_SHARED_H

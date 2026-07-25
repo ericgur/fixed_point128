@@ -76,23 +76,23 @@
       <Item Name="[high]"             ExcludeView="simple">high, d</Item>
     </Expand>
   </Type>
-  <Type Name="fp128::uint128_t">
-    <DisplayString>{high,h}{low,hb}</DisplayString>
-    <Expand HideRawView="true" >
-      <Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
-      <Item Name="[high (hex)]" ExcludeView="simple">high,h</Item>
-      <Item Name="[low]"  ExcludeView="simple">low,d</Item>
-      <Item Name="[high]" ExcludeView="simple">high,d</Item>
-    </Expand>
-  </Type>
-  <Type Name="fp128::int128_t">
-    <Intrinsic Name="sign" Expression="(high >> 63) == 1" />
+  <!--
+    uint128_t and int128_t are both aliases of fp128::int128_base<IsSigned>, so a single wildcard
+    entry covers them. $T1 substitutes the template argument exactly as the type name spells it,
+    which is 0 or 1 for MSVC; comparing against zero rather than a literal keeps this working if a
+    toolchain spells it false/true instead.
+  -->
+  <Type Name="fp128::int128_base&lt;*&gt;">
+    <Intrinsic Name="is_signed" Expression="$T1 != 0" />
+    <!-- the unsigned instantiation never takes the negative display path -->
+    <Intrinsic Name="sign" Expression="is_signed() &amp;&amp; (high >> 63) == 1" />
     <Intrinsic Name="sign_int" Expression="(sign()) ? -1 : 1" />
     <Intrinsic Name="comp_low" Expression="~low + 1" />
     <Intrinsic Name="comp_high" Expression="(int)(comp_low() == 0) + ~high" />
     <DisplayString Condition="sign()">-{comp_high(),h}{comp_low(),hb}</DisplayString>
     <DisplayString>{high,h}{low,hb}</DisplayString>
     <Expand HideRawView="true" >
+      <Item Name="[signed]"    ExcludeView="simple">is_signed()</Item>
       <Item Name="[low (hex)]"  ExcludeView="simple">low,h</Item>
       <Item Name="[high (hex)]" ExcludeView="simple">high,h</Item>
       <Item Name="[low]"  ExcludeView="simple">low,d</Item>

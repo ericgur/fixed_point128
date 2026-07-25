@@ -764,8 +764,8 @@ void bench_mandelbrot(double time_per_function = 1.0)
             // v = 2.0 * (u * v) + y;
             v = ((u * v) << 1) + y;
             u = tmp;
-            usq = u * u;
-            vsq = v * v;
+            usq = sqr(u);
+            vsq = sqr(v);
             // check uv vector amplitude is smaller than 2
             modulus = usq + vsq;
         }
@@ -970,6 +970,7 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     c &= a;
     c |= a;
     c ^= a;
+    c.square();
 
     // compound-assignment with scalar types (exercises template overloads)
     c += 1.5;
@@ -1062,6 +1063,7 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)fmin(val, val);
     (void)fmax(val, val);
     (void)hypot(val, val);
+    (void)sqr(val);
     (void)sqrt(val);
     (void)exp(val);
     (void)exp2(val);

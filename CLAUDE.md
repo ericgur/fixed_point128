@@ -7,7 +7,6 @@
 - C++20 standard, C17 for C files
 - OpenMP enabled for parallel processing
 - AVX2 instruction set on Windows (MSVC)
-/clee- Qt6 with widgets, core, and gui modules
 
 # Code Style Rules
 - C++20 standard, C17 for C files

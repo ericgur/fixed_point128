@@ -146,7 +146,7 @@ float128 double_factorial(int x) noexcept;
  * </UL>
  */
 
-class __declspec(align(16)) float128
+class FP128_ALIGN16 float128
 {
     // build time validation of template parameters
     static_assert(sizeof(void*) == 8, "float128 is supported in 64 bit builds only!");
@@ -246,7 +246,7 @@ public:
         // subnormal numbers
         if (d.e == 0) {
             // the exponent is -1022 (1-1023)
-            auto msb = 64 - static_cast<int32_t>(_lzcnt_u64(d.f));
+            auto msb = 64 - static_cast<int32_t>(lzcnt64(d.f));
             // exponent
             int32_t x_expo = static_cast<int32_t>(d.e) - 1023;
             int32_t expo = x_expo + msb - dbl_frac_bits;
@@ -331,15 +331,18 @@ public:
 
         // convert the input string to lowercase for simpler processing.
         const auto x_len = 1 + strlen(x);
-        auto str_ptr = std::make_unique_for_overwrite<char[]>(x_len);
+        // make_unique_for_overwrite throws bad_alloc, which this noexcept constructor must not
+        // propagate. The nothrow form reports a failed allocation as a null pointer instead.
+        auto str_ptr = std::unique_ptr<char[]>(new (std::nothrow) char[x_len]);
         char* p = str_ptr.get();
         if (p == nullptr)
             return;
 
         strnlwr(p, x, x_len);
 
-        // skip white space
-        while (*p == ' ')
+        // skip leading white space. The cast keeps a negative char from reaching isspace, which
+        // only accepts values representable as unsigned char (or EOF).
+        while (*p && isspace(static_cast<unsigned char>(*p)))
             ++p;
 
         if (*p == '\0') {
@@ -381,7 +384,7 @@ public:
         char* frac_start = nullptr;
 
         // count the integer digits
-        while (isdigit(*p) || (base == 16 && *p >= 'a' && *p <= 'f')) {
+        while (isdigit(static_cast<unsigned char>(*p)) || (base == 16 && *p >= 'a' && *p <= 'f')) {
             ++int_digits;
             ++p;
         }
@@ -445,11 +448,11 @@ public:
         if (*p == '.') {
             *p = '\0';
             ++p;
-            frac_start = (isdigit(*p)) ? p : nullptr;
+            frac_start = (isdigit(static_cast<unsigned char>(*p))) ? p : nullptr;
 
             // count the fraction digits if they exist
             if (frac_start) {
-                while (isdigit(*p)) {
+                while (isdigit(static_cast<unsigned char>(*p))) {
                     ++frac_digits;
                     ++p;
                 }
@@ -546,38 +549,37 @@ public:
         // 2) Fraction digits exist and not all zero
         float128 frac_part;
         if (frac_digits > 0) {
-            // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
-            int32_t digits = std::min(frac_digits, max_digits - int_digits);
-            constexpr int32_t digit_group = 9;
-            static_assert(digit_group <= 9);  // must fit in 32 bit
-            int32_t i = 0;
-            // const float128 group_base = exp10(-digit_group);
-            const float128 group_base = float128(0x4b2e62d01511f12a, 0x12e0be826d69, EXP_BIAS - 30, 0);  // 10^-9
-            float128 current_base = 1;
-
-            for (; i < digits; i += digit_group) {
-                // convert to an int
-                uint32_t val = 0;
-                for (auto j = 0; j < digit_group; ++j) {
-                    val *= 10;
-                    if (i + j < digits)
-                        val += frac_start[i + j] - '0';
-                }
-
-                current_base *= group_base;
-                frac_part += current_base * val;
+            // A fraction below 0.1 begins with zeros that carry no information. Skipping them and
+            // compensating through the divisor's exponent means the digit budget is spent on
+            // significant digits only. Charging the leading zeros against it, as this used to,
+            // left a value such as 1.1e-7 with barely 29 significant digits, too few to read back.
+            int32_t leading_zeros = 0;
+            if (int_digits == 0) {
+                while (leading_zeros < frac_digits && frac_start[leading_zeros] == '0')
+                    ++leading_zeros;
             }
 
-            //// handle the remaining digits one at a time
-            // for (; i < digits; ++i) {
-            //     // convert to an int
-            //     uint32_t val = frac_start[i] - '0';
-            //     current_base *= tenth();
-            //     if (val == 0)
-            //         continue;
-            //     frac_part += current_base * val;
-            // }
+            // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
+            const int32_t digits = std::min(frac_digits - leading_zeros, max_digits - int_digits);
 
+            // Read the digits as a plain integer and scale down with a single division.
+            //
+            // The accumulation is exact: a float128 holds every integer below 2^113, which is a
+            // little above 10^34, so all the digits kept here survive without rounding. Only the
+            // final divide rounds.
+            //
+            // The previous implementation instead multiplied by a stored 10^-9 constant once per
+            // group of 9 digits and summed the pieces. Negative powers of ten are not
+            // representable in binary, so that constant was already inexact, its running product
+            // compounded the error, and every partial sum rounded again. Even "0.5", which is
+            // exactly representable, came out one unit in the last place low.
+            float128 numerator;
+            for (int32_t i = 0; i < digits; ++i) {
+                numerator = numerator * 10 + (frac_start[leading_zeros + i] - '0');
+            }
+
+            // the skipped zeros are put back through the exponent of the divisor
+            frac_part = numerator / exp10(digits + leading_zeros);
             frac_part.set_sign(sign);
         }
 
@@ -800,14 +802,14 @@ public:
 
         if (is_special()) {
             if (is_nan()) {
-                strcpy(str, "nan");
+                snprintf(str, buff_size, "nan");
             } else if (is_inf()) {
-                sprintf(str, "%sinf", (is_negative()) ? "-" : "");
+                snprintf(str, buff_size, "%sinf", (is_negative()) ? "-" : "");
             }
             return str;
         }
         if (is_zero()) {
-            strcpy(str, "0");
+            snprintf(str, buff_size, "0");
             return str;
         }
 
@@ -824,17 +826,25 @@ public:
         if (get_sign()) {
             *p++ = '-';
         }
-        // convert the integer part
-        float128 int_part, frac_part, ten = 10;
-        frac_part = modf(fabs(*this), &int_part);
+        // convert the integer part. The fraction is handled separately below, straight from the
+        // encoding, so only the integer half of the split is needed here.
+        float128 int_part;
+        (void)modf(fabs(*this), &int_part);
+        // remembered for the fraction loop below, which counts significant digits
+        const bool int_is_zero = int_part.is_zero();
         int32_t int_digits = 0;
         char* pp = tmp_buf;
         do {
-            auto digit = static_cast<uint32_t>(fmod(int_part, ten));
+            // Peel off the least significant decimal digit. The quotient has to be truncated:
+            // a plain divide leaves the discarded digit behind as a fraction, which then makes
+            // every digit extracted after it wrong. 123456789 came out as 123467899.
+            const float128 next = trunc(int_part / 10);
+            const auto digit = static_cast<uint32_t>(int_part - next * 10);
             *pp++ = static_cast<char>(digit + '0');
-            int_part /= 10;
+            int_part = next;
             ++int_digits;
-        } while (int_digits < buff_size && int_part >= 1);
+            // leave room for the terminator written below
+        } while (int_digits < buff_size - 1 && !int_part.is_zero());
         *pp = '\0';
         for (auto i = int_digits; i != 0; --i) {
             *p++ = *--pp;
@@ -848,24 +858,37 @@ public:
         }
 
         // convert the fraction part
-        if (!frac_part.is_zero()) {
+        uint64_t frac_fixed[FIXED_WORDS];
+        if (fraction_to_fixed(frac_fixed)) {
             *p++ = '.';
-            ++int_digits;
-            constexpr int32_t digit_group = 5, max_frac_digits = 35;
-            static_assert(digit_group <= 9);  // must fit in 32 bit
-            float128 base = 100000;
+            constexpr int32_t digit_group = 5, max_sig_digits = 36;
+            constexpr uint64_t group_base = 100000;  // 10^digit_group
+            static_assert(digit_group <= 19);        // the group must fit in a single word
             char fmt[20];
-            sprintf(fmt, "%%0%ii", digit_group);
-            int32_t groups = std::min(max_frac_digits, (buff_size - int_digits - 1)) / digit_group;
-            while (groups-- > 0) {
-                frac_part *= base;
-                frac_part = modf(frac_part, &int_part);
-                uint32_t val = static_cast<uint32_t>(int_part);
-                p += sprintf(p, fmt, val);
+            snprintf(fmt, sizeof(fmt), "%%0%illu", digit_group);
+
+            // A binary128 needs 36 significant decimal digits to be read back exactly. The budget
+            // is counted in significant digits, starting at the first non zero one: the leading
+            // zeros of a fraction below 0.1 carry no information. Charging them against a fixed
+            // count of digits after the decimal point, as this used to, left small values with too
+            // few significant digits to survive a round trip.
+            int32_t sig_digits = int_is_zero ? 0 : int_digits;
+            while (!fixed_is_zero(frac_fixed) && sig_digits < max_sig_digits && (p - str) + digit_group + 1 < buff_size) {
+                const uint64_t val = fixed_mul_extract(frac_fixed, group_base);
+                const int written = snprintf(p, static_cast<size_t>(buff_size - (p - str)), fmt, val);
+                if (written <= 0)
+                    break;
+                for (int32_t k = 0; k < written; ++k) {
+                    if (sig_digits > 0 || p[k] != '0')
+                        ++sig_digits;
+                }
+                p += written;
             }
 
-            // back track and remove trailing zero
+            // back track and remove trailing zeros, and the decimal point if nothing survived
             while (p[-1] == '0')
+                --p;
+            if (p[-1] == '.')
                 --p;
         }
 
@@ -880,19 +903,36 @@ public:
     void to_e_format(char* str, int32_t buff_size) const
     {
         if (is_zero()) {
-            sprintf(str, "%s0e0", is_negative() ? "-" : "");
+            snprintf(str, buff_size, "%s0e0", is_negative() ? "-" : "");
+            return;
+        }
+        if (is_special()) {
+            snprintf(str, buff_size, "%s", is_nan() ? "nan" : (is_negative() ? "-inf" : "inf"));
             return;
         }
 
-        auto l10 = static_cast<int32_t>(trunc(log10(*this)));
+        // log10 needs a positive argument: passing a negative value straight in produced a NaN,
+        // which turned into an exponent of INT32_MIN and a mantissa of "inf".
+        int32_t l10 = static_cast<int32_t>(trunc(log10(fabs(*this))));
         float128 f = *this / exp10(l10);
-        std::string s = f;
-        char temp[128];
-        sprintf(temp, "e%d", l10);
-        auto tail_len = strlen(temp) + 1;
-        s.resize(buff_size - tail_len, '0');
-        s.append(temp);
-        strncpy(str, s.c_str(), buff_size);
+
+        // log10 is not exact, so the mantissa can land just outside [1, 10). Nudge it back so the
+        // printed form always has exactly one digit before the decimal point.
+        const float128 mag = fabs(f);
+        if (mag >= 10) {
+            f /= 10;
+            ++l10;
+        } else if (mag < 1) {
+            f *= 10;
+            --l10;
+        }
+
+        // The mantissa is printed by the normal path, which is reached because its exponent is
+        // small. Note there is no padding here: the previous version resized the mantissa string
+        // out to the full buffer with '0' characters, which is what produced the long runs of
+        // zeros in the output.
+        const std::string mantissa = f;
+        snprintf(str, buff_size, "%se%d", mantissa.c_str(), l10);
     }
 
     //
@@ -963,10 +1003,16 @@ public:
     FP128_INLINE float128& operator+=(const float128& other) noexcept
     {
         // check trivial cases
-        if (high_bits.e == INF_EXP_BIASED || other.high_bits.e == INF_EXP_BIASED) {
-            if (is_nan() || other.is_nan())
+        if (is_special() || other.is_special()) {
+            // A NaN operand propagates. Adding infinities of opposite signs is the invalid
+            // operation and produces a NaN as well.
+            if (is_nan() || other.is_nan() || (is_inf() && other.is_inf() && get_sign() != other.get_sign())) {
                 *this = nan();
-            // return inf with the right sign
+                return *this;
+            }
+
+            // Either a single operand is infinite, or both are infinite with the same sign.
+            // In both cases the result is that infinity, keeping its own sign.
             if (other.is_inf())
                 *this = other;
             return *this;
@@ -1069,14 +1115,23 @@ public:
     {
         // check trivial cases
         if (is_special() || other.is_special()) {
-            if (is_nan() || other.is_nan())
+            // A NaN operand propagates, and so does the invalid operation inf * zero.
+            // Note the zero tests are only reachable for the operand that is not special.
+            if (is_nan() || other.is_nan() || (is_inf() && other.is_zero()) || (is_zero() && other.is_inf())) {
                 *this = nan();
-            // return inf with the right sign
-            if (other.is_inf())
-                *this = other;
+                return *this;
+            }
+
+            // at least one operand is infinite, the result is infinite with the combined sign
+            const uint32_t res_sign = get_sign() ^ other.get_sign();
+            *this = inf();
+            set_sign(res_sign);
             return *this;
         } else if (is_zero() || other.is_zero()) {
+            // the sign of a zero product is the combination of both operand signs
+            const uint32_t res_sign = get_sign() ^ other.get_sign();
             *this = 0;
+            set_sign(res_sign);
             return *this;
         }
         // extract fractions and exponents
@@ -1133,6 +1188,7 @@ public:
         // constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
         // const bool need_rounding = (res[index] & half) != 0;
 
+        const uint64_t sticky_bits = res[0] | (res[1] & FP128_MAX_VALUE_64(lsb));
         l1 = shift_right128(res[index], res[index + 1], lsb);  // custom function is 20% faster in Mandelbrot than the intrinsic
         h1 = shift_right128(res[index + 1], res[index + 2], lsb);
         --expo;
@@ -1142,8 +1198,83 @@ public:
         //     h1 += l1 == 0;
         // }
 
-        norm_fraction(l1, h1, expo);
+        norm_fraction_sticky(l1, h1, expo, sticky_bits != 0);
         set_components(l1, h1, expo, sign ^ other_sign);
+        return *this;
+    }
+    /**
+     * @brief Squares this object in place.
+     *
+     * Cheaper than operator*=(*this) on several counts:
+     * - a square is symmetric, so the two cross products of the fraction multiply are the
+     *   same value and only three 64x64->128 bit multiplies are needed instead of four
+     * - the result sign is always positive, so no sign combining is needed
+     * - only one operand has to be tested for the special cases and for being an exponent
+     *   of 2, and in the exponent of 2 case the fraction does not have to be copied
+     * - the exponents are added to each other, which is a doubling
+     *
+     * The result is identical to (*this) * (*this) for every value, specials included.
+     *
+     * @return This object.
+     */
+    FP128_INLINE float128& square() noexcept
+    {
+        // check trivial cases
+        if (is_special()) {
+            // a NaN stays a NaN, +/-inf squared is +inf
+            *this = is_nan() ? nan() : inf();
+            return *this;
+        } else if (is_zero()) {
+            *this = 0;
+            return *this;
+        }
+        // extract the fraction and exponent, the sign of a square is always positive
+        uint32_t sign;
+        int32_t expo;
+        uint64_t l, h;
+        get_components(l, h, expo, sign);
+
+        // add the exponent to itself
+        expo += expo;
+
+        // optimize for exponents of 2, the fraction is unchanged by the multiply
+        if (is_exponent_of_2()) {
+            set_components(l, h, expo, 0);
+            return *this;
+        }
+
+        // square the fraction
+        // the fraction is in u16.112 precision
+        // the result will be u32.224 precision and will be shifted-right by 112 bit
+        uint64_t res[4];  // 256 bit of result
+        uint64_t cross[2];
+
+        // multiply the low QWORD by itself
+        res[0] = mulx_u64(l, l, &res[1]);
+
+        // multiply the high QWORD by itself (overflow can happen)
+        res[2] = mulx_u64(h, h, &res[3]);
+
+        // the low * high cross product, which appears twice in the sum
+        cross[0] = mulx_u64(l, h, &cross[1]);
+
+        uint8_t carry = addcarryx_u64(0, res[1], cross[0], &res[1]);
+        res[3] += addcarryx_u64(carry, res[2], cross[1], &res[2]);
+
+        carry = addcarryx_u64(0, res[1], cross[0], &res[1]);
+        res[3] += addcarryx_u64(carry, res[2], cross[1], &res[2]);
+
+        // extract the bits from res[] keeping the precision the same as this object
+        constexpr int32_t index = 1;
+        constexpr int32_t lsb = (FRAC_BITS & 63) - 1;  // bit within the 64bit data pointed by res[index] minus 1 to improve rounding
+
+        const uint64_t sticky_bits = res[0] | (res[1] & FP128_MAX_VALUE_64(lsb));
+        l = shift_right128(res[index], res[index + 1], lsb);
+        h = shift_right128(res[index + 1], res[index + 2], lsb);
+        --expo;
+
+        norm_fraction_sticky(l, h, expo, sticky_bits != 0);
+        set_components(l, h, expo, 0);
         return *this;
     }
     /**
@@ -1160,21 +1291,25 @@ public:
     FP128_INLINE float128& operator/=(const float128& other)
     {
         // check trivial cases
-        if (other.is_zero()) {
-            *this = inf();
-            return *this;
-        } else if (is_zero()) {
+        // A NaN operand propagates, and so do the invalid operations zero / zero and inf / inf.
+        if (is_nan() || other.is_nan() || (is_zero() && other.is_zero()) || (is_inf() && other.is_inf())) {
+            *this = nan();
             return *this;
         }
-        if (is_special() || other.is_special()) {
-            if (is_nan() || other.is_nan())
-                *this = nan();
-            // return inf with the right sign
-            if (other.is_inf()) {
-                *this = other;
-                set_sign(get_sign() ^ other.get_sign());
-            }
 
+        // the sign of any of the results below is the combination of both operand signs
+        const uint32_t res_sign = get_sign() ^ other.get_sign();
+
+        // An infinite dividend or a zero divisor produce an infinity, a zero dividend or an
+        // infinite divisor produce a zero. The combinations where both apply, which are the
+        // two invalid operations, were already handled above.
+        if (is_inf() || other.is_zero()) {
+            *this = inf();
+            set_sign(res_sign);
+            return *this;
+        } else if (is_zero() || other.is_inf()) {
+            *this = 0;
+            set_sign(res_sign);
             return *this;
         }
 
@@ -1199,19 +1334,24 @@ public:
         const uint64_t nom[4] = {0, 0, l1, h1};
         const uint64_t denom[2] = {l2, h2};
 
-        if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+        uint64_t rem[2] {};
+        if (0 == div_32bit((uint32_t*)q, (uint32_t*)rem, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
             // 128 bit were added to the dividend, 112 were lost:
             // need to shift right 16 bit (128 - 112) but we don't go all the way so norm_fraction()
             //  can produce accurate rounding
-            l1 = shift_right128(q[0], q[1], 127 - FRAC_BITS);
-            h1 = shift_right128(q[1], q[2], 127 - FRAC_BITS);
+            constexpr int32_t dshift = 127 - FRAC_BITS;
+            // A non zero remainder means the quotient was cut short, and the bits shifted out of
+            // q[0] are lost as well. Both have to reach the rounding step as a sticky bit.
+            const uint64_t sticky_bits = rem[0] | rem[1] | (q[0] & FP128_MAX_VALUE_64(dshift));
+            l1 = shift_right128(q[0], q[1], dshift);
+            h1 = shift_right128(q[1], q[2], dshift);
             --expo;
+            norm_fraction_sticky(l1, h1, expo, sticky_bits != 0);
         } else {  // error
             *this = inf();
             return *this;
         }
 
-        norm_fraction(l1, h1, expo);
         set_components(l1, h1, expo, sign ^ other_sign);
         return *this;
     }
@@ -1228,11 +1368,13 @@ public:
     /**
      * @brief Convert to bool
      */
-    [[nodiscard]] FP128_INLINE operator bool() const noexcept { return high != 0 || low != 0; }
+    [[nodiscard]] FP128_INLINE operator bool() const noexcept { return !is_zero(); }
     /**
      * @brief Logical not (!). Opposite of operator bool.
+     * Uses is_zero() rather than testing the raw words: negative zero has its sign bit set and
+     * would otherwise be reported as a non zero value.
      */
-    [[nodiscard]] FP128_INLINE bool operator!() const noexcept { return high == 0 && low == 0; }
+    [[nodiscard]] FP128_INLINE bool operator!() const noexcept { return is_zero(); }
     /**
      * @brief Unary +. Returns a copy of the object.
      */
@@ -1505,6 +1647,150 @@ public:
      * @param h High part of the fraction
      * @param e Unbiased exponent, can be any value.
      */
+    /// @brief Word count of the fixed point expansion used to print the fraction digits.
+    static constexpr int32_t FIXED_WORDS = 4;
+
+    /**
+     * @brief Expands the fraction part of this value into an exact fixed point number.
+     *
+     * The result is the fraction scaled by 2^256 and held in four words, frac[0] being the least
+     * significant. Nothing is lost: a fraction bit of a binary128 has weight 2^(e-112) with e no
+     * smaller than -111 on the path that calls this, so scaling by 2^256 always lands on an
+     * integer, and the fraction is below one so the product stays under 2^256.
+     *
+     * Printing the digits from this expansion is exact. Deriving them by repeatedly multiplying a
+     * float128 by 100000 instead, as this used to, rounds once per group and the error compounds
+     * over the eight or so groups that a full precision value needs.
+     *
+     * @param frac Output, four words holding the fraction scaled by 2^256
+     * @return True when a fraction exists, false when the value is an integer
+     */
+    [[nodiscard]] FP128_INLINE bool fraction_to_fixed(uint64_t frac[FIXED_WORDS]) const noexcept
+    {
+        for (int32_t i = 0; i < FIXED_WORDS; ++i)
+            frac[i] = 0;
+
+        uint64_t l, h;
+        int32_t e;
+        uint32_t s;
+        get_components(l, h, e, s);
+
+        // no bits sit below the binary point
+        if (e >= FRAC_BITS)
+            return false;
+
+        // keep only the bits whose weight is below one. A value under one contributes all of them.
+        if (e >= 0) {
+            const int32_t keep = FRAC_BITS - e;  // 1 - 112
+            if (keep <= 64) {
+                l &= FP128_MAX_VALUE_64(keep);
+                h = 0;
+            } else {
+                h &= FP128_MAX_VALUE_64(keep - 64);
+            }
+        }
+
+        if (l == 0 && h == 0)
+            return false;
+
+        // bit i of the surviving fraction has weight 2^(e-112+i), which scaled by 2^256 lands on
+        // bit e+144+i. The shift is non negative for every exponent that reaches this function.
+        const int32_t shift = e + 2 * 64 + (FIXED_WORDS * 64 - 2 * 64) - FRAC_BITS;  // e + 144
+        FP128_ASSERT(shift >= 0 && shift < FIXED_WORDS * 64);
+        const int32_t word = shift >> 6;
+        const int32_t bit = shift & 63;
+
+        if (bit == 0) {
+            frac[word] = l;
+            if (word + 1 < FIXED_WORDS)
+                frac[word + 1] = h;
+        } else {
+            frac[word] = l << bit;
+            if (word + 1 < FIXED_WORDS)
+                frac[word + 1] = (l >> (64 - bit)) | (h << bit);
+            if (word + 2 < FIXED_WORDS)
+                frac[word + 2] = h >> (64 - bit);
+        }
+        return true;
+    }
+    /**
+     * @brief Multiplies the fixed point fraction by a small value and returns the part that
+     *        crossed the binary point.
+     * @param frac Fraction scaled by 2^256, updated in place to hold the new fraction
+     * @param mul Multiplier, small enough that the result stays below 2^64
+     * @return The integer part produced by the multiply, which is the next group of digits
+     */
+    [[nodiscard]] FP128_INLINE static uint64_t fixed_mul_extract(uint64_t frac[FIXED_WORDS], uint64_t mul) noexcept
+    {
+        uint64_t carry = 0;
+        for (int32_t i = 0; i < FIXED_WORDS; ++i) {
+            uint64_t hi;
+            const uint64_t lo = mulx_u64(frac[i], mul, &hi);
+            const uint8_t c = addcarryx_u64(0, lo, carry, &frac[i]);
+            carry = hi + c;
+        }
+        // the fraction was below one, so the overflow is below mul and fits in a single word
+        return carry;
+    }
+    /// @brief True when every word of the fixed point fraction is zero.
+    [[nodiscard]] FP128_INLINE static bool fixed_is_zero(const uint64_t frac[FIXED_WORDS]) noexcept
+    {
+        uint64_t acc = 0;
+        for (int32_t i = 0; i < FIXED_WORDS; ++i)
+            acc |= frac[i];
+        return acc == 0;
+    }
+    /**
+     * @brief Normalize the fraction to bit 112, rounding half to even.
+     *
+     * The multiply and the divide both produce more bits than the fraction can hold and then throw
+     * the surplus away. Rounding correctly needs two pieces of information about what was
+     * discarded: the highest dropped bit, which chooses the direction, and whether anything below
+     * it was set, which separates an exact tie from a remainder above half. The caller passes the
+     * latter for the words it dropped before calling; this function collects the rest.
+     *
+     * norm_fraction() below rounds from a three bit window instead, which cannot see the discarded
+     * low words at all, so its ties resolve arbitrarily.
+     *
+     * @param l Low part of the fraction
+     * @param h High part of the fraction
+     * @param e Unbiased exponent, adjusted to match the normalized fraction
+     * @param sticky True when the caller already dropped one or more set bits below l
+     */
+    FP128_INLINE void norm_fraction_sticky(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) const noexcept
+    {
+        if (l == 0 && h == 0) {
+            e = ZERO_EXP_BIASED;
+            return;
+        }
+        const int32_t msb = static_cast<int32_t>(log2(l, h));
+        const int32_t shift = msb - FRAC_BITS;
+        e += shift;
+        if (shift <= 0) {
+            shift_left128_inplace_safe(l, h, -shift);
+            return;
+        }
+
+        // the highest dropped bit decides the direction, everything under it is sticky
+        const uint64_t guard = (shift <= 64) ? FP128_GET_BIT(l, shift - 1) : FP128_GET_BIT(h, shift - 65);
+        bool below = sticky;
+        if (!below && shift >= 2) {
+            below = (shift <= 64) ? ((l << (65 - shift)) != 0)
+                                  : (l != 0 || (shift >= 66 && (h << (129 - shift)) != 0));
+        }
+
+        const uint64_t new_l = shift_right128(l, h, shift);
+        h = (shift < 64) ? (h >> shift) : 0;
+        l = new_l;
+
+        if (guard && (below || (l & 1))) {
+            if (++l == 0)
+                ++h;
+            // a carry out of the fraction moves to the next power of two
+            if ((h >> 48) != 1)
+                ++e;
+        }
+    }
     FP128_INLINE void norm_fraction(uint64_t& l, uint64_t& h, int32_t& e) const noexcept
     {
         // l and h are both zero
@@ -1701,7 +1987,7 @@ public:
             if (e & 1)
                 res *= b;
             e >>= 1;
-            b *= b;
+            b.square();
         }
         return res;
     }
@@ -1756,7 +2042,16 @@ public:
      * @param rhs Right hand side operand
      * @return True if this and other are equal.
      */
-    [[nodiscard]] friend FP128_INLINE bool operator==(const float128& lhs, const float128& rhs) noexcept { return lhs.high == rhs.high && lhs.low == rhs.low; }
+    [[nodiscard]] friend FP128_INLINE bool operator==(const float128& lhs, const float128& rhs) noexcept
+    {
+        // A NaN compares equal to nothing, not even to another NaN with the same bits.
+        if (lhs.is_nan() || rhs.is_nan())
+            return false;
+        // Positive and negative zero are numerically equal even though their bits differ.
+        if (lhs.is_zero() && rhs.is_zero())
+            return true;
+        return lhs.high == rhs.high && lhs.low == rhs.low;
+    }
     /// @overload
     template <typename T> [[nodiscard]] friend FP128_INLINE bool operator==(const float128& lhs, const T& rhs) noexcept { return lhs == float128(rhs); }
     /// @overload
@@ -1767,7 +2062,7 @@ public:
      * @param rhs Right hand side operand
      * @return True if not equal.
      */
-    [[nodiscard]] friend FP128_INLINE bool operator!=(const float128& lhs, const float128& rhs) noexcept { return lhs.high != rhs.high || lhs.low != rhs.low; }
+    [[nodiscard]] friend FP128_INLINE bool operator!=(const float128& lhs, const float128& rhs) noexcept { return !(lhs == rhs); }
     /// @overload
     template <typename T> [[nodiscard]] friend FP128_INLINE bool operator!=(const float128& lhs, const T& rhs) noexcept { return lhs != float128(rhs); }
     /// @overload
@@ -1780,6 +2075,14 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE bool operator<(const float128& lhs, const float128& rhs) noexcept
     {
+        // A NaN is unordered with everything, so every relational test involving one is false.
+        if (lhs.is_nan() || rhs.is_nan())
+            return false;
+        // The two zeros are numerically equal, so neither is smaller than the other. Without this
+        // the differing sign bits would make -0 compare smaller than +0.
+        if (lhs.is_zero() && rhs.is_zero())
+            return false;
+
         auto rhs_sign = rhs.get_sign();
         auto lhs_sign = lhs.get_sign();
 
@@ -1803,11 +2106,18 @@ public:
      * @param rhs Right hand side operand
      * @return True when this object is smaller or equal.
      */
-    [[nodiscard]] friend FP128_INLINE bool operator<=(const float128& lhs, const float128& rhs) noexcept { return !(lhs > rhs); }
+    [[nodiscard]] friend FP128_INLINE bool operator<=(const float128& lhs, const float128& rhs) noexcept
+    {
+        // Not simply !(lhs > rhs): a NaN makes every relational test false, so negating the
+        // opposite test would wrongly report that a NaN is less than or equal to everything.
+        if (lhs.is_nan() || rhs.is_nan())
+            return false;
+        return !(lhs > rhs);
+    }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE bool operator<=(const float128& lhs, const T& rhs) noexcept { return !(lhs > float128(rhs)); }
+    template <typename T> [[nodiscard]] friend FP128_INLINE bool operator<=(const float128& lhs, const T& rhs) noexcept { return lhs <= float128(rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE bool operator<=(const T& lhs, const float128& rhs) noexcept { return !(float128(lhs) > rhs); }
+    template <typename T> [[nodiscard]] friend FP128_INLINE bool operator<=(const T& lhs, const float128& rhs) noexcept { return float128(lhs) <= rhs; }
     /**
      * @brief Return true this object is larger than the other
      * @param lhs left hand side operand
@@ -1816,6 +2126,13 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE bool operator>(const float128& lhs, const float128& rhs) noexcept
     {
+        // A NaN is unordered with everything, so every relational test involving one is false.
+        if (lhs.is_nan() || rhs.is_nan())
+            return false;
+        // the two zeros are numerically equal, so neither is larger than the other
+        if (lhs.is_zero() && rhs.is_zero())
+            return false;
+
         auto rhs_sign = rhs.get_sign();
         auto lhs_sign = lhs.get_sign();
 
@@ -1839,11 +2156,17 @@ public:
      * @param rhs Right hand side operand
      * @return True when this objext is larger or equal.
      */
-    [[nodiscard]] friend FP128_INLINE bool operator>=(const float128& lhs, const float128& rhs) noexcept { return !(lhs < rhs); }
+    [[nodiscard]] friend FP128_INLINE bool operator>=(const float128& lhs, const float128& rhs) noexcept
+    {
+        // see the note on operator<= about why this is not simply !(lhs < rhs)
+        if (lhs.is_nan() || rhs.is_nan())
+            return false;
+        return !(lhs < rhs);
+    }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE bool operator>=(const float128& lhs, const T& rhs) noexcept { return !(lhs < float128(rhs)); }
+    template <typename T> [[nodiscard]] friend FP128_INLINE bool operator>=(const float128& lhs, const T& rhs) noexcept { return lhs >= float128(rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE bool operator>=(const T& lhs, const float128& rhs) noexcept { return !(float128(lhs) < rhs); }
+    template <typename T> [[nodiscard]] friend FP128_INLINE bool operator>=(const T& lhs, const float128& rhs) noexcept { return float128(lhs) >= rhs; }
 
     /**
      * @brief Return the NaN constant
@@ -2000,12 +2323,22 @@ public:
      */
     [[nodiscard]] friend float128 fmod(const float128& x, const float128& y) noexcept
     {
+        // a NaN operand propagates
+        if (x.is_nan() || y.is_nan())
+            return nan();
+
         // trivial case, x is zero
         if (x.is_zero())
             return x;
 
-        if (y.is_zero())
-            return copysign(inf(), y);
+        // fmod(x, 0) is the invalid operation and produces a NaN, matching the CRT.
+        // An infinite dividend is invalid for the same reason.
+        if (y.is_zero() || x.is_inf())
+            return nan();
+
+        // an infinite divisor leaves the dividend untouched
+        if (y.is_inf())
+            return x;
 
         // do the division in with positive numbers
         float128 x_div_y = x / y;
@@ -2064,7 +2397,16 @@ public:
      * @param y Second value
      * @return sqrt(x^2 + y^2).
      */
-    [[nodiscard]] friend FP128_INLINE float128 hypot(const float128& x, const float128& y) noexcept { return sqrt(x * x + y * y); }
+    [[nodiscard]] friend FP128_INLINE float128 hypot(const float128& x, const float128& y) noexcept { return sqrt(sqr(x) + sqr(y)); }
+    /**
+     * @brief Calculates the square of a value. i.e. x^2
+     *
+     * Faster than x * x and identical to it, see float128::square().
+     *
+     * @param x Value to square
+     * @return x^2, which is never negative.
+     */
+    [[nodiscard]] friend FP128_INLINE float128 sqr(float128 x) noexcept { return x.square(); }
     /**
      * @brief Calculates the square root using Newton's method.
      * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw
@@ -2358,7 +2700,7 @@ public:
                 if (ix & 1)
                     exp_ix *= b;
                 ix >>= 1;
-                b *= b;
+                b.square();
             }
         } else {
             exp_ix = 1;
@@ -2445,7 +2787,7 @@ public:
                 if (expo & 1)
                     res *= b;
                 expo >>= 1;
-                b *= b;
+                b.square();
             }
         }
 
@@ -2519,8 +2861,7 @@ public:
         float128 b = float128::half();  // 0.5
         float128 fy;                    // fraction part of the result
         for (size_t i = 0; i < float128::FRAC_BITS; ++i) {
-            // x = x * x
-            x *= x;
+            x.square();
             // if x is greater than 2, we have another bit in the result
             if (x >= two) {
                 // divide x by 2 using shifts

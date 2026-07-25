@@ -7,8 +7,10 @@
 *.aps
 html
 gtest/build
+gtest/build_clang
 gtest/external
 *.bak
 bin/
 build/
 
+/Testing

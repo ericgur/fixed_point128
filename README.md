@@ -29,16 +29,18 @@
 ```
 fixed_point128_shared.h
     |
-    +--- int128_t.h
-    |
-    +--- uint128_t.h
+    +--- int128_shared.h
     |        |
-    |        +--- float128.h
+    |        +--- int128_t.h
+    |        |
+    |        +--- uint128_t.h
+    |                 |
+    |                 +--- float128.h
     |
     +--- fixed_point128.h
 ```
 
-All headers depend on `fixed_point128_shared.h`. The `float128` class additionally depends on `uint128_t.h`. Do not include `fixed_point128_shared.h` directly; it is pulled in automatically by the other headers.
+All headers depend on `fixed_point128_shared.h`. The `float128` class additionally depends on `uint128_t.h`. Do not include `fixed_point128_shared.h` or `int128_shared.h` directly; they are pulled in automatically by the other headers.
 
 ---
 
