@@ -14,3 +14,8 @@ bin/
 build/
 
 /Testing
+
+# VS claude code extensions
+.claude/settings*.json
+.claude/*.ps1
+.mcp.json
