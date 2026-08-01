@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Debug Clang" />
+    <BuildType Name="Release" />
+    <BuildType Name="Release Clang" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="fixed_point128.vcxproj" Id="16ba4eff-3569-418b-82bf-f2b5deb3d612">
+    <BuildType Solution="Debug Clang|*" Project="Debug Clang x64" />
+    <BuildType Solution="Release Clang|*" Project="Release Clang x64" />
+  </Project>
+</Solution>

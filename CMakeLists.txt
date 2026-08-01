@@ -2,7 +2,7 @@
 # @file CMakeLists.txt
 # @brief Build script for the fixed_point128 benchmark executable (GCC/Clang).
 #
-# MSVC builds are covered by fixed_point128.sln.
+# MSVC builds are covered by fixed_point128.slnx.
 #
 #   cmake -S . -B build
 #   cmake --build build

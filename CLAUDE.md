@@ -7,6 +7,7 @@
 - C++20 standard, C17 for C files
 - OpenMP enabled for parallel processing
 - AVX2 instruction set on Windows (MSVC)
+- Code must compile without warnings on MSVC and Clang.
 
 # Code Style Rules
 - C++20 standard, C17 for C files
@@ -24,3 +25,5 @@
 - Ensure that the final `return` statement of a method is on its own line.
 - All functions that return a value that is not an error code or boolean success value must be set as [[nodiscard]].
 - Indentation is 4 spaces. No tabs.
+- All source files must be UTF-8 encoded. Convert if they don't meet this requirement.
+- Line ending must be LF (Unix style). Convert if they don't meet this requirement.
