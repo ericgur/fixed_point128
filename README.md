@@ -75,9 +75,19 @@ Requires CMake 3.21 or newer (3.25 for the presets below), and Ninja for the `cl
 Configure once per toolchain, then build and test:
 
 ```sh
-cmake --preset msvc                 # or: clang-cl, clang, gcc
-cmake --build --preset msvc-debug   # ...-debug or ...-release
-ctest --preset msvc-debug -j
+cmake --preset msvc                   # configure; or: clang-cl, clang, gcc
+cmake --build --preset msvc-release   # build; or: msvc-debug
+ctest --preset msvc-release -j        # test;  or: msvc-debug
+```
+
+Every configure preset uses a multi-config generator, so the configure step is configuration agnostic:
+there is no `msvc-debug` *configure* preset and `cmake --preset msvc-debug` is an error. Debug versus
+Release is selected at build and test time, which is why `-debug` and `-release` appear only on
+`cmake --build --preset` and `ctest --preset`. Building the directory directly rather than through a
+build preset needs an explicit `--config`, otherwise CMake defaults to Debug:
+
+```sh
+cmake --build out/build/msvc --config Release
 ```
 
 | Preset | Toolchain | Platform |

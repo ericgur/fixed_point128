@@ -9,9 +9,18 @@
 # Supported toolchains: MSVC, clang-cl, Clang and GCC, on Windows, macOS and Linux. Use the presets in
 # CMakePresets.json rather than invoking cmake by hand:
 #
-#     cmake --preset msvc            # or clang-cl / clang / gcc
-#     cmake --build --preset msvc-debug
-#     ctest --preset msvc-debug
+#     cmake --preset msvc                  # configure; or clang-cl / clang / gcc
+#     cmake --build --preset msvc-release  # build; or msvc-debug
+#     ctest --preset msvc-release          # test;  or msvc-debug
+#
+# Every configure preset uses a multi-config generator (Visual Studio, or Ninja Multi-Config), so the
+# configure step is configuration agnostic - there is no `msvc-debug` *configure* preset, and asking for
+# one is an error. Debug versus Release is chosen at build and test time, which is why `-debug` and
+# `-release` only ever appear on `cmake --build --preset` and `ctest --preset`.
+#
+# For the same reason, building the directory directly instead of through a build preset needs an
+# explicit configuration: bare `cmake --build out/build/msvc` silently builds Debug, the first entry in
+# CMAKE_CONFIGURATION_TYPES. Pass `--config Release` if you go that route.
 #
 # The unit tests need the GoogleTest submodule:
 #

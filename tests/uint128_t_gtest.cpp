@@ -1,9 +1,13 @@
 // remove warnings from gtest itself
+#if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 26439)
 #pragma warning(disable : 26495)
+#endif
 #include <gtest/gtest.h>
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#endif
 #include <ostream>
 #include <ctime>
 #include <cfloat>
@@ -185,10 +189,9 @@ TEST(uint128_t, AddDifferentSign)
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint64_t value1 = get_uint64_random();
-#pragma warning(push)
-#pragma warning(disable : 4146)
-        uint64_t value2 = -get_uint64_random();
-#pragma warning(pop)
+        // two's complement negation written as a subtraction from zero: same bit pattern as unary
+        // minus, without MSVC's C4146 complaint about negating an unsigned type
+        uint64_t value2 = 0ull - get_uint64_random();
         uint64_t res = value1 + value2;
         uint128_t f1 = value1;
         uint128_t f2 = value2;
@@ -291,10 +294,9 @@ TEST(uint128_t, SubtractDifferentSign)
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint64_t value1 = get_uint64_random();
-#pragma warning(push)
-#pragma warning(disable : 4146)
-        uint64_t value2 = -get_uint64_random();
-#pragma warning(pop)
+        // two's complement negation written as a subtraction from zero: same bit pattern as unary
+        // minus, without MSVC's C4146 complaint about negating an unsigned type
+        uint64_t value2 = 0ull - get_uint64_random();
         uint64_t res = value1 - value2;
         uint128_t f1 = value1;
         uint128_t f2 = value2;

@@ -1,9 +1,13 @@
 // remove warnings from gtest itself
+#if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 26439)
 #pragma warning(disable : 26495)
+#endif
 #include <gtest/gtest.h>
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#endif
 #include <ostream>
 #include <ctime>
 #include "gtest_shared.h"

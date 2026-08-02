@@ -25,6 +25,10 @@ target_link_libraries(fixed_point128_tests
 fp128_set_warnings(fixed_point128_tests)
 fp128_link_clang_builtins(fixed_point128_tests)
 
+# gtest_discover_tests below runs this executable at build time, so a runtime the loader cannot find
+# would break the build itself rather than merely the test run.
+fp128_link_static_runtime(fixed_point128_tests)
+
 ##
 # Two MSVC /W4 diagnostics fire on deliberate constructs in the library headers, and only from this
 # target: the benchmark instantiates neither code path. Both are suppressed here rather than on the

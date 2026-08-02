@@ -14,6 +14,7 @@ fp128_set_warnings(bench)
 fp128_set_arch_flags(bench)
 fp128_enable_declspec(bench)
 fp128_link_clang_builtins(bench)
+fp128_link_static_runtime(bench)
 
 set_target_properties(bench PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
