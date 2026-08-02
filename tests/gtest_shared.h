@@ -66,10 +66,10 @@ FP128_FORCE_INLINE int32_t get_random_sign()
 {
     Double res;
     int expo = (get_uint32_random() % (max_exponent - min_exponent)) + min_exponent;
-    res.e = (uint64_t)expo + 1023;
-    res.f = get_uint64_random();
-    res.s = get_random_sign() == 1;
-    return res.val;
+    res.set_e((uint64_t)expo + 1023);
+    res.set_f(get_uint64_random());
+    res.set_s(get_random_sign() == 1);
+    return res.val();
 }
 
 // returns a positive random number
@@ -204,6 +204,24 @@ template <typename T> T static ReferenceMultiply(const T& a, const T& b)
 [[maybe_unused]] uint64_t static SignExtension(int64_t x)
 {
     return (x < 0) ? UINT64_MAX : 0ull;
+}
+
+// Launders a value through volatile storage. The optimizer cannot see the value any more, so an
+// expression built from the result has to be computed at runtime instead of being folded.
+//
+// This is what lets the constexpr tests check a constant evaluated result against the runtime one.
+// The two do not run the same code: the bit counting and extended arithmetic intrinsics are not
+// constant expressions, so fixed_point128_shared.h substitutes a portable implementation of each
+// one while the compiler is evaluating. Only a genuinely runtime computation exercises the
+// intrinsics and shows that the substitutes agree with the hardware.
+//
+// @tparam T Any scalar type
+// @param x Value to hide from the optimizer
+// @return x, unchanged
+template <typename T> [[nodiscard]] T static opaque(T x)
+{
+    volatile T v = x;
+    return v;
 }
 
 // Absolute tolerance for comparing a fixed_point128<I> division result against a double reference.

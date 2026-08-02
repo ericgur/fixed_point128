@@ -1840,3 +1840,208 @@ TEST(fixed_point128, ConstructorFromStringEdgeCases)
     const char high_byte[] = {'1', '2', static_cast<char>(0xB5), 0};
     EXPECT_TRUE(fp(high_byte) == fp(12));
 }
+
+/**********************************************************************
+ * Compile time (constexpr) evaluation
+ *
+ * Each test below pairs static_asserts, which fail the build the moment one of these operations
+ * stops being usable in a constant expression, with a runtime check of the same expression.
+ *
+ * The runtime half earns its place. A constant evaluated call does not run the same code a runtime
+ * call does: the bit counting and extended arithmetic intrinsics (mulx_u64, addcarryx_u64,
+ * lzcnt64) are not constant expressions, so fixed_point128_shared.h substitutes a portable
+ * implementation of each one while the compiler is evaluating. Only comparing the two results
+ * shows that the substitutes agree with the hardware. opaque(), declared in gtest_shared.h, is
+ * what keeps the runtime half from being constant folded back into the compile time one.
+ ***********************************************************************/
+TEST(fixed_point128, ConstexprConstructionAndConversion)
+{
+    typedef fixed_point128<32> fp;
+
+    constexpr fp zero;
+    constexpr fp from_u64(static_cast<uint64_t>(7));
+    constexpr fp from_i64(static_cast<int64_t>(-7));
+    constexpr fp from_u32(static_cast<uint32_t>(7));
+    constexpr fp from_i32(static_cast<int32_t>(-7));
+    constexpr fp from_bits(1, 0, 0);  // the low/high/sign constructor
+    constexpr fp copied(from_i32);
+    constexpr fp assigned = [] { fp a; a = fp(5); return a; }();
+
+    static_assert(zero.is_zero());
+    static_assert(static_cast<uint64_t>(from_u64) == 7ull);
+    static_assert(static_cast<int64_t>(from_i64) == -7ll);
+    static_assert(static_cast<uint32_t>(from_u32) == 7u);
+    static_assert(static_cast<int32_t>(from_i32) == -7);
+    static_assert(from_bits == fp::epsilon());
+    static_assert(copied == from_i32);
+    static_assert(static_cast<int32_t>(assigned) == 5);
+
+    // the cross template conversions, in both directions
+    constexpr fixed_point128<16> fewer_int_bits(from_u32);  // I < I2, shifts left
+    constexpr fixed_point128<48> more_int_bits(from_u32);   // I > I2, shifts right
+    static_assert(static_cast<int32_t>(fewer_int_bits) == 7);
+    static_assert(static_cast<int32_t>(more_int_bits) == 7);
+
+    // the exact constants, which are compile time values rather than lazily initialized statics
+    static_assert(static_cast<int32_t>(fp::one()) == 1);
+    static_assert(fp::half() + fp::half() == fp::one());
+    static_assert(fp::epsilon() > fp(0));
+    static_assert(fixed_point128<64>::half() < fixed_point128<64>::one());  // 0.5 lands in the low QWORD
+    static_assert(fixed_point128<1>::half() < fixed_point128<1>::one());
+
+    EXPECT_TRUE(fp(opaque(-7)) == from_i32);
+    EXPECT_TRUE(fixed_point128<16>(fp(opaque(7))) == fewer_int_bits);
+    EXPECT_TRUE(fixed_point128<48>(fp(opaque(7))) == more_int_bits);
+}
+TEST(fixed_point128, ConstexprShiftsBitwiseAndUnary)
+{
+    typedef fixed_point128<32> fp;
+
+    static_assert(static_cast<int32_t>(fp(8) >> 3) == 1);
+    static_assert(static_cast<int32_t>(fp(1) << 3) == 8);
+    static_assert(static_cast<int32_t>(fp(1) << 70) == 0);  // overflow is silent, the value wraps
+    constexpr fp shifted = [] { fp a(16); a >>= 2; a <<= 1; return a; }();
+    static_assert(static_cast<int32_t>(shifted) == 8);
+
+    static_assert(static_cast<int32_t>(fp(12) & fp(10)) == 8);
+    static_assert(static_cast<int32_t>(fp(12) | fp(3)) == 15);
+    static_assert(static_cast<int32_t>(fp(12) ^ fp(10)) == 6);
+    static_assert(!(~fp(0)).is_zero());
+
+    static_assert((-fp(5)).is_negative());
+    static_assert((+fp(5)).is_positive());
+    static_assert((-fp(0)).is_positive());  // negating zero must not produce a negative zero
+    static_assert(!fp(0));
+    static_assert(static_cast<bool>(fp(1)));
+
+    EXPECT_TRUE((fp(opaque(16)) >> 2 << 1) == shifted);
+    EXPECT_TRUE((fp(opaque(12)) & fp(opaque(10))) == fp(8));
+    EXPECT_TRUE(-fp(opaque(0)) == fp(0));
+}
+TEST(fixed_point128, ConstexprComparisonsAndQueries)
+{
+    typedef fixed_point128<32> fp;
+
+    static_assert(fp(1) < fp(2));
+    static_assert(fp(2) > fp(1));
+    static_assert(fp(-2) < fp(-1));
+    static_assert(fp(1) <= 1 && fp(1) >= 1);
+    static_assert(fp(1) == 1 && fp(1) != 2);
+    static_assert(1 == fp(1) && 2 > fp(1));  // the overloads taking the fixed_point128 on the right
+
+    static_assert(fp(3).is_int());
+    static_assert(!(fp(1) >> 1).is_int());
+    static_assert(fixed_point128<64>(3).is_int());  // the I == 64 branch, where there are no fraction bits in high
+    static_assert(fp(0).is_zero());
+    static_assert(fp(-1).is_negative() && fp(1).is_positive());
+    static_assert(fp(1).get_bit(fp::F) == 1);  // 1.0 has its single set bit at the radix point
+    static_assert(fp(4).get_exponent() == 2);
+    static_assert((fp::one() >> 1).get_exponent() == -1);
+
+    EXPECT_TRUE(fp(opaque(4)).get_exponent() == 2);
+    EXPECT_TRUE(fp(opaque(3)).is_int());
+    EXPECT_TRUE(fp(opaque(1)) < fp(opaque(2)));
+}
+TEST(fixed_point128, ConstexprArithmetic)
+{
+    typedef fixed_point128<32> fp;
+
+    static_assert(static_cast<int32_t>(fp(3) + fp(4)) == 7);
+    static_assert(static_cast<int32_t>(fp(3) - fp(4)) == -1);
+    static_assert(static_cast<int32_t>(fp(-3) + fp(-4)) == -7);
+    static_assert((fp(3) - fp(3)).is_zero());
+    static_assert((fp(3) - fp(3)).is_positive());         // cancelling to zero must drop the sign
+    static_assert(static_cast<int32_t>(fp(3) + 4) == 7);  // the generic right hand side overload
+
+    static_assert(static_cast<int32_t>(fp(6) * fp(7)) == 42);
+    static_assert(static_cast<int32_t>(fp(-6) * fp(7)) == -42);
+    static_assert(fp::half() * fp(8) == fp(4));
+    static_assert(static_cast<int32_t>(fp(6) * static_cast<uint64_t>(7)) == 42);  // the uint64_t specialization
+    static_assert(static_cast<int32_t>(fp(-6) * -7) == 42);
+    static_assert(static_cast<int32_t>(fixed_point128<64>(6) * fixed_point128<64>(7)) == 42);  // the F == 64 branch
+    static_assert(fixed_point128<1>::half() * fixed_point128<1>::half() == fixed_point128<1>::half() >> 1);
+
+    // sqr is documented to be bit identical to x * x
+    static_assert(sqr(fp::half()) == fp::half() * fp::half());
+    static_assert(static_cast<int32_t>(sqr(fp(-9))) == 81);
+    static_assert(sqr(fp(-9)).is_positive());
+
+    constexpr fp stepped = [] { fp a(5); ++a; a++; --a; return a; }();
+    static_assert(static_cast<int32_t>(stepped) == 6);
+    constexpr fp accumulated = [] { fp a; for (int32_t i = 1; i <= 10; ++i) a += fp(i); return a; }();
+    static_assert(static_cast<int32_t>(accumulated) == 55);
+
+    EXPECT_TRUE(fp(opaque(3)) + fp(opaque(4)) == fp(7));
+    EXPECT_TRUE(fp(opaque(3)) - fp(opaque(4)) == fp(-1));
+    EXPECT_TRUE(fp(opaque(6)) * fp(opaque(7)) == fp(42));
+    EXPECT_TRUE(sqr(fp(opaque(-9))) == fp(81));
+    EXPECT_TRUE(fixed_point128<64>(opaque(6)) * fixed_point128<64>(opaque(7)) == fixed_point128<64>(42));
+}
+TEST(fixed_point128, ConstexprMathFunctions)
+{
+    typedef fixed_point128<32> fp;
+    constexpr fp two_and_a_half = fp(5) >> 1;
+
+    static_assert(fabs(fp(-5)) == fp(5));
+    static_assert(floor(two_and_a_half) == fp(2));
+    static_assert(floor(-two_and_a_half) == fp(-3));
+    static_assert(ceil(two_and_a_half) == fp(3));
+    static_assert(ceil(-two_and_a_half) == fp(-2));
+    static_assert(trunc(-two_and_a_half) == fp(-2));
+    static_assert(round(fp::half()) == fp(1));  // the halfway value rounds away from zero
+    static_assert(round(-fp::half()) == fp(-1));
+    static_assert(round(fp::half() >> 1).is_positive());  // -0.25 rounds to +0, never to -0
+    static_assert(copysign(fp(5), fp(-1)).is_negative());
+    static_assert(fmin(fp(1), fp(2)) == fp(1));
+    static_assert(fmax(fp(1), fp(2)) == fp(2));
+    static_assert(fdim(fp(5), fp(3)) == fp(2));
+    static_assert(fdim(fp(3), fp(5)) == fp(0));
+    static_assert(ilogb(fp(8)) == 3);
+    static_assert(lzcnt128(fp::one()) == 31);  // 1.0 sets bit F, leaving the I-1 integer bits above it clear
+
+    // modf splits into an integer and a fraction part, both carrying the sign of the input
+    constexpr fp modf_int = [] { fp ip; (void)modf(-(fp(5) >> 1), &ip); return ip; }();
+    constexpr fp modf_frac = [] { fp ip; return modf(-(fp(5) >> 1), &ip); }();
+    static_assert(modf_int == fp(-2));
+    static_assert(modf_frac == -fp::half());
+
+    static_assert(log2(fp(8)) == fp(3));  // an exact power of two takes the shortcut
+    static_assert(logb(fp(9)) == fp(3));
+    constexpr fp log2_of_10 = log2(fp(10));  // the full fraction loop, one squaring per fraction bit
+    static_assert(log2_of_10 > fp(3) && log2_of_10 < fp(4));
+
+    EXPECT_TRUE(floor(-(fp(opaque(5)) >> 1)) == fp(-3));
+    EXPECT_TRUE(round(-fp::half() * fp(opaque(1))) == fp(-1));
+    EXPECT_TRUE(ilogb(fp(opaque(8))) == 3);
+    // the loop above runs ~100 squarings, every one of them through mulx_u64
+    EXPECT_TRUE(log2(fp(opaque(10))) == log2_of_10);
+}
+
+// The double and float conversions used to be the one thing that could not happen at compile time:
+// they read the inactive member of a union, which constant evaluation rejects. Now that Double and
+// Float convert with std::bit_cast, a floating point literal crosses the boundary either way.
+TEST(fixed_point128, ConstexprFloatingPointConversion)
+{
+    typedef fixed_point128<32> fp;
+
+    constexpr fp from_double = 3.25;
+    constexpr fp negative = -2.5;
+    static_assert(static_cast<double>(from_double) == 3.25);
+    static_assert(static_cast<float>(from_double) == 3.25f);
+    static_assert(static_cast<double>(negative) == -2.5);
+    static_assert(static_cast<long double>(from_double) == 3.25L);
+    static_assert(fp(0.5) == fp::half());
+    static_assert(fp(1.0) == fp::one());
+    static_assert(fp(0.0).is_zero());
+    static_assert(fp(-0.0).is_zero() && fp(-0.0).is_positive());  // no negative zero
+    static_assert(from_double + negative == fp(0.75));
+    static_assert(static_cast<int32_t>(fp(3.99)) == 3);  // truncates towards zero
+
+    // a value that needs the full fraction, not just a few bits
+    constexpr fp tenth = 0.1;
+    static_assert(tenth > fp(0.09) && tenth < fp(0.11));
+
+    EXPECT_TRUE(fp(static_cast<double>(opaque(13)) / 4.0) == fp(3.25));
+    EXPECT_DOUBLE_EQ(static_cast<double>(fp(opaque(13)) / 4), 3.25);
+    EXPECT_TRUE(fp(0.1) == tenth);  // the runtime conversion agrees with the constant evaluated one
+}

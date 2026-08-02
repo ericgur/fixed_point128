@@ -31,12 +31,13 @@
  * Provides compiler-specific intrinsic wrappers (MSVC and GCC/Clang), bit
  * manipulation utilities (128-bit shifts, leading zero counts, population counts),
  * multi-word division algorithms (32-bit and 64-bit word-based, derived from
- * Hacker's Delight), IEEE 754 bit-layout unions, and build configuration macros.
+ * Hacker's Delight), IEEE 754 bit-layout views, and build configuration macros.
  *
  * This header is consumed by fixed_point128.h and should not be included directly.
  */
 
 #include <array>
+#include <bit>  // countl_zero, popcount - the constant evaluated stand-ins for the lzcnt/popcnt intrinsics
 #include <cstdint>
 #include <cassert>
 #include <cctype>   // tolower, isspace
@@ -129,20 +130,172 @@ static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;  ///< Use recipr
 #include <intrin.h>
 #include <immintrin.h>
 
-#define lzcnt32 __lzcnt
-#define lzcnt64 __lzcnt64
 #define udiv64 _udiv64
 #define udiv128 _udiv128
-#define mulx_u64 _mulx_u64
-#define addcarryx_u64 _addcarryx_u64
-#define popcnt32 __popcnt
-#define popcnt64 __popcnt64
 #define alloca _alloca
 
 // The 128 bit funnel shifts, which map to a single SHRD/SHLD instruction here.
 // See the note on the naming in the Clang section below.
-#define FP128_SHIFTRIGHT128 __shiftright128
-#define FP128_SHIFTLEFT128 __shiftleft128
+#define FP128_SHIFTRIGHT128 fp128_shiftright128
+#define FP128_SHIFTLEFT128 fp128_shiftleft128
+
+//
+// The bit counting and extended arithmetic intrinsics are wrapped in constexpr functions rather
+// than aliased with a macro, so that the operations built on them (fixed_point128's addition,
+// multiplication and get_exponent among them) can be evaluated at compile time.
+//
+// An intrinsic is never a constant expression, so each wrapper serves a constant evaluated call
+// from a portable implementation of the same operation and leaves every other call to the
+// intrinsic. std::is_constant_evaluated() is folded away by the optimizer, so the runtime path is
+// the bare intrinsic it was before, and it is the only path a runtime call can take: the portable
+// code never reaches code generation.
+//
+
+/**
+ * @brief Right funnel shift of a 128 bit value held in two QWORDs.
+ *
+ * Wraps __shiftright128, a single SHRD instruction. The shift count is taken modulo 64 and a
+ * count of zero returns the low QWORD unchanged, which is what the instruction does and what the
+ * constant evaluated path below reproduces.
+ *
+ * @param l Low QWORD.
+ * @param h High QWORD.
+ * @param shift Bits to shift.
+ * @return Lower 64 bits of the result.
+ */
+FP128_FORCE_INLINE constexpr uint64_t fp128_shiftright128(uint64_t l, uint64_t h, unsigned char shift) noexcept
+{
+    if (std::is_constant_evaluated()) {
+        const unsigned char s = shift & 63;
+        // shifting a 64 bit value by 64 is undefined in C++, which is what the zero case would reach
+        return (s == 0) ? l : (l >> s) | (h << (64 - s));
+    }
+    return __shiftright128(l, h, shift);
+}
+
+/**
+ * @brief Left funnel shift of a 128 bit value held in two QWORDs.
+ *
+ * Wraps __shiftleft128, a single SHLD instruction. The shift count is taken modulo 64 and a count
+ * of zero returns the high QWORD unchanged.
+ *
+ * @param l Low QWORD.
+ * @param h High QWORD.
+ * @param shift Bits to shift.
+ * @return Upper 64 bits of the result.
+ */
+FP128_FORCE_INLINE constexpr uint64_t fp128_shiftleft128(uint64_t l, uint64_t h, unsigned char shift) noexcept
+{
+    if (std::is_constant_evaluated()) {
+        const unsigned char s = shift & 63;
+        return (s == 0) ? h : (h << s) | (l >> (64 - s));
+    }
+    return __shiftleft128(l, h, shift);
+}
+
+/**
+ * @brief Count leading zeros in a 32-bit value.
+ * @param x Value to inspect.
+ * @return Number of leading zero bits, 32 for a zero operand.
+ */
+FP128_FORCE_INLINE constexpr uint32_t lzcnt32(uint32_t x) noexcept
+{
+    if (std::is_constant_evaluated()) {
+        return static_cast<uint32_t>(std::countl_zero(x));
+    }
+    return __lzcnt(x);
+}
+
+/**
+ * @brief Count leading zeros in a 64-bit value.
+ * @param x Value to inspect.
+ * @return Number of leading zero bits, 64 for a zero operand.
+ */
+FP128_FORCE_INLINE constexpr uint64_t lzcnt64(uint64_t x) noexcept
+{
+    if (std::is_constant_evaluated()) {
+        return static_cast<uint64_t>(std::countl_zero(x));
+    }
+    return __lzcnt64(x);
+}
+
+/**
+ * @brief Count set bits in a 32-bit value.
+ * @param x Value to inspect.
+ * @return Number of 1 bits in x.
+ */
+FP128_FORCE_INLINE constexpr uint32_t popcnt32(uint32_t x) noexcept
+{
+    if (std::is_constant_evaluated()) {
+        return static_cast<uint32_t>(std::popcount(x));
+    }
+    return __popcnt(x);
+}
+
+/**
+ * @brief Count set bits in a 64-bit value.
+ * @param x Value to inspect.
+ * @return Number of 1 bits in x.
+ */
+FP128_FORCE_INLINE constexpr uint64_t popcnt64(uint64_t x) noexcept
+{
+    if (std::is_constant_evaluated()) {
+        return static_cast<uint64_t>(std::popcount(x));
+    }
+    return __popcnt64(x);
+}
+
+/**
+ * @brief 64x64 -> 128-bit unsigned multiply, wrapping the MULX instruction.
+ *
+ * MSVC has no 128 bit integer type to fall back on, so the constant evaluated path assembles the
+ * product from four 32x32 -> 64 bit partial products, the schoolbook algorithm on 32 bit limbs.
+ *
+ * @param a First operand.
+ * @param b Second operand.
+ * @param hi Pointer to receive the upper 64 bits of the product.
+ * @return Lower 64 bits of the product.
+ */
+FP128_FORCE_INLINE constexpr uint64_t mulx_u64(uint64_t a, uint64_t b, uint64_t* hi) noexcept
+{
+    FP128_ASSERT(hi != nullptr);  // Caller must provide a valid pointer for the high part.
+    if (std::is_constant_evaluated()) {
+        const uint64_t a_lo = a & UINT32_MAX, a_hi = a >> 32;
+        const uint64_t b_lo = b & UINT32_MAX, b_hi = b >> 32;
+        const uint64_t p_ll = a_lo * b_lo;
+        const uint64_t p_lh = a_lo * b_hi;
+        const uint64_t p_hl = a_hi * b_lo;
+        const uint64_t p_hh = a_hi * b_hi;
+        // The middle column holds the carry out of the low 32 bits plus the low halves of both
+        // cross products. Three values below 2^32 cannot overflow a 64 bit accumulator.
+        const uint64_t mid = (p_ll >> 32) + (p_lh & UINT32_MAX) + (p_hl & UINT32_MAX);
+        *hi = p_hh + (p_lh >> 32) + (p_hl >> 32) + (mid >> 32);
+        return (mid << 32) | (p_ll & UINT32_MAX);
+    }
+    return _mulx_u64(a, b, hi);
+}
+
+/**
+ * @brief 64-bit add with carry, wrapping the ADCX instruction.
+ * @param c Input carry (0 or 1).
+ * @param a First operand.
+ * @param b Second operand.
+ * @param out Pointer to receive the 64-bit sum.
+ * @return Output carry (0 or 1).
+ */
+FP128_FORCE_INLINE constexpr unsigned char addcarryx_u64(unsigned char c, uint64_t a, uint64_t b, uint64_t* out) noexcept
+{
+    FP128_ASSERT(out != nullptr);  // Caller must provide a valid pointer for the result.
+    if (std::is_constant_evaluated()) {
+        // Unsigned addition wraps, so a sum that came out smaller than an operand is exactly the
+        // carry out. The total is at most 2^65-1, so at most one of the two additions can carry.
+        const uint64_t sum = a + b;
+        const uint64_t res = sum + c;
+        *out = res;
+        return static_cast<unsigned char>((sum < a) | (res < sum));
+    }
+    return _addcarryx_u64(c, a, b, out);
+}
 
 //
 // GCC/Clang portable fallback implementations
@@ -237,22 +390,24 @@ FP128_FORCE_INLINE constexpr uint64_t udiv128(uint64_t hi_dividend, uint64_t lo_
  * @param hi Pointer to receive the upper 64 bits of the product.
  * @return Lower 64 bits of the product.
  */
-FP128_FORCE_INLINE static uint64_t mulx_u64(uint64_t a, uint64_t b, uint64_t* hi) noexcept
+FP128_FORCE_INLINE static constexpr uint64_t mulx_u64(uint64_t a, uint64_t b, uint64_t* hi) noexcept
 {
     FP128_ASSERT(hi != nullptr);  // Caller must provide a valid pointer for the high part. Compatibility with MSVC intrinsic.
 #if defined(FP128_ARM64)
-    uint64_t lo_res = 0, hi_res = 0;
-    __asm__("umulh %[hi], %[a], %[b]\n\t"
-            "mul   %[lo], %[a], %[b]"
-            : [hi] "=&r"(hi_res), [lo] "=r"(lo_res)  // hi is early-clobber: MUL reads a and b after hi was written
-            : [a] "r"(a), [b] "r"(b));
-    *hi = hi_res;
-    return lo_res;
-#else
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        uint64_t lo_res = 0, hi_res = 0;
+        __asm__("umulh %[hi], %[a], %[b]\n\t"
+                "mul   %[lo], %[a], %[b]"
+                : [hi] "=&r"(hi_res), [lo] "=r"(lo_res)  // hi is early-clobber: MUL reads a and b after hi was written
+                : [a] "r"(a), [b] "r"(b));
+        *hi = hi_res;
+        return lo_res;
+    }
+#endif
     __uint128_t r = (__uint128_t)a * b;
     *hi = (uint64_t)(r >> 64);
     return (uint64_t)r;
-#endif
 }
 
 /**
@@ -268,25 +423,27 @@ FP128_FORCE_INLINE static uint64_t mulx_u64(uint64_t a, uint64_t b, uint64_t* hi
  * @param out Pointer to receive the 64-bit sum.
  * @return Output carry (0 or 1).
  */
-FP128_FORCE_INLINE static unsigned char addcarryx_u64(unsigned char c, uint64_t a, uint64_t b, uint64_t* out) noexcept
+FP128_FORCE_INLINE static constexpr unsigned char addcarryx_u64(unsigned char c, uint64_t a, uint64_t b, uint64_t* out) noexcept
 {
     FP128_ASSERT(out != nullptr);  // Caller must provide a valid pointer for the result. Compatibility with MSVC intrinsic.
 #if defined(FP128_ARM64)
-    uint64_t sum = 0;
-    uint32_t carry_out = 0;
-    __asm__("cmp  %w[cin], #1\n\t"      // C = (cin != 0)
-            "adcs %[sum], %[a], %[b]\n\t"
-            "cset %w[cout], cs"
-            : [sum] "=&r"(sum), [cout] "=&r"(carry_out)  // both outputs are early-clobber, they must not alias the inputs
-            : [cin] "r"((uint32_t)c), [a] "r"(a), [b] "r"(b)
-            : "cc");
-    *out = sum;
-    return (unsigned char)carry_out;
-#else
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        uint64_t sum = 0;
+        uint32_t carry_out = 0;
+        __asm__("cmp  %w[cin], #1\n\t"      // C = (cin != 0)
+                "adcs %[sum], %[a], %[b]\n\t"
+                "cset %w[cout], cs"
+                : [sum] "=&r"(sum), [cout] "=&r"(carry_out)  // both outputs are early-clobber, they must not alias the inputs
+                : [cin] "r"((uint32_t)c), [a] "r"(a), [b] "r"(b)
+                : "cc");
+        *out = sum;
+        return (unsigned char)carry_out;
+    }
+#endif
     __uint128_t r = (__uint128_t)a + b + c;
     *out = (uint64_t)r;
     return (unsigned char)(r >> 64);
-#endif
 }
 
 /**
@@ -295,15 +452,17 @@ FP128_FORCE_INLINE static unsigned char addcarryx_u64(unsigned char c, uint64_t 
  * The AArch64 CLZ instruction is defined for a zero operand (it returns the operand width),
  * so unlike the x86 BSR based lowering no zero test is needed.
  */
-FP128_FORCE_INLINE static uint32_t lzcnt32(uint32_t x) noexcept
+FP128_FORCE_INLINE static constexpr uint32_t lzcnt32(uint32_t x) noexcept
 {
 #if defined(FP128_ARM64)
-    uint32_t res = 0;
-    __asm__("clz %w[res], %w[val]" : [res] "=r"(res) : [val] "r"(x));
-    return res;
-#else
-    return (x == 0) ? 32u : (uint32_t)__builtin_clz(x);
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        uint32_t res = 0;
+        __asm__("clz %w[res], %w[val]" : [res] "=r"(res) : [val] "r"(x));
+        return res;
+    }
 #endif
+    return (x == 0) ? 32u : (uint32_t)__builtin_clz(x);
 }
 
 /**
@@ -311,15 +470,17 @@ FP128_FORCE_INLINE static uint32_t lzcnt32(uint32_t x) noexcept
  *
  * The AArch64 CLZ instruction returns 64 for a zero operand, no zero test is needed.
  */
-FP128_FORCE_INLINE static uint64_t lzcnt64(uint64_t x) noexcept
+FP128_FORCE_INLINE static constexpr uint64_t lzcnt64(uint64_t x) noexcept
 {
 #if defined(FP128_ARM64)
-    uint64_t res = 0;
-    __asm__("clz %[res], %[val]" : [res] "=r"(res) : [val] "r"(x));
-    return res;
-#else
-    return (x == 0) ? 64u : (uint64_t)__builtin_clzll(x);
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        uint64_t res = 0;
+        __asm__("clz %[res], %[val]" : [res] "=r"(res) : [val] "r"(x));
+        return res;
+    }
 #endif
+    return (x == 0) ? 64u : (uint64_t)__builtin_clzll(x);
 }
 
 /**
@@ -329,21 +490,23 @@ FP128_FORCE_INLINE static uint64_t lzcnt64(uint64_t x) noexcept
  * Apple Silicon does not implement. The value is moved to a NEON register, CNT counts the bits
  * of each of the 8 bytes in parallel and ADDV sums the 8 byte lanes into a single byte.
  */
-FP128_FORCE_INLINE static uint64_t popcnt64(uint64_t x) noexcept
+FP128_FORCE_INLINE static constexpr uint64_t popcnt64(uint64_t x) noexcept
 {
 #if defined(FP128_ARM64)
-    uint32_t res = 0;
-    uint8x8_t tmp;
-    __asm__("fmov %d[tmp], %[val]\n\t"
-            "cnt  %[tmp].8b, %[tmp].8b\n\t"
-            "addv %b[tmp], %[tmp].8b\n\t"
-            "fmov %w[res], %s[tmp]"
-            : [res] "=r"(res), [tmp] "=&w"(tmp)
-            : [val] "r"(x));
-    return res;
-#else
-    return (uint64_t)__builtin_popcountll(x);
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        uint32_t res = 0;
+        uint8x8_t tmp;
+        __asm__("fmov %d[tmp], %[val]\n\t"
+                "cnt  %[tmp].8b, %[tmp].8b\n\t"
+                "addv %b[tmp], %[tmp].8b\n\t"
+                "fmov %w[res], %s[tmp]"
+                : [res] "=r"(res), [tmp] "=&w"(tmp)
+                : [val] "r"(x));
+        return res;
+    }
 #endif
+    return (uint64_t)__builtin_popcountll(x);
 }
 
 /**
@@ -352,21 +515,23 @@ FP128_FORCE_INLINE static uint64_t popcnt64(uint64_t x) noexcept
  * Same NEON sequence as popcnt64. FMOV of a W register zeroes the upper lanes of the NEON
  * register, so the 4 unused bytes contribute nothing to the ADDV sum.
  */
-FP128_FORCE_INLINE static uint32_t popcnt32(uint32_t x) noexcept
+FP128_FORCE_INLINE static constexpr uint32_t popcnt32(uint32_t x) noexcept
 {
 #if defined(FP128_ARM64)
-    uint32_t res = 0;
-    uint8x8_t tmp;
-    __asm__("fmov %s[tmp], %w[val]\n\t"
-            "cnt  %[tmp].8b, %[tmp].8b\n\t"
-            "addv %b[tmp], %[tmp].8b\n\t"
-            "fmov %w[res], %s[tmp]"
-            : [res] "=r"(res), [tmp] "=&w"(tmp)
-            : [val] "r"(x));
-    return res;
-#else
-    return (uint32_t)__builtin_popcount(x);
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        uint32_t res = 0;
+        uint8x8_t tmp;
+        __asm__("fmov %s[tmp], %w[val]\n\t"
+                "cnt  %[tmp].8b, %[tmp].8b\n\t"
+                "addv %b[tmp], %[tmp].8b\n\t"
+                "fmov %w[res], %s[tmp]"
+                : [res] "=r"(res), [tmp] "=&w"(tmp)
+                : [val] "r"(x));
+        return res;
+    }
 #endif
+    return (uint32_t)__builtin_popcount(x);
 }
 
 #endif  // #if defined (FP128_CLANG)
@@ -402,54 +567,105 @@ static constexpr int32_t dbl_exp_bits = 11;   ///< Exponent bit count of an IEEE
 /***********************************************************************************
  *                                  Containers
  ************************************************************************************/
-#if defined(FP128_MSVC)
-#pragma warning(push)
-#pragma warning(disable : 4201)  // nameless union/structs
-#endif
-
 /**
  * @struct Double
- * @brief Union for accessing IEEE 754 double-precision bit fields.
+ * @brief Bit level view of an IEEE 754 double-precision value.
  *
- * Allows direct access to the mantissa, exponent, and sign of a double
- * without manual bit shifting.
+ * Gives access to the mantissa, exponent and sign of a double without manual bit shifting, and
+ * assembles a double back out of those three fields.
+ *
+ * The value is held as a raw bit pattern and converted with std::bit_cast rather than being
+ * overlaid with a union. The two produce identical code - a single move between register classes -
+ * but reading the inactive member of a union is not allowed during constant evaluation, which
+ * would keep every conversion between these types and a double out of a constant expression.
  */
 struct Double {
-    Double(double v = 0) noexcept : val(v) {}
-    union {
-        struct {
-            uint64_t f : dbl_frac_bits;  ///< Mantissa (fraction) bits.
-            uint64_t e : dbl_exp_bits;   ///< Biased exponent bits.
-            uint64_t s : 1;              ///< Sign bit (0 = positive, 1 = negative).
-        };
-        double val;  ///< The raw double value.
-    };
+    uint64_t bits;  ///< The raw bit pattern of the double.
+
+    /// @brief Constructs from a double, or from positive zero when no value is given.
+    constexpr Double(double v = 0) noexcept : bits(std::bit_cast<uint64_t>(v)) {}
+
+    /// @brief Mantissa (fraction) bits.
+    [[nodiscard]] constexpr uint64_t f() const noexcept { return bits & FRAC_MASK; }
+    /// @brief Biased exponent bits.
+    [[nodiscard]] constexpr uint64_t e() const noexcept { return (bits >> dbl_frac_bits) & EXP_MASK; }
+    /// @brief Sign bit (0 = positive, 1 = negative).
+    [[nodiscard]] constexpr uint64_t s() const noexcept { return bits >> SIGN_SHIFT; }
+    /// @brief The double these bits encode.
+    [[nodiscard]] constexpr double val() const noexcept { return std::bit_cast<double>(bits); }
+
+    /// @brief Sets the mantissa. Bits above the field width are dropped, as a bit-field assignment would.
+    constexpr void set_f(uint64_t v) noexcept { bits = (bits & ~FRAC_MASK) | (v & FRAC_MASK); }
+    /// @brief Sets the biased exponent. Bits above the field width are dropped.
+    constexpr void set_e(uint64_t v) noexcept { bits = (bits & ~(EXP_MASK << dbl_frac_bits)) | ((v & EXP_MASK) << dbl_frac_bits); }
+    /// @brief Sets the sign bit.
+    constexpr void set_s(uint64_t v) noexcept { bits = (bits & ~(1ull << SIGN_SHIFT)) | ((v & 1) << SIGN_SHIFT); }
+
+    /**
+     * @brief Assembles a double out of its three fields.
+     *
+     * Preferred over three set_ calls wherever the value is built from scratch: those each mask
+     * the old field out before merging the new one, which is wasted work when there is nothing
+     * there yet.
+     *
+     * @param s Sign bit.
+     * @param e Biased exponent. Bits above the field width are dropped.
+     * @param f Mantissa. Bits above the field width are dropped.
+     * @return The assembled double.
+     */
+    [[nodiscard]] static constexpr double make(uint64_t s, uint64_t e, uint64_t f) noexcept
+    {
+        return std::bit_cast<double>(((s & 1) << SIGN_SHIFT) | ((e & EXP_MASK) << dbl_frac_bits) | (f & FRAC_MASK));
+    }
+
+private:
+    static constexpr uint64_t FRAC_MASK = (1ull << dbl_frac_bits) - 1;   ///< Mask of the mantissa field.
+    static constexpr uint64_t EXP_MASK = (1ull << dbl_exp_bits) - 1;     ///< Mask of the exponent field, once shifted down.
+    static constexpr int32_t SIGN_SHIFT = dbl_frac_bits + dbl_exp_bits;  ///< Bit position of the sign.
 };
-static_assert(sizeof(Double) == sizeof(double), "The Double union should have the same size as a double variable!");
+static_assert(sizeof(Double) == sizeof(double), "The Double view should have the same size as a double variable!");
 
 /**
  * @struct Float
- * @brief Union for accessing IEEE 754 single-precision bit fields.
+ * @brief Bit level view of an IEEE 754 single-precision value.
  *
- * Allows direct access to the mantissa, exponent, and sign of a float
- * without manual bit shifting.
+ * The single precision counterpart of @ref Double, see its documentation.
  */
 struct Float {
-    Float(float v = 0) noexcept : val(v) {}
-    union {
-        struct {
-            uint32_t f : flt_frac_bits;  ///< Mantissa (fraction) bits.
-            uint32_t e : flt_exp_bits;   ///< Biased exponent bits.
-            uint32_t s : 1;              ///< Sign bit (0 = positive, 1 = negative).
-        };
-        float val;  ///< The raw float value.
-    };
-};
-static_assert(sizeof(Float) == sizeof(float), "The Float union should have the same size as a float variable!");
+    uint32_t bits;  ///< The raw bit pattern of the float.
 
-#if defined(FP128_MSVC)
-#pragma warning(pop)
-#endif
+    /// @brief Constructs from a float, or from positive zero when no value is given.
+    constexpr Float(float v = 0) noexcept : bits(std::bit_cast<uint32_t>(v)) {}
+
+    /// @brief Mantissa (fraction) bits.
+    [[nodiscard]] constexpr uint32_t f() const noexcept { return bits & FRAC_MASK; }
+    /// @brief Biased exponent bits.
+    [[nodiscard]] constexpr uint32_t e() const noexcept { return (bits >> flt_frac_bits) & EXP_MASK; }
+    /// @brief Sign bit (0 = positive, 1 = negative).
+    [[nodiscard]] constexpr uint32_t s() const noexcept { return bits >> SIGN_SHIFT; }
+    /// @brief The float these bits encode.
+    [[nodiscard]] constexpr float val() const noexcept { return std::bit_cast<float>(bits); }
+
+    /// @brief Sets the mantissa. Bits above the field width are dropped, as a bit-field assignment would.
+    constexpr void set_f(uint32_t v) noexcept { bits = (bits & ~FRAC_MASK) | (v & FRAC_MASK); }
+    /// @brief Sets the biased exponent. Bits above the field width are dropped.
+    constexpr void set_e(uint32_t v) noexcept { bits = (bits & ~(EXP_MASK << flt_frac_bits)) | ((v & EXP_MASK) << flt_frac_bits); }
+    /// @brief Sets the sign bit.
+    constexpr void set_s(uint32_t v) noexcept { bits = (bits & ~(1u << SIGN_SHIFT)) | ((v & 1) << SIGN_SHIFT); }
+
+    /// @brief Assembles a float out of its three fields, see Double::make().
+    /// @param s Sign bit. @param e Biased exponent. @param f Mantissa. @return The assembled float.
+    [[nodiscard]] static constexpr float make(uint32_t s, uint32_t e, uint32_t f) noexcept
+    {
+        return std::bit_cast<float>(((s & 1) << SIGN_SHIFT) | ((e & EXP_MASK) << flt_frac_bits) | (f & FRAC_MASK));
+    }
+
+private:
+    static constexpr uint32_t FRAC_MASK = (1u << flt_frac_bits) - 1;     ///< Mask of the mantissa field.
+    static constexpr uint32_t EXP_MASK = (1u << flt_exp_bits) - 1;       ///< Mask of the exponent field, once shifted down.
+    static constexpr int32_t SIGN_SHIFT = flt_frac_bits + flt_exp_bits;  ///< Bit position of the sign.
+};
+static_assert(sizeof(Float) == sizeof(float), "The Float view should have the same size as a float variable!");
 
 /***********************************************************************************
  *                                  Functions
@@ -498,7 +714,7 @@ template <typename T>[[nodiscard]] constexpr uint32_t array_length(const T& a)
  * @param shift Number of bits to shift.
  * @return The rounded result of x >> shift.
  */
-[[nodiscard]] FP128_INLINE uint64_t shift_right64_round(uint64_t x, int shift) noexcept
+[[nodiscard]] FP128_INLINE constexpr uint64_t shift_right64_round(uint64_t x, int shift) noexcept
 {
     FP128_ASSERT(shift > 0 && shift < 64);
     x += 1ull << (shift - 1);
@@ -513,7 +729,7 @@ template <typename T>[[nodiscard]] constexpr uint32_t array_length(const T& a)
  * @param shift Bits to shift, between 1-63
  * @return void
  */
-FP128_INLINE void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
+FP128_INLINE constexpr void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     FP128_ASSERT(shift > 0 && shift < 64);
     l = (l >> shift) | (h << (64 - shift));
@@ -527,7 +743,7 @@ FP128_INLINE void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) no
  * @param shift Bits to shift, between 1-63
  * @return void
  */
-FP128_INLINE void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
+FP128_INLINE constexpr void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     FP128_ASSERT(shift > 0 && shift < 64);
     h = (h << shift) | (l >> (64 - shift));
@@ -541,7 +757,7 @@ FP128_INLINE void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) noe
  * @param shift Bits to shift, between 1-inf
  * @return void
  */
-FP128_INLINE void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
+FP128_INLINE constexpr void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0);
     if (shift == 0)
@@ -593,7 +809,7 @@ FP128_INLINE void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shif
  * @param shift Bits to shift, between 1-inf
  * @return void
  */
-FP128_INLINE void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
+FP128_INLINE constexpr void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0);
     if (shift == 0)
@@ -619,7 +835,7 @@ FP128_INLINE void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift
  * @
  * @return Lower 64 bit of the result
  */
-template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t l, uint64_t h) noexcept
+template <int shift> [[nodiscard]] FP128_INLINE constexpr uint64_t shift_right128(uint64_t l, uint64_t h) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 128);
     if constexpr (shift == 0) {
@@ -639,7 +855,7 @@ template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t
  * @
  * @return Upper 64 bit of the result
  */
- template <int shift> [[nodiscard]] FP128_FORCE_INLINE uint64_t shift_left128(uint64_t l, uint64_t h) noexcept
+ template <int shift> [[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t shift_left128(uint64_t l, uint64_t h) noexcept
  {
     FP128_ASSERT(shift >= 0 && shift < 128);
     if constexpr (shift == 0) {
@@ -659,7 +875,7 @@ template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t
  * @param shift Bits to shift, between 0-127
  * @return Lower 64 bit of the result
  */
-[[nodiscard]] FP128_FORCE_INLINE uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
+[[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t shift_right128(uint64_t l, uint64_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 128);
     switch (shift >> 6) {
@@ -678,7 +894,7 @@ template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t
  * @param shift Bits to shift, between 0-127
  * @return Lower 64 bit of the result
  */
-[[nodiscard]] FP128_FORCE_INLINE uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
+[[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t shift_right128_round(uint64_t l, uint64_t h, int shift) noexcept
 {
     shift_right128_inplace_safe(l, h, shift);
     return l;
@@ -690,7 +906,7 @@ template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t
  * @param shift Bits to shift, between 0-127
  * @return Upper 64 bit of the result
  */
-[[nodiscard]] FP128_FORCE_INLINE uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
+[[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t shift_left128(uint64_t l, uint64_t h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0 && shift < 128);
     switch (shift >> 6) {
@@ -708,7 +924,7 @@ template <int shift> [[nodiscard]] FP128_INLINE uint64_t shift_right128(uint64_t
  * @param h High QWORD (ref)
  * @return void
  */
-FP128_INLINE void twos_complement128(uint64_t& l, uint64_t& h) noexcept
+FP128_INLINE constexpr void twos_complement128(uint64_t& l, uint64_t& h) noexcept
 {
     l = ~l + 1ull;
     h = ~h + (l == 0);
@@ -909,7 +1125,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * @param x input value.
  * @return Number of 1 bits in x.
  */
-[[nodiscard]] FP128_INLINE uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
+[[nodiscard]] FP128_INLINE constexpr uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
 {
     return popcnt64(l) + popcnt64(h);
 }
@@ -919,7 +1135,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * @param h High QWORD
  * @return Left zero count
  */
-[[nodiscard]] FP128_INLINE uint64_t lzcnt128(uint64_t l, uint64_t h) noexcept
+[[nodiscard]] FP128_INLINE constexpr uint64_t lzcnt128(uint64_t l, uint64_t h) noexcept
 {
     return (h != 0) ? lzcnt64(h) : 64 + lzcnt64(l);
 }
@@ -930,7 +1146,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * @param h High QWORD of the value
  * @return log2(x). Returns zero when x is zero.
  */
-[[nodiscard]] FP128_INLINE uint64_t log2(uint64_t l, uint64_t h) noexcept
+[[nodiscard]] FP128_INLINE constexpr uint64_t log2(uint64_t l, uint64_t h) noexcept
 {
     return (h != 0 || l != 0) ? 127 - lzcnt128(l, h) : 0;
 }
@@ -940,7 +1156,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * @param x The number to perform log2 on.
  * @return log2(x). Returns zero when x is zero.
  */
-[[nodiscard]] FP128_INLINE uint64_t log2(uint64_t x) noexcept
+[[nodiscard]] FP128_INLINE constexpr uint64_t log2(uint64_t x) noexcept
 {
     return (x) ? 63ull - lzcnt64(x) : 0;
 }
@@ -950,7 +1166,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * @param x The number to perform log2 on.
  * @return log2(x). Returns zero when x is zero.
  */
-[[nodiscard]] FP128_INLINE uint32_t log2(uint32_t x) noexcept
+[[nodiscard]] FP128_INLINE constexpr uint32_t log2(uint32_t x) noexcept
 {
     return (x) ? 31ull - lzcnt32(x) : 0;
 }
