@@ -30,8 +30,8 @@
 #include <cstdio>
 #include <chrono>
 #include <format>
-#include "../inc/fixed_point128.h"
-#include "../inc/uint128_t.h"
+#include "fixed_point128.h"
+#include "uint128_t.h"
 
 using namespace std;
 using namespace fp128;

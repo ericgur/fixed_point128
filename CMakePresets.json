@@ -1,0 +1,99 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "inherits": "base",
+      "architecture": "x64",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "msvc",
+      "displayName": "Visual Studio - MSVC (x64)",
+      "description": "Visual Studio generator with the MSVC toolset. The generator is left unset so CMake selects the newest Visual Studio installed on the machine.",
+      "inherits": "windows-base"
+    },
+    {
+      "name": "clang-cl",
+      "displayName": "Visual Studio - Clang (x64)",
+      "description": "Visual Studio generator with the ClangCL toolset. Requires the 'C++ Clang tools for Windows' Visual Studio component.",
+      "inherits": "windows-base",
+      "toolset": "ClangCL"
+    },
+    {
+      "name": "unix-base",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Ninja Multi-Config"
+    },
+    {
+      "name": "clang",
+      "displayName": "Ninja - Clang",
+      "description": "Command line Clang build. This is the preset to use on macOS and Linux.",
+      "inherits": "unix-base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "gcc",
+      "displayName": "Ninja - GCC",
+      "description": "Command line GCC build.",
+      "inherits": "unix-base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "msvc-debug",       "configurePreset": "msvc",      "configuration": "Debug" },
+    { "name": "msvc-release",     "configurePreset": "msvc",      "configuration": "Release" },
+    { "name": "clang-cl-debug",   "configurePreset": "clang-cl",  "configuration": "Debug" },
+    { "name": "clang-cl-release", "configurePreset": "clang-cl",  "configuration": "Release" },
+    { "name": "clang-debug",      "configurePreset": "clang",     "configuration": "Debug" },
+    { "name": "clang-release",    "configurePreset": "clang",     "configuration": "Release" },
+    { "name": "gcc-debug",        "configurePreset": "gcc",       "configuration": "Debug" },
+    { "name": "gcc-release",      "configurePreset": "gcc",       "configuration": "Release" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    { "name": "msvc-debug",       "inherits": "test-base", "configurePreset": "msvc",      "configuration": "Debug" },
+    { "name": "msvc-release",     "inherits": "test-base", "configurePreset": "msvc",      "configuration": "Release" },
+    { "name": "clang-cl-debug",   "inherits": "test-base", "configurePreset": "clang-cl",  "configuration": "Debug" },
+    { "name": "clang-cl-release", "inherits": "test-base", "configurePreset": "clang-cl",  "configuration": "Release" },
+    { "name": "clang-debug",      "inherits": "test-base", "configurePreset": "clang",     "configuration": "Debug" },
+    { "name": "clang-release",    "inherits": "test-base", "configurePreset": "clang",     "configuration": "Release" },
+    { "name": "gcc-debug",        "inherits": "test-base", "configurePreset": "gcc",       "configuration": "Debug" },
+    { "name": "gcc-release",      "inherits": "test-base", "configurePreset": "gcc",       "configuration": "Release" }
+  ]
+}

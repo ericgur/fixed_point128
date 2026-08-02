@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  fixed_point128.common.props
+
+  Settings shared by every project in fixed_point128.slnx.
+
+  Imported from each project's "PropertySheets" ImportGroup, which runs after Microsoft.Cpp.props and
+  therefore after $(PlatformToolset) and $(UseDebugLibraries) have been established. That is what lets
+  this sheet branch on debug versus release and on the MSVC versus Clang toolset, instead of repeating
+  four near-identical ItemDefinitionGroups in every project file.
+
+  Warning settings deliberately live in fixed_point128.warnings.props rather than here, so that the
+  vendored GoogleTest project can share the layout and language settings without inheriting a warning
+  level it is not expected to satisfy.
+-->
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup Label="UserMacros">
+    <!-- Repository root. The solution lives in msvc/, so every source path is relative to here. -->
+    <FP128Root>$(MSBuildThisFileDirectory)..\</FP128Root>
+    <FP128GoogleTestDir>$(FP128Root)external\googletest\googletest\</FP128GoogleTestDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Build output goes to the repository root, not under msvc/, matching the CMake presets. -->
+    <OutDir>$(FP128Root)bin\$(Platform)_$(Configuration)\</OutDir>
+    <IntDir>$(FP128Root)build\$(Platform)_$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <!-- All sources in this repository are UTF-8; without this MSVC decodes them as system ANSI. -->
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(UseDebugLibraries)'=='true'">
+    <ClCompile>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <!-- Full symbols for the static library too, so GoogleTest source can be stepped into. -->
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(UseDebugLibraries)'!='true'">
+    <ClCompile>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>false</SDLCheck>
+      <Optimization>MaxSpeed</Optimization>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!--
+    The RuntimeLibrary settings above pin the shared (DLL) CRT for every project and configuration.
+    This must stay in one place: the test executable links a static GoogleTest, and a CRT mismatch
+    between the two produces duplicate symbol errors at best and heap corruption at worst. It matches
+    gtest_force_shared_crt=ON in external/CMakeLists.txt so both build systems agree.
+  -->
+
+  <!--
+    udiv128() divides a __uint128_t, which Clang lowers to a call to __udivti3. That symbol lives in
+    compiler-rt rather than in the MSVC runtime, so the builtins library has to be named explicitly
+    when building with the Clang toolset. The CMake equivalent is cmake/FP128ClangRuntime.cmake.
+  -->
+  <ItemDefinitionGroup Condition="'$(PlatformToolset)'=='ClangCL'">
+    <Link>
+      <AdditionalLibraryDirectories>$(LLVMInstallDir)\lib\clang\$(LLVMIncludeVersion)\lib\windows;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>clang_rt.builtins-x86_64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+</Project>

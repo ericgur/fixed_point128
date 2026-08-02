@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -9,42 +9,48 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
+    <Filter Include="Build">
+      <UniqueIdentifier>{7B4E1C2A-9F35-4D6E-8A11-3C5D2E9F0B47}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="inc\fixed_point128.h">
+    <ClInclude Include="$(FP128Root)include\fixed_point128.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\uint128_t.h">
+    <ClInclude Include="$(FP128Root)include\uint128_t.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\fixed_point128_shared.h">
+    <ClInclude Include="$(FP128Root)include\fixed_point128_shared.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\float128.h">
+    <ClInclude Include="$(FP128Root)include\float128.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\int128_t.h">
+    <ClInclude Include="$(FP128Root)include\int128_t.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="inc\int128_shared.h">
+    <ClInclude Include="$(FP128Root)include\int128_shared.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Bench.cpp">
+    <ClCompile Include="$(FP128Root)bench\Bench.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="cpp.hint" />
-    <None Include="README.md" />
-    <None Include=".gitignore" />
-    <None Include="CLAUDE.md" />
+    <None Include="$(FP128Root)cpp.hint" />
+    <None Include="$(FP128Root)README.md" />
+    <None Include="$(FP128Root).gitignore" />
+    <None Include="$(FP128Root)CLAUDE.md" />
+    <None Include="$(FP128Root)CMakeLists.txt">
+      <Filter>Build</Filter>
+    </None>
+    <None Include="$(FP128Root)CMakePresets.json">
+      <Filter>Build</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
-    <Natvis Include="fixed_point128.natvis" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="CMakeLists.txt" />
+    <Natvis Include="$(FP128Root)fixed_point128.natvis" />
   </ItemGroup>
 </Project>

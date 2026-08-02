@@ -2,7 +2,7 @@
  A 128 bit fixed-point class template for fast, high precision calculations.
  This code is used in my [Mandelbrot just-for-fun project](https://github.com/ericgur/Mandelbrot). With double precision floats I could zoom the image to 2<sup>44</sup>, with the fixed_point128, 2<sup>113</sup> is possible.
  
- The `inc` directory contains the header files for the **fixed_point128** library, a header-only C++20 library providing 128-bit integer, fixed-point, and floating-point arithmetic types. 
+ The `include` directory contains the header files for the **fixed_point128** library, a header-only C++20 library providing 128-bit integer, fixed-point, and floating-point arithmetic types. 
  
  All types reside in the `fp128` namespace.
 
@@ -27,32 +27,127 @@
    - **Clang 17+** - Windows (Clang toolset), Linux or macOS.
    - **GCC** - Linux or macOS. GCC takes the same code path as Clang (`__uint128_t` and `__builtin_*`).
 
-## Building
+ Using the library needs nothing beyond the above. Building the benchmark or the tests additionally
+ needs CMake 3.21+ (or Visual Studio), and the tests need the GoogleTest submodule described below.
 
-The library itself is header-only: add the `inc` directory to your include path and include the header you need. There is nothing to compile or link. The sections below cover the benchmark and test suite that ship with the repository.
+## Repository Layout
 
-### Benchmark
-
-**GCC / Clang** - via CMake (3.20 or newer). Builds `src/Bench.cpp` into `bin/`:
-
-```sh
-cmake -S . -B build
-cmake --build build
-./bin/bench
+```
+include/     the library - header only, this is all a consumer needs
+bench/       benchmark program
+tests/       GoogleTest suite
+external/    third party dependencies (GoogleTest, as a git submodule)
+cmake/       CMake helper modules
+msvc/        Visual Studio project files (the solution lives at the repository root)
+DoxyGen/     documentation configuration
 ```
 
-**MSVC** - open `fixed_point128.slnx` in Visual Studio 2019+ and build.
+## Getting the Sources
 
-### Tests
+GoogleTest is tracked as a git submodule, so clone recursively:
 
-The GoogleTest suite lives in `gtest`. CMake must be installed and on the `PATH`. Run the scripts below from the `gtest` directory.
+```sh
+git clone --recurse-submodules https://github.com/ericgur/fixed_point128.git
+```
 
-**MSVC** - run `setup.bat` once to generate `build\fixed_point128_gtest.sln`, then after each code change:
-- `build.bat` - build the test app.
-- `test.bat` - run all tests.
-- `test_failed.bat` - re-run only the tests that failed.
+If the repository was cloned without `--recurse-submodules`, fetch the submodule afterwards:
 
-**Clang** - uses the Clang toolset that ships with Visual Studio (install the "C++ Clang tools for Windows" component). It builds into `build_clang\`, so both toolchains can be kept side by side. Run `setup_clang.bat` once, then `build_clang.bat` and `test_clang.bat`.
+```sh
+git submodule update --init --recursive
+```
+
+Only the tests need the submodule. Consumers of the library, and the benchmark, do not.
+
+## Building
+
+The library itself is header-only: add the `include` directory to your include path and include the
+header you need. There is nothing to compile or link. The sections below cover the benchmark and the
+test suite that ship with the repository.
+
+Two build systems are maintained in parallel and both build the same sources:
+
+- **CMake** - Windows, macOS and Linux, with MSVC, clang-cl, Clang or GCC. This is the command line path.
+- **Visual Studio solution** (`fixed_point128.slnx`) - Windows only, with both the MSVC and Clang toolsets.
+
+### CMake
+
+Requires CMake 3.21 or newer (3.25 for the presets below), and Ninja for the `clang` and `gcc` presets.
+Configure once per toolchain, then build and test:
+
+```sh
+cmake --preset msvc                 # or: clang-cl, clang, gcc
+cmake --build --preset msvc-debug   # ...-debug or ...-release
+ctest --preset msvc-debug -j
+```
+
+| Preset | Toolchain | Platform |
+| --- | --- | --- |
+| `msvc` | Visual Studio generator, MSVC toolset | Windows |
+| `clang-cl` | Visual Studio generator, ClangCL toolset | Windows |
+| `clang` | Ninja + `clang++` | macOS, Linux, Windows |
+| `gcc` | Ninja + `g++` | Linux |
+
+The `msvc` and `clang-cl` presets do not pin a generator, so CMake selects the newest Visual Studio
+installed on the machine. The `clang-cl` preset needs the "C++ Clang tools for Windows" Visual Studio
+component.
+
+Everything lands under `out/build/<preset>/`. Useful extras:
+
+```sh
+ctest --preset msvc-debug --rerun-failed          # only what failed last time
+ctest --preset msvc-debug -R float128             # only matching tests
+cmake --preset msvc -DFP128_BUILD_TESTS=OFF       # skip the tests (no submodule needed)
+./out/build/clang/bin/Release/bench               # run the benchmark
+```
+
+### Visual Studio
+
+Open `fixed_point128.slnx` in Visual Studio 2019 or newer. The solution holds three projects:
+
+| Project | Output |
+| --- | --- |
+| `fixed_point128` | the benchmark executable |
+| `fixed_point128_tests` | the GoogleTest suite |
+| `googletest` | GoogleTest built as a static library from the submodule |
+
+Four configurations are available - `Debug`, `Release`, and `Debug Clang` / `Release Clang` for the
+Clang toolset - all for `x64`. Binaries are written to `bin/`.
+
+#### Running and debugging the tests
+
+Set **fixed_point128_tests** as the startup project and press F5. The project reference to
+`googletest` builds and links the static library automatically; there is nothing to configure.
+
+- Breakpoints work in the test sources and throughout the header-only library, which is compiled into
+  the test binary with full debug information.
+- `fixed_point128.natvis` is compiled into the test PDB, so `fixed_point128<I>`, `float128`,
+  `int128_t` and `uint128_t` show their values in Locals and Watch instead of raw QWORDs.
+- **Test Explorer** lists the individual cases through the "Test Adapter for Google Test" component of
+  the C++ workload. Right-click a single test and choose *Debug* to break inside just that case.
+- To narrow down an F5 run, add arguments under Project Properties -> Debugging -> Command Arguments,
+  for example `--gtest_filter=float128.Add* --gtest_break_on_failure`. The latter drops into the
+  debugger at the first failing assertion. These are stored in the untracked `.vcxproj.user` file.
+
+Switching the configuration to *Debug Clang* gives the same experience against the Clang-built binaries.
+
+## Updating GoogleTest
+
+The submodule is pinned to a release tag rather than tracking a branch, so that a given commit of this
+repository always builds against a known GoogleTest version. To move the pin:
+
+```sh
+cd external/googletest
+git fetch --tags
+git checkout v1.18.0     # the desired release tag
+cd ../..
+git add external/googletest
+git commit -m "Update GoogleTest to v1.18.0"
+```
+
+Everyone else picks the new version up with `git submodule update --init --recursive` after pulling.
+
+`git submodule update --remote external/googletest` would instead advance to the tip of GoogleTest's
+default branch. That is deliberately not used here, because it pins an arbitrary untagged commit.
 
  ## Dependency Graph
 

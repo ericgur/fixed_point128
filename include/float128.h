@@ -3125,8 +3125,7 @@ public:
     {
         // constants for segmentation
         constexpr float128 pi = float128::pi();
-        constexpr float128 half_pi = float128::half_pi();        // pi / 2
-        constexpr float128 quarter_pi = float128::quarter_pi();  // pi / 4
+        constexpr float128 half_pi = float128::half_pi();  // pi / 2
 
         // x == 0
         if (!x) {
@@ -3147,7 +3146,6 @@ public:
         // calculate the ratio keeping it below 1.0
         ratio = (comp) ? x / y : y / x;
         res = atan(ratio);
-        const float128 eps = fabs(res >> 110);
 
         if (comp)
             res = (res.is_negative()) ? -half_pi - res : half_pi - res;

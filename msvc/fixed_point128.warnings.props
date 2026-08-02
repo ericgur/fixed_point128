@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  fixed_point128.warnings.props
+
+  The project warning level, imported only by the first party projects. The vendored GoogleTest
+  project imports fixed_point128.common.props but not this sheet, because its code is not ours to fix
+  and its diagnostics would otherwise be indistinguishable from our own.
+
+  The CMake equivalent is fp128_set_warnings() in cmake/FP128CompilerOptions.cmake.
+-->
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup>
+    <RunCodeAnalysis>false</RunCodeAnalysis>
+    <CodeAnalysisRuleSet>NativeRecommendedRules.ruleset</CodeAnalysisRuleSet>
+    <EnableMicrosoftCodeAnalysis>true</EnableMicrosoftCodeAnalysis>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <!--
+        Angle bracket includes are treated as external headers, so /W4 applies to this project's own
+        code and to the library headers (which include each other with quotes) but not to the standard
+        library or to GoogleTest. Without this, diagnostics such as C4389 inside gtest.h are reported
+        against our projects. This mirrors the SYSTEM include directories CMake already uses.
+      -->
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <!-- /W4 alone leaves most of the Clang specific diagnostics off; -Wextra turns them on. -->
+  <ItemDefinitionGroup Condition="'$(PlatformToolset)'=='ClangCL'">
+    <ClCompile>
+      <AdditionalOptions>-Wextra %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <!-- PREfast is configured but only runs when RunCodeAnalysis is turned on for a build. -->
+  <ItemDefinitionGroup Condition="'$(PlatformToolset)'!='ClangCL'">
+    <ClCompile>
+      <EnablePREfast>true</EnablePREfast>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+</Project>

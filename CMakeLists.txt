@@ -1,37 +1,66 @@
 ##
 # @file CMakeLists.txt
-# @brief Build script for the fixed_point128 benchmark executable (GCC/Clang).
+# @brief Top level build script for the fixed_point128 library, benchmark and unit tests.
 #
-# MSVC builds are covered by fixed_point128.slnx.
+# fixed_point128 is header only, so the library itself is exposed as an INTERFACE target that simply
+# carries the include directory and the C++20 requirement. The benchmark and the GoogleTest suite are
+# ordinary executables that link against it.
 #
-#   cmake -S . -B build
-#   cmake --build build
-#   ./bin/bench
+# Supported toolchains: MSVC, clang-cl, Clang and GCC, on Windows, macOS and Linux. Use the presets in
+# CMakePresets.json rather than invoking cmake by hand:
+#
+#     cmake --preset msvc            # or clang-cl / clang / gcc
+#     cmake --build --preset msvc-debug
+#     ctest --preset msvc-debug
+#
+# The unit tests need the GoogleTest submodule:
+#
+#     git submodule update --init --recursive
+#
+# The MSVC solution in msvc/ builds the same sources through MSBuild and is maintained in parallel.
 ##
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 
-project(fixed_point128_bench LANGUAGES CXX)
+project(fixed_point128
+        VERSION 1.0.0
+        DESCRIPTION "128 bit integer, fixed-point and floating-point arithmetic types"
+        HOMEPAGE_URL "https://github.com/ericgur/fixed_point128"
+        LANGUAGES CXX)
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
-endif()
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(FP128CompilerOptions)
+include(FP128ClangRuntime)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(bench src/Bench.cpp)
-target_include_directories(bench PRIVATE inc)
-target_compile_options(bench PRIVATE -Wall -Wextra -O3)
+option(FP128_BUILD_BENCH "Build the fixed_point128 benchmark" ${PROJECT_IS_TOP_LEVEL})
+option(FP128_BUILD_TESTS "Build the fixed_point128 unit tests" ${PROJECT_IS_TOP_LEVEL})
 
-# Bench.cpp uses __declspec(noinline), which needs explicit opt-in outside MSVC.
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-fdeclspec" HAVE_FDECLSPEC)
-if(HAVE_FDECLSPEC)
-    target_compile_options(bench PRIVATE -fdeclspec)
+##
+# The library target.
+#
+# Header only, so INTERFACE: consumers inherit the include directory and the C++20 requirement and
+# nothing is compiled here. This is also what lets the tests and the benchmark use portable
+# `#include <fixed_point128.h>` instead of relative paths into the source tree.
+##
+add_library(fixed_point128 INTERFACE)
+add_library(fixed_point128::fixed_point128 ALIAS fixed_point128)
+
+target_include_directories(fixed_point128 INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>")
+
+target_compile_features(fixed_point128 INTERFACE cxx_std_20)
+
+if(FP128_BUILD_BENCH)
+    add_subdirectory(bench)
 endif()
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86|X86|AMD64|amd64|x86_64|i[3-6]86)$")
-    target_compile_options(bench PRIVATE -mavx2 -mbmi -mbmi2 -mlzcnt)
+if(FP128_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(external)
+    add_subdirectory(tests)
 endif()

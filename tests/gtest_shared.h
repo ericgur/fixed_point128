@@ -1,13 +1,17 @@
+#ifndef GTEST_SHARED_H
+#define GTEST_SHARED_H
+
 #ifndef UNREFERENCED_PARAMETER
 #define UNREFERENCED_PARAMETER(P) (P)
 #endif
 
-#include "..\inc\fixed_point128.h"
-#include "..\inc\uint128_t.h"
-#include "..\inc\int128_t.h"
-#include "..\inc\float128.h"
-#ifndef GTEST_SHARED_H
-#define GTEST_SHARED_H
+// Quoted includes for the library headers, angle brackets for system and third-party ones. The
+// distinction is what lets MSVC treat GoogleTest and the standard library as external headers and
+// hold only our own code to /W4; the library headers follow the same convention among themselves.
+#include "fixed_point128.h"
+#include "uint128_t.h"
+#include "int128_t.h"
+#include "float128.h"
 
 /*************************************************
  * Fixed point 128 tests
@@ -22,10 +26,14 @@ static constexpr int RANDOM_SEED = 0x12345678;  // must have a repeatable seed f
 // declaration because get_double_random() calls them. The 'static' has to appear here as well:
 // a first declaration without it gives the name external linkage, which the later definition
 // keeps, and every translation unit including this header then emits the same external symbol.
-static uint64_t get_uint64_random();
-static int64_t get_int64_random();
-static uint32_t get_uint32_random();
-static int32_t get_int32_random();
+//
+// [[maybe_unused]] is required on every helper in this header: internal linkage means each test
+// translation unit gets its own copy, and no single one of them uses the whole set, which is
+// exactly what MSVC reports as C4505 at /W4.
+[[maybe_unused]] static uint64_t get_uint64_random();
+[[maybe_unused]] static int64_t get_int64_random();
+[[maybe_unused]] static uint32_t get_uint32_random();
+[[maybe_unused]] static int32_t get_int32_random();
 
 // friend class to all containers to simplify test cases
 namespace fp128
@@ -46,13 +54,15 @@ class fp128_gtest
 };
 }  // namespace fp128
 
-__forceinline int32_t get_random_sign()
+// FP128_FORCE_INLINE rather than __forceinline: the latter only exists on the MSVC frontend and does
+// not compile under Clang on macOS or Linux.
+FP128_FORCE_INLINE int32_t get_random_sign()
 {
     return (rand() & 1) ? 1 : -1;
 }
 
 // returns a random number
-double static get_double_random(int32_t min_exponent = -10, int32_t max_exponent = 63)
+[[maybe_unused]] double static get_double_random(int32_t min_exponent = -10, int32_t max_exponent = 63)
 {
     Double res;
     int expo = (get_uint32_random() % (max_exponent - min_exponent)) + min_exponent;
@@ -86,12 +96,13 @@ int32_t static get_int32_random()
     return (int32_t)get_uint32_random() * get_random_sign();
 }
 
-char static get_digit_random()
+[[maybe_unused]] char static get_digit_random()
 {
     return (char)(rand() % 10) + '0';
 }
 // return true on overflow
-template <typename T, int I> bool check_overflow(T value, const fixed_point128<I>& d)
+// 'd' is only present so that I can be deduced from the call site; its value is never read.
+template <typename T, int I> bool check_overflow(T value, [[maybe_unused]] const fixed_point128<I>& d)
 {
     if constexpr (std::is_floating_point<T>::value) {
         value = fabs(value);
@@ -106,12 +117,12 @@ template <typename T, int I> bool check_overflow(T value, const fixed_point128<I
     return floor(log2(value)) >= I;
 }
 
-bool static check_overflow_uint128(double value)
+[[maybe_unused]] bool static check_overflow_uint128(double value)
 {
     return floor(log2(abs(value))) > 127;
 }
 
-bool static check_overflow_int128(double value)
+[[maybe_unused]] bool static check_overflow_int128(double value)
 {
     return floor(log2(abs(value))) > 126;
 }
@@ -190,7 +201,7 @@ template <typename T> T static ReferenceMultiply(const T& a, const T& b)
 // The high QWORD produced when a signed 64 bit value is sign extended to 128 bit. Mirrors what the
 // integral constructor does, so a reference value can be assembled from the two QWORDs without
 // going through the type under test.
-uint64_t static SignExtension(int64_t x)
+[[maybe_unused]] uint64_t static SignExtension(int64_t x)
 {
     return (x < 0) ? UINT64_MAX : 0ull;
 }

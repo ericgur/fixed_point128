@@ -1389,7 +1389,6 @@ TEST(float128, exp)
         double res = exp(value);
         float128 f1 = value;
         float128 float128_res = exp(f1);
-        double float128_res_ = (double)float128_res;
         EXPECT_DOUBLE_EQ(float128_res, res) << "exp: "
                                             << "value=" << value;
     }

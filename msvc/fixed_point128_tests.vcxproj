@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  fixed_point128_tests.vcxproj
+
+  The GoogleTest suite, built through MSBuild. The CMake equivalent is tests/CMakeLists.txt; the two
+  are kept in step by hand and the source list below is the thing to update when a test file is added.
+
+  Set this as the solution startup project to run the tests under the debugger. The ProjectReference
+  to googletest.vcxproj builds and links the static library automatically, and the natvis item below
+  is compiled into the PDB so the library types pretty-print in Locals and Watch.
+
+  Visual Studio's Test Explorer discovers the individual cases through the "Test Adapter for Google
+  Test" component, which allows debugging a single test without touching the command line arguments.
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug Clang x64|x64">
+      <Configuration>Debug Clang x64</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release Clang x64|x64">
+      <Configuration>Release Clang x64</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{6468231d-bbb6-4478-a65c-2a26d1e667c3}</ProjectGuid>
+    <RootNamespace>fixedpoint128tests</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Clang x64|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>ClangCL</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Clang x64|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>ClangCL</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="fixed_point128.common.props" />
+    <Import Project="fixed_point128.warnings.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <!-- Run from the output directory so a debugged test resolves relative paths the way ctest does. -->
+    <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(FP128Root)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!--
+        Static analysis is turned off for the tests. The GoogleTest assertion macros expand to
+        comparisons the analyzer reports as constant-versus-constant (C6326) thousands of times over,
+        which is inherent to how the macros work rather than a defect in the tests.
+      -->
+      <EnablePREfast>false</EnablePREfast>
+      <!--
+        4201  float128 stores its 128 bits in an anonymous struct wrapping an anonymous union. The
+              layout is the point of the type.
+        4702  MSVC reports the code after an `if constexpr` chain as unreachable for the instantiations
+              where an earlier branch returns, even though it is live for all the others.
+      -->
+      <DisableSpecificWarnings>4201;4702;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <!--
+        The string round-trip tests copy between fixed size buffers they own with strcpy/strlen, which
+        the Windows CRT marks deprecated in favour of its non-portable _s variants.
+      -->
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <!--
+    Where the GoogleTest headers come from, and how each toolset is told to stop warning about them.
+
+    MSVC honours /external:anglebrackets (set in fixed_point128.warnings.props), so a plain include
+    directory is enough. clang-cl does not implement that switch and needs the directory to be named
+    as a system include instead, which is what -imsvc does. The path is therefore added exactly once,
+    through whichever mechanism the active toolset understands.
+  -->
+  <ItemDefinitionGroup Condition="'$(PlatformToolset)'!='ClangCL'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(FP128GoogleTestDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(PlatformToolset)'=='ClangCL'">
+    <ClCompile>
+      <AdditionalOptions>-imsvc "$(FP128GoogleTestDir)include" %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="$(FP128Root)tests\fixed_point128_gtest.cpp" />
+    <ClCompile Include="$(FP128Root)tests\float128_gtest.cpp" />
+    <ClCompile Include="$(FP128Root)tests\int128_t_gtest.cpp" />
+    <ClCompile Include="$(FP128Root)tests\uint128_t_gtest.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(FP128Root)tests\gtest_shared.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="$(FP128Root)fixed_point128.natvis" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="googletest.vcxproj">
+      <Project>{2c43c518-cd01-49ee-8385-1e85a0da3e97}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

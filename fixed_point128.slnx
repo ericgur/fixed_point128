@@ -6,7 +6,15 @@
     <BuildType Name="Release Clang" />
     <Platform Name="x64" />
   </Configurations>
-  <Project Path="fixed_point128.vcxproj" Id="16ba4eff-3569-418b-82bf-f2b5deb3d612">
+  <Project Path="msvc/fixed_point128.vcxproj" Id="16ba4eff-3569-418b-82bf-f2b5deb3d612">
+    <BuildType Solution="Debug Clang|*" Project="Debug Clang x64" />
+    <BuildType Solution="Release Clang|*" Project="Release Clang x64" />
+  </Project>
+  <Project Path="msvc/fixed_point128_tests.vcxproj" Id="6468231d-bbb6-4478-a65c-2a26d1e667c3">
+    <BuildType Solution="Debug Clang|*" Project="Debug Clang x64" />
+    <BuildType Solution="Release Clang|*" Project="Release Clang x64" />
+  </Project>
+  <Project Path="msvc/googletest.vcxproj" Id="2c43c518-cd01-49ee-8385-1e85a0da3e97">
     <BuildType Solution="Debug Clang|*" Project="Debug Clang x64" />
     <BuildType Solution="Release Clang|*" Project="Release Clang x64" />
   </Project>

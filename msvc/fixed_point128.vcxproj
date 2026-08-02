@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  fixed_point128.vcxproj
+
+  The benchmark executable. The CMake equivalent is bench/CMakeLists.txt.
+
+  The library itself is header only and has nothing to build, so the headers appear here only to give
+  them a home in the Solution Explorer.
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug Clang x64|x64">
+      <Configuration>Debug Clang x64</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release Clang x64|x64">
+      <Configuration>Release Clang x64</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{16ba4eff-3569-418b-82bf-f2b5deb3d612}</ProjectGuid>
+    <RootNamespace>fixedpoint128</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug Clang x64|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>ClangCL</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release Clang x64|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>ClangCL</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="fixed_point128.common.props" />
+    <Import Project="fixed_point128.warnings.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(FP128Root)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!--
+        The benchmark measures the library at its fastest and is not expected to run on pre-Haswell
+        hardware. The unit tests deliberately stay on the baseline instruction set.
+        Mirrors fp128_set_arch_flags() in cmake/FP128CompilerOptions.cmake.
+      -->
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="$(FP128Root)include\fixed_point128.h" />
+    <ClInclude Include="$(FP128Root)include\fixed_point128_shared.h" />
+    <ClInclude Include="$(FP128Root)include\float128.h" />
+    <ClInclude Include="$(FP128Root)include\int128_shared.h" />
+    <ClInclude Include="$(FP128Root)include\int128_t.h" />
+    <ClInclude Include="$(FP128Root)include\uint128_t.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(FP128Root)bench\Bench.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(FP128Root).gitignore" />
+    <None Include="$(FP128Root)CLAUDE.md" />
+    <None Include="$(FP128Root)cpp.hint" />
+    <None Include="$(FP128Root)README.md" />
+    <None Include="$(FP128Root)CMakeLists.txt" />
+    <None Include="$(FP128Root)CMakePresets.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="$(FP128Root)fixed_point128.natvis" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
