@@ -106,11 +106,11 @@ Open `fixed_point128.slnx` in Visual Studio 2019 or newer. The solution holds th
 
 | Project | Output |
 | --- | --- |
-| `fixed_point128` | the benchmark executable |
+| `bench` | the benchmark executable |
 | `fixed_point128_tests` | the GoogleTest suite |
 | `googletest` | GoogleTest built as a static library from the submodule |
 
-Four configurations are available - `Debug`, `Release`, and `Debug Clang` / `Release Clang` for the
+Four configurations are available - `Debug`, `Release`, and `Debug_clang` / `Release_clang` for the
 Clang toolset - all for `x64`. Binaries are written to `bin/`.
 
 #### Running and debugging the tests
@@ -128,7 +128,7 @@ Set **fixed_point128_tests** as the startup project and press F5. The project re
   for example `--gtest_filter=float128.Add* --gtest_break_on_failure`. The latter drops into the
   debugger at the first failing assertion. These are stored in the untracked `.vcxproj.user` file.
 
-Switching the configuration to *Debug Clang* gives the same experience against the Clang-built binaries.
+Switching the configuration to *Debug_clang* gives the same experience against the Clang-built binaries.
 
 ## Updating GoogleTest
 
