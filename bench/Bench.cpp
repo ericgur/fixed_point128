@@ -54,10 +54,81 @@ struct Duration {
     inline static double frequency;
 };
 
-// get a value that makes the complier not optimize away certain expressions.
-template <typename T> __declspec(noinline) T get_const(T val)
+/**
+ * @brief Volatile sink written by DoNotOptimize().
+ *
+ * A store to a volatile object is an observable side effect, so no optimizer is permitted to remove
+ * it - nor the computation that produced the stored value.
+ */
+static volatile unsigned char benchSink = 0;
+
+/**
+ * @brief Makes @p value observable so the computation that produced it cannot be eliminated.
+ *
+ * Every byte of the object is stored to a volatile sink, which forces the complete value to be
+ * materialized. Call this after a timed loop on whatever the loop produced; without it the compiler
+ * is free to delete the entire loop body as dead code, and both MSVC and Clang do exactly that.
+ *
+ * The argument is taken by value and the function is deliberately not inlined, so that the address
+ * of the *caller's* variable is never taken. Taking it costs real throughput: a by reference,
+ * inlined version of this sink pins the accumulator of the cheap operators to a second register
+ * pair and MSVC then loses 24% on the addition benchmark, measuring the harness instead of the add.
+ *
+ * This is deliberately not cheap - it costs sizeof(T) volatile stores - so call it outside the timed
+ * loop, never inside it.
+ *
+ * @tparam T Type of the consumed value.
+ * @param value Value to make observable.
+ */
+template <typename T> FP128_NO_INLINE void DoNotOptimize(T value) noexcept
 {
-    return val;
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(&value);
+    for (size_t i = 0; i < sizeof(T); ++i) {
+        benchSink = bytes[i];
+    }
+}
+
+/**
+ * @brief Identity function used as the target of MakeOpaque()'s indirect call.
+ * @tparam T Type of the value passed through.
+ * @param value Value to return unchanged.
+ * @return @p value.
+ */
+template <typename T> [[nodiscard]] FP128_NO_INLINE T Identity(T value) noexcept
+{
+    return value;
+}
+
+/** @brief Pointer to function type used by MakeOpaque(). */
+template <typename T> using IdentityFunc = T (*)(T) noexcept;
+
+/**
+ * @brief Volatile pointer to Identity<T>(), reloaded from memory at every call.
+ *
+ * Being volatile is the whole point: the optimizer may not assume which function the pointer
+ * designates, so it can neither devirtualize the call nor propagate the argument through it.
+ */
+template <typename T> volatile IdentityFunc<T> identityPtr = &Identity<T>;
+
+/**
+ * @brief Returns @p value through a call the optimizer cannot see through.
+ *
+ * Used on the *input* of a timed loop. Because the result is opaque, loop invariant code motion
+ * cannot hoist an expression computed from it out of the loop, which would otherwise turn a timed
+ * loop over a pure function into a single evaluation plus an empty loop.
+ *
+ * The cost is one volatile load plus an indirect call: measured at roughly 5 cycles under MSVC and
+ * 18 under Clang, so it is noise for anything from sqrt() upwards, and a fixed floor under the cheap
+ * arithmetic operators - which is why the loop carried benchmarks (addition, subtraction, Mandelbrot)
+ * do not use it, being unhoistable on their own.
+ *
+ * @tparam T Type of the value passed through.
+ * @param value Value to hide from the optimizer.
+ * @return @p value, unchanged but opaque.
+ */
+template <typename T> [[nodiscard]] FP128_INLINE T MakeOpaque(T value) noexcept
+{
+    return identityPtr<T>(value);
 }
 
 void print_ips(const char* name, int64_t ips)
@@ -94,22 +165,22 @@ void bench_comparison_operators(double time_per_function = 1.0)
     fixed_point128<10> f2 = fixed_point128<10>::golden_ratio();
     int64_t dummy = 0;
     // start the clock
-    // get_const on both operands each iteration prevents LICM from hoisting the
-    // loop-invariant comparisons. get_const(dummy) as a sink forces dummy to be
-    // live, preventing dead-code elimination of the loop body.
+    // Hiding one operand is enough to stop LICM from hoisting the loop invariant comparisons out of
+    // the loop, and costs half of what hiding both would. DoNotOptimize(dummy) after the loop keeps
+    // the accumulated result observable; the previous sink went through an int64_t overload of the
+    // opaque helper that MSVC proved pure and deleted, taking the whole loop body with it.
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            const auto v1 = get_const(f1);
-            const auto v2 = get_const(f2);
-            dummy += (v1 > v2);
-            dummy += (v1 >= v2);
-            dummy += (v1 < v2);
-            dummy += (v1 <= v2);
+            const auto v1 = MakeOpaque(f1);
+            dummy += (v1 > f2);
+            dummy += (v1 >= f2);
+            dummy += (v1 < f2);
+            dummy += (v1 <= f2);
         }
         total_iterations += 4 * BENCH_ITERATIONS;
     }
-    dummy = get_const(dummy);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(dummy);
 
     print_ips("Operators >, >=, <, <= (average of all 4)", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -122,8 +193,8 @@ void bench_addition(double time_per_function = 1.0)
     fixed_point128<10> f1 = fabs(fixed_point128<10>::pi());
     fixed_point128<10> f2 = fixed_point128<10>::e();
     // f3 accumulates each iteration, creating a loop-carried dependency that
-    // prevents LICM from hoisting the addition out of the loop. get_const(f3)
-    // after the loop is an opaque noinline call that forces f3 to be live,
+    // prevents LICM from hoisting the addition out of the loop. DoNotOptimize(f3)
+    // after the loop stores f3 to a volatile sink, forcing it to be live and
     // preventing dead-code elimination of the entire loop body.
     fixed_point128<10> f3 = f2;
     // start the clock
@@ -134,7 +205,7 @@ void bench_addition(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(f3);
     print_ips("Addition", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -146,8 +217,8 @@ void bench_subtraction(double time_per_function = 1.0)
     fixed_point128<10> f1 = fabs(fixed_point128<10>::pi());
     fixed_point128<10> f2 = fixed_point128<10>::e();
     // f3 accumulates each iteration, creating a loop-carried dependency that
-    // prevents LICM from hoisting the subtraction out of the loop. get_const(f3)
-    // after the loop is an opaque noinline call that forces f3 to be live,
+    // prevents LICM from hoisting the subtraction out of the loop. DoNotOptimize(f3)
+    // after the loop stores f3 to a volatile sink, forcing it to be live and
     // preventing dead-code elimination of the entire loop body.
     fixed_point128<10> f3 = f1;
     // start the clock
@@ -158,7 +229,7 @@ void bench_subtraction(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(f3);
     print_ips("Subtraction", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -177,25 +248,31 @@ void bench_multiplication(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = get_const(f1) * f2;
+            f3 = MakeOpaque(f1) * f2;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(f3);
     print_ips("Multiplication by fixed_point128", (uint64_t)(total_iterations / dur.duration()));
 
-    // Initialize to 1 so the compiler cannot prove f10 is always 0 and eliminate the loop.
-    fixed_point128<32> f10 = 1;
-    uint32_t int_val = 123456789;
+    // The multiplicand is hidden behind MakeOpaque() rather than accumulated into a single value.
+    // The accumulating form (f10 = f10 * int_val) was degenerate: the low QWORD of the product does
+    // not depend on the high QWORD, so with nothing observing the result both compilers proved the
+    // high half dead. MSVC collapsed the whole operation into a single 64 bit mulx and Clang went
+    // further, vectorizing the remaining chain 4 wide - neither was timing a 128 bit multiply.
+    // pi * 123456789 needs 29 integer bits, so it fits fixed_point128<32> without overflowing.
+    fixed_point128<32> f10 = fixed_point128<32>::pi();
+    fixed_point128<32> f11;
+    const uint32_t int_val = 123456789;
     total_iterations = 0;
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f10 = f10 * int_val;
+            f11 = MakeOpaque(f10) * int_val;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    f10 = get_const(f10);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(f11);
     print_ips("Multiplication by int32_t", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -210,29 +287,29 @@ void bench_division(double time_per_function = 1.0)
     total_iterations = 0;
 
     // start the clock
-    // get_const on the dividend each iteration prevents LICM from hoisting the
+    // MakeOpaque on the dividend each iteration prevents LICM from hoisting the
     // loop-invariant division out of the loop, without causing value accumulation
     // that would produce degenerate (zero/overflow) inputs.
-    double dval = get_const(64.0);
+    double dval = MakeOpaque(64.0);
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = get_const(f1) / dval;
+            f3 = MakeOpaque(f1) / dval;
         }
-        total_iterations += 2 * BENCH_ITERATIONS;
+        total_iterations += BENCH_ITERATIONS;
     }
-    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(f3);
     print_ips("Division by double (exponent of 2)", (uint64_t)(total_iterations / dur.duration()));
 
     total_iterations = 0;
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = get_const(f1) / 5ll;
+            f3 = MakeOpaque(f1) / 5ll;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(f3);
     print_ips("Division by int64", (uint64_t)(total_iterations / dur.duration()));
 
     fixed_point128<10> f4 = 5;
@@ -240,22 +317,22 @@ void bench_division(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = get_const(f1) / f4;
+            f3 = MakeOpaque(f1) / f4;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(f3);
     print_ips("Division by fixed_point128 (int)", (uint64_t)(total_iterations / dur.duration()));
 
     total_iterations = 0;
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = get_const(f1) / f2;
+            f3 = MakeOpaque(f1) / f2;
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    f3 = get_const(f3);  // opaque sink: forces the loop to actually execute
+    DoNotOptimize(f3);
     print_ips("Division by fixed_point128 (float)", (uint64_t)(total_iterations / dur.duration()));
 }
 
@@ -270,13 +347,11 @@ void bench_reciprocal(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = reciprocal(f1);
+            f2 = reciprocal(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("reciprocal", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -292,13 +367,11 @@ void bench_sqrt(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = sqrt(f1);
+            f2 = sqrt(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("sqrt", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -314,13 +387,11 @@ void bench_exp(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = exp(f1);
+            f2 = exp(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("exp", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -336,13 +407,11 @@ void bench_exp2(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = exp2(f1);
+            f2 = exp2(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("exp2", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -358,13 +427,11 @@ void bench_expm1(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = expm1(f1);
+            f2 = expm1(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("expm1", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -381,13 +448,11 @@ void bench_pow(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = pow(f1, f2);
+            f3 = pow(MakeOpaque(f1), f2);
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f3) {
-        f3++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f3);
 
     print_ips("pow", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -403,13 +468,11 @@ void bench_log(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = log(f1);
+            f2 = log(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("log", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -425,13 +488,11 @@ void bench_log2(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = log2(f1);
+            f2 = log2(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("log2", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -447,13 +508,11 @@ void bench_log10(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = log10(f1);
+            f2 = log10(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("log10", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -469,13 +528,11 @@ void bench_log1p(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = log1p(f1);
+            f2 = log1p(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("log1p", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -491,13 +548,11 @@ void bench_sin(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = sin(f1);
+            f2 = sin(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("sin", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -513,13 +568,11 @@ void bench_asin(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = asin(f1);
+            f2 = asin(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("asin", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -535,13 +588,11 @@ void bench_cos(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = cos(f1);
+            f2 = cos(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("cos", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -557,13 +608,11 @@ void bench_acos(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = acos(f1);
+            f2 = acos(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("acos", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -579,13 +628,11 @@ void bench_tan(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = tan(f1);
+            f2 = tan(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("tan", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -601,13 +648,11 @@ void bench_atan(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = atan(f1);
+            f2 = atan(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("atan", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -623,13 +668,11 @@ void bench_sinh(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = sinh(f1);
+            f2 = sinh(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("sinh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -645,13 +688,11 @@ void bench_asinh(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = asinh(f1);
+            f2 = asinh(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("asinh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -667,13 +708,11 @@ void bench_cosh(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = cosh(f1);
+            f2 = cosh(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("cosh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -689,13 +728,11 @@ void bench_acosh(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = acosh(f1);
+            f2 = acosh(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("acosh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -711,13 +748,11 @@ void bench_tanh(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = tanh(f1);
+            f2 = tanh(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("tanh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -733,13 +768,11 @@ void bench_atanh(double time_per_function = 1.0)
     dur.start();
     while (dur.cur_duration() < time_per_function) {
         for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = tanh(f1);
+            f2 = atanh(MakeOpaque(f1));
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (f2) {
-        f2++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(f2);
 
     print_ips("atanh", (uint64_t)(total_iterations / dur.duration()));
 }
@@ -750,9 +783,11 @@ void bench_mandelbrot(double time_per_function = 1.0)
     uint64_t total_iterations = 0;
     // setup
     fixed_point128<10> usq, vsq, tmp, modulus, u, v;
-    // a point that doesn't diverge quickly
-    fixed_point128<10> x = -0.7294734415;
-    fixed_point128<10> y = 0.242809;
+    // A point that doesn't diverge quickly. Both coordinates are hidden from the optimizer so the
+    // iteration cannot be constant folded; the orbit itself is loop carried, so nothing inside the
+    // loop is hoistable and no per-iteration barrier is needed.
+    fixed_point128<10> x = MakeOpaque(fixed_point128<10>(-0.7294734415));
+    fixed_point128<10> y = MakeOpaque(fixed_point128<10>(0.242809));
     // start the clock
     dur.start();
     while (dur.cur_duration() < time_per_function) {
@@ -771,9 +806,7 @@ void bench_mandelbrot(double time_per_function = 1.0)
         }
         total_iterations += BENCH_ITERATIONS;
     }
-    if (modulus) {
-        modulus++;
-    }  // fool the complier into not optimizing away the benchmark
+    DoNotOptimize(modulus);
 
     print_ips("Mandelbrot", (uint64_t)(total_iterations / dur.duration()));
 }
