@@ -840,31 +840,7 @@ public:
      */
     FP128_FORCE_INLINE constexpr fixed_point128& operator+=(const fixed_point128& rhs) noexcept
     {
-        // same sign: the simple case
-        if (rhs.sign == sign) {
-            // add the rhs value
-            const uint8_t carry = addcarryx_u64(0, low, rhs.low, &low);
-            addcarryx_u64(carry, high, rhs.high, &high);
-        }
-        // different sign: invert the sign for this and subtract
-        else {
-            sign ^= 1;
-            bool result_has_different_sign = (sign) ? rhs > *this : rhs < *this;
-            twos_complement128(low, high);
-
-            // add the rhs value
-            const uint8_t carry = addcarryx_u64(0, low, rhs.low, &low);
-            addcarryx_u64(carry, high, rhs.high, &high);
-
-            // if result is with a different sign, invert it along with the sign.
-            if (result_has_different_sign) {
-                sign ^= 1;
-                twos_complement128(low, high);
-            }
-
-            reset_sign_for_zero();
-        }
-        return *this;
+        return AddMagnitude(rhs, rhs.sign);
     }
     /**
      * @brief Add a value to this object
@@ -879,8 +855,11 @@ public:
      */
     FP128_FORCE_INLINE constexpr fixed_point128& operator-=(const fixed_point128& rhs) noexcept
     {
-        *this += -rhs;
-        return *this;
+        // Subtracting rhs is adding it with the opposite sign. Passing the flipped sign to the
+        // shared core is what keeps this as cheap as operator+=: forming an actual negated copy
+        // instead (*this += -rhs) costs a temporary plus the reset_sign_for_zero() that
+        // operator-() performs on it, and inverts which branch of the core the common case takes.
+        return AddMagnitude(rhs, rhs.sign ^ 1);
     }
     /**
      * @brief Subtract a value to this object
@@ -1495,6 +1474,50 @@ private:
      * @brief Set the sign to 0 when both low and high are zero, i.e. avoid having negative zero value
      */
     FP128_INLINE constexpr void reset_sign_for_zero() noexcept { sign &= (0 != low || 0 != high); }
+
+    /**
+     * @brief Adds the magnitude of rhs to this object, treating rhs as if it carried sign rhsSign.
+     *
+     * Shared core of operator+= and operator-=. In a sign and magnitude representation the two
+     * differ only in the sign attributed to the addend, so passing that sign in as a parameter lets
+     * both operators reach the same code without either of them building a negated copy of rhs.
+     *
+     * Two cases:
+     * - Like signs: the magnitudes add and the sign is unchanged. Two instructions, and no zero
+     *   check is needed because a sum of magnitudes is zero only when both operands already were.
+     * - Unlike signs: the magnitudes subtract and the larger one keeps its sign. Which of the two
+     *   is larger is not established up front: the difference is taken in one direction and its
+     *   borrow out answers the question for free, so the ordinary case costs a subtract and a
+     *   not-taken branch. Only when the subtraction ran the wrong way round does the two's
+     *   complement pass run, turning the wrapped difference back into a magnitude.
+     *
+     * @param rhs Right hand side operand; only its magnitude is read, its sign is ignored.
+     * @param rhsSign Sign to attribute to rhs: rhs.sign to add it, rhs.sign ^ 1 to subtract it.
+     * @return This object.
+     */
+    FP128_FORCE_INLINE constexpr fixed_point128& AddMagnitude(const fixed_point128& rhs, uint32_t rhsSign) noexcept
+    {
+        // like signs: the magnitudes add and the sign is unchanged
+        if (rhsSign == sign) {
+            const uint8_t carry = addcarryx_u64(0, low, rhs.low, &low);
+            addcarryx_u64(carry, high, rhs.high, &high);
+            return *this;
+        }
+
+        // unlike signs: the magnitudes subtract. Writing each half of the difference straight back
+        // is safe even when rhs aliases this object - as it does for a -= a, which reaches this
+        // branch - because every QWORD of rhs is read before its counterpart here is overwritten.
+        const uint8_t borrow = subborrow_u64(0, low, rhs.low, &low);
+        // A borrow out of the high QWORD means rhs had the larger magnitude, so the difference
+        // wrapped and the result takes rhs's sign. Equal magnitudes do not borrow and yield a zero
+        // whose sign is cleared below.
+        if (subborrow_u64(borrow, high, rhs.high, &high)) {
+            twos_complement128(low, high);
+            sign = rhsSign;
+        }
+        reset_sign_for_zero();
+        return *this;
+    }
 
     /// @}
 

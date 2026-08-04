@@ -297,6 +297,29 @@ FP128_FORCE_INLINE constexpr unsigned char addcarryx_u64(unsigned char c, uint64
     return _addcarryx_u64(c, a, b, out);
 }
 
+/**
+ * @brief 64-bit subtract with borrow, wrapping the SBB instruction.
+ * @param b Input borrow (0 or 1).
+ * @param a Minuend.
+ * @param c Subtrahend.
+ * @param out Pointer to receive the 64-bit difference.
+ * @return Output borrow (0 or 1).
+ */
+FP128_FORCE_INLINE constexpr unsigned char subborrow_u64(unsigned char b, uint64_t a, uint64_t c, uint64_t* out) noexcept
+{
+    FP128_ASSERT(out != nullptr);  // Caller must provide a valid pointer for the result.
+    if (std::is_constant_evaluated()) {
+        // Unsigned subtraction wraps, so a difference that came out larger than the minuend is
+        // exactly the borrow out. The result is at least -(2^65-1), so at most one of the two
+        // subtractions can borrow.
+        const uint64_t diff = a - c;
+        const uint64_t res = diff - b;
+        *out = res;
+        return static_cast<unsigned char>((diff > a) | (res > diff));
+    }
+    return _subborrow_u64(b, a, c, out);
+}
+
 //
 // GCC/Clang portable fallback implementations
 //
@@ -444,6 +467,28 @@ FP128_FORCE_INLINE static constexpr unsigned char addcarryx_u64(unsigned char c,
     __uint128_t r = (__uint128_t)a + b + c;
     *out = (uint64_t)r;
     return (unsigned char)(r >> 64);
+}
+
+/**
+ * @brief 64-bit subtract with borrow (GCC/Clang fallback for _subborrow_u64).
+ *
+ * Unlike its addcarryx_u64 neighbour this has no hand written AArch64 variant. The subtraction of a
+ * borrow is expressed naturally by the __uint128_t expression below, which Clang already lowers to
+ * the SUBS/SBCS pair an assembly version would have spelled out, so there is nothing left to win.
+ *
+ * @param b Input borrow (0 or 1).
+ * @param a Minuend.
+ * @param c Subtrahend.
+ * @param out Pointer to receive the 64-bit difference.
+ * @return Output borrow (0 or 1).
+ */
+FP128_FORCE_INLINE static constexpr unsigned char subborrow_u64(unsigned char b, uint64_t a, uint64_t c, uint64_t* out) noexcept
+{
+    FP128_ASSERT(out != nullptr);  // Caller must provide a valid pointer for the result. Compatibility with MSVC intrinsic.
+    __uint128_t r = (__uint128_t)a - c - b;
+    *out = (uint64_t)r;
+    // The difference wraps when it borrows, so bit 64 of the 128-bit result is the borrow out.
+    return (unsigned char)((r >> 64) & 1);
 }
 
 /**
