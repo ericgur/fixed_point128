@@ -250,7 +250,7 @@ public:
 
         // overflow which catches NaN and Inf
         if constexpr (is_signed) {
-            // -(2**127) is represnted correctly (doesn't overflow)
+            // -(2**127) is represented correctly (doesn't overflow)
             if (e > 126) {
                 if (d.s() == 0) {
                     high = 0x8000000000000000ull - 1;
@@ -667,10 +667,13 @@ public:
      */
     FP128_INLINE constexpr int128_base& operator-=(const int128_base& rhs) noexcept
     {
-        int128_base temp = rhs;
-        twos_complement128(temp.low, temp.high);
-        const uint8_t carry = addcarryx_u64(0, low, temp.low, &low);
-        addcarryx_u64(carry, high, temp.high, &high);
+        // Subtracting directly rather than adding the two's complement of rhs. Both are the same
+        // difference modulo 2^128, but neither compiler folds the negate-and-add form back into a
+        // borrow chain: MSVC emits the whole neg/not/sete sequence and lands on twice the
+        // instruction count of operator+=. Writing the difference back in place is safe when rhs
+        // aliases this object, each QWORD of rhs being read before its counterpart is overwritten.
+        const uint8_t borrow = subborrow_u64(0, low, rhs.low, &low);
+        subborrow_u64(borrow, high, rhs.high, &high);
         return *this;
     }
     /**
@@ -1287,9 +1290,9 @@ public:
      */
     [[nodiscard]] FP128_INLINE constexpr bool is_int() const noexcept { return true; }
     /**
-     * @brief Returns true if the value positive (incuding zero)
+     * @brief Returns true if the value is positive (including zero)
      * Always true for the unsigned type, which lets the sign tests in the shared code fold away.
-     * @return True when the the value positive
+     * @return True when the value is positive
      */
     [[nodiscard]] FP128_INLINE constexpr bool is_positive() const noexcept
     {
@@ -1302,7 +1305,7 @@ public:
     /**
      * @brief Returns true if the value negative (smaller than zero)
      * Always false for the unsigned type, which lets the sign tests in the shared code fold away.
-     * @return True when the the value negative
+     * @return True when the value is negative
      */
     [[nodiscard]] FP128_INLINE constexpr bool is_negative() const noexcept
     {
