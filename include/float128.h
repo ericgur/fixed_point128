@@ -362,7 +362,7 @@ public:
             return;
 
         constexpr uint64_t base16_max_digits = (112 + 4) / 4;  // 29 hex digits. 28 for the fraction (112 bit) and another for the unity
-        constexpr uint64_t base10_max_digits = 35;             // maximum for 112 bit of manstissa/fraction is 34, read one extra to get maximum precision
+        constexpr uint64_t base10_max_digits = 35;             // maximum for 112 bit of mantissa/fraction is 34, read one extra to get maximum precision
         uint32_t sign = 0;
         uint32_t base = 10;
         int32_t expo2 = 0;   // base2 exponent
@@ -444,7 +444,7 @@ public:
             char* cur_digit = int_start;
             char* const end_digit = int_start + digits_consumed;
 
-            // fill the internal structure starting the the top bits of high
+            // fill the internal structure starting at the top bits of high
             while (cur_digit < end_digit) {
                 uint64_t d = *cur_digit;
                 if (d >= '0' && d <= '9')
@@ -505,7 +505,7 @@ public:
             }
 
             // TODO: optimize small numbers
-            // integer part is zero - skip the leading zeros in the fraction and ajust the exponent
+            // integer part is zero - skip the leading zeros in the fraction and adjust the exponent
             // example 0.01 == 0.1E-1
             // if (int_digits == 0 && frac_start != nullptr) {
             //    while (*frac_start == '0') {
@@ -1468,7 +1468,7 @@ public:
      */
     [[nodiscard]] FP128_INLINE constexpr bool is_signaling() const
     {
-        // TODO: supprot sNaN
+        // TODO: support sNaN
         return false;
     }
     /**
@@ -1870,7 +1870,7 @@ public:
         e += shift;
         if (shift > 0) {
             shift_right128_inplace_safe(l, h, shift);
-            // rounding up may have happended, expect the the upper 16 bit to be exactly 1
+            // rounding up may have happened, expect the upper 16 bit to be exactly 1
             if ((h >> 48) != 1) {
                 ++e;
             }
@@ -2479,7 +2479,7 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE constexpr float128 fdim(const float128& x, const float128& y) noexcept { return (x > y) ? x - y : float128(); }
     /**
-     * @brief Returns the minimun between x and y.
+     * @brief Returns the minimum between x and y.
      * @param x First value
      * @param y Second value
      * @return If x < y returns x. Otherwise y.
@@ -3036,7 +3036,7 @@ public:
     }
     /**
      * @brief Calculate the cosine function over a limited range [-0.5pi, 0.5pi]
-     * Since the sin1 function converges faster, call it with the modifed angle.
+     * Since the sin1 function converges faster, call it with the modified angle.
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Cosine of x
      */

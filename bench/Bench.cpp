@@ -28,8 +28,12 @@
 // #define FP128_DISABLE_INLINE TRUE
 
 #include <cstdio>
+#include <cstring>
 #include <chrono>
 #include <format>
+#include <fstream>
+#include <string>
+#include <vector>
 #include "fixed_point128.h"
 #include "uint128_t.h"
 
@@ -131,8 +135,44 @@ template <typename T> [[nodiscard]] FP128_INLINE T MakeOpaque(T value) noexcept
     return identityPtr<T>(value);
 }
 
+/**
+ * @brief A single benchmark measurement, recorded by print_ips().
+ *
+ * Measurements are always collected, whether or not a JSON report was requested: recording happens
+ * outside every timed loop, so it cannot perturb a result, and collecting unconditionally keeps the
+ * benchmark functions free of any knowledge of the output format.
+ */
+struct BenchResult {
+    std::string group;  ///< Title of the group the measurement belongs to.
+    std::string name;   ///< Name of the measured operation, as printed to the terminal.
+    int64_t ips;        ///< Measured iterations per second.
+};
+
+/** @brief Every measurement taken so far, in execution order. */
+static std::vector<BenchResult> benchResults;
+
+/** @brief Title of the group currently being benchmarked; tags each new result. */
+static std::string currentGroup;
+
+/**
+ * @brief Prints a group banner and tags all subsequent results as belonging to that group.
+ *
+ * The rules above and below the title are sized to the title, which is why the banner is built here
+ * rather than being spelled out at each call site.
+ *
+ * @param title Group title, e.g. "Arithmetic benchmark".
+ */
+void PrintGroupHeader(const char* title)
+{
+    currentGroup = title;
+    const std::string rule(std::strlen(title), '-');
+    printf("\n%s\n%s\n%s\n", rule.c_str(), title, rule.c_str());
+}
+
 void print_ips(const char* name, int64_t ips)
 {
+    benchResults.push_back(BenchResult { currentGroup, name, ips });
+
     if (ips < 1000) {
         printf("%s: %lld/s\n", name, ips);
     } else if (ips < 1000000) {
@@ -153,10 +193,7 @@ void print_ips(const char* name, int64_t ips)
  */
 void bench_comparison_operators(double time_per_function = 1.0)
 {
-    printf("\n");
-    printf("-----------------------------\n");
-    printf("Comparison operator benchmark\n");
-    printf("-----------------------------\n");
+    PrintGroupHeader("Comparison operator benchmark");
 
     Duration dur;
     uint64_t total_iterations = 0;
@@ -811,16 +848,13 @@ void bench_mandelbrot(double time_per_function = 1.0)
     print_ips("Mandelbrot", (uint64_t)(total_iterations / dur.duration()));
 }
 /**
- * @brief Benches all simple arithmatic functions
+ * @brief Benches all simple arithmetic functions
  * @param time_per_function Time spent in each sub-test
  */
 
-void bench_arithmatic(double time_per_function = 1.0)
+void bench_arithmetic(double time_per_function = 1.0)
 {
-    printf("\n");
-    printf("--------------------\n");
-    printf("Arithmatic benchmark\n");
-    printf("--------------------\n");
+    PrintGroupHeader("Arithmetic benchmark");
 
     bench_addition(time_per_function);
     bench_subtraction(time_per_function);
@@ -836,10 +870,7 @@ void bench_arithmatic(double time_per_function = 1.0)
 
 void bench_exponents(double time_per_function = 1.0)
 {
-    printf("\n");
-    printf("-------------------\n");
-    printf("Exponents benchmark\n");
-    printf("-------------------\n");
+    PrintGroupHeader("Exponents benchmark");
     bench_sqrt(time_per_function);
     bench_exp(time_per_function);
     bench_exp2(time_per_function);
@@ -853,10 +884,7 @@ void bench_exponents(double time_per_function = 1.0)
  */
 void bench_log_functions(double time_per_function = 1.0)
 {
-    printf("\n");
-    printf("---------------------\n");
-    printf("Logarithmic benchmark\n");
-    printf("---------------------\n");
+    PrintGroupHeader("Logarithmic benchmark");
 
     bench_log(time_per_function);
     bench_log2(time_per_function);
@@ -870,10 +898,7 @@ void bench_log_functions(double time_per_function = 1.0)
  */
 void bench_trig_functions(double time_per_function = 1.0)
 {
-    printf("\n");
-    printf("----------------------\n");
-    printf("Trigonometic benchmark\n");
-    printf("----------------------\n");
+    PrintGroupHeader("Trigonometric benchmark");
 
     bench_sin(time_per_function);
     bench_asin(time_per_function);
@@ -889,20 +914,14 @@ void bench_trig_functions(double time_per_function = 1.0)
  */
 void bench_special_functions(double time_per_function = 1.0)
 {
-    printf("\n");
-    printf("--------------------------\n");
-    printf("Special function benchmark\n");
-    printf("--------------------------\n");
+    PrintGroupHeader("Special function benchmark");
 
     bench_mandelbrot(time_per_function);
 }
 
 void bench_hyperbolic_trig_functions(double time_per_function = 1.0)
 {
-    printf("\n");
-    printf("---------------------------------\n");
-    printf("Hyperbolic trigonometic benchmark\n");
-    printf("---------------------------------\n");
+    PrintGroupHeader("Hyperbolic trigonometric benchmark");
 
     bench_sinh(time_per_function);
     bench_asinh(time_per_function);
@@ -912,27 +931,173 @@ void bench_hyperbolic_trig_functions(double time_per_function = 1.0)
     bench_atanh(time_per_function);
 }
 /**
+ * @brief Returns the human readable name and version of the compiler that built this binary.
+ *
+ * clang-cl defines both `__clang__` and `_MSC_VER`; `__clang__` is therefore tested first, so a
+ * clang-cl build is reported as Clang - the code generator, which is what a benchmark result depends
+ * on, rather than the flag syntax.
+ *
+ * @return Compiler description, e.g. "MSVC 19.44".
+ */
+[[nodiscard]] std::string CompilerName()
+{
+#ifdef __clang__
+    return format("Clang {}", __clang_version__);
+#elif defined(__GNUC__) || defined(__GNUG__)
+    return format("GCC {}.{}", __GNUC__, __GNUC_MINOR__);
+#elif defined(_MSC_VER)
+    return format("MSVC {}.{}", _MSC_VER / 100, _MSC_VER - 100 * (_MSC_VER / 100));
+#else
+    return "an unknown compiler";
+#endif
+}
+
+/**
+ * @brief Returns a file name safe identifier of the compiler and its version.
+ *
+ * Unlike CompilerName(), this never embeds `__clang_version__`, which carries the vendor string and
+ * repository URL and so contains spaces and slashes.
+ *
+ * @return Compiler tag, e.g. "clang-19.1.5" or "msvc-19.44".
+ */
+[[nodiscard]] std::string CompilerTag()
+{
+#ifdef __clang__
+    return format("clang-{}.{}.{}", __clang_major__, __clang_minor__, __clang_patchlevel__);
+#elif defined(__GNUC__) || defined(__GNUG__)
+    return format("gcc-{}.{}", __GNUC__, __GNUC_MINOR__);
+#elif defined(_MSC_VER)
+    return format("msvc-{}.{}", _MSC_VER / 100, _MSC_VER - 100 * (_MSC_VER / 100));
+#else
+    return "unknown";
+#endif
+}
+
+/**
+ * @brief Returns the build type this binary was compiled with.
+ *
+ * Uses the same condition as the library itself (fixed_point128_shared.h), so the reported build
+ * type cannot disagree with the one the measured code was compiled under.
+ *
+ * @return "debug" or "release".
+ */
+[[nodiscard]] constexpr const char* BuildType() noexcept
+{
+#if defined _DEBUG || defined DEBUG
+    return "debug";
+#else
+    return "release";
+#endif
+}
+
+/**
+ * @brief Returns the name of the JSON report for this binary.
+ *
+ * The name encodes the compiler and the build type so that reports from different toolchains, or
+ * from a debug and a release build of the same toolchain, never overwrite one another.
+ *
+ * @return File name, e.g. "bench_msvc-19.44_release.json".
+ */
+[[nodiscard]] std::string JsonFileName()
+{
+    return format("bench_{}_{}.json", CompilerTag(), BuildType());
+}
+
+/**
+ * @brief Returns the current UTC time as an ISO 8601 timestamp, e.g. "2026-08-04T09:15:42Z".
+ */
+[[nodiscard]] std::string Timestamp()
+{
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    return format("{:%FT%TZ}", now);
+}
+
+/**
+ * @brief Escapes a string for embedding in a JSON string literal.
+ *
+ * Benchmark names are ASCII and currently contain nothing that needs escaping, but they are free
+ * text; escaping here means adding a name later can never silently produce invalid JSON.
+ *
+ * @param text String to escape.
+ * @return @p text with all JSON control characters escaped.
+ */
+[[nodiscard]] std::string EscapeJson(const std::string& text)
+{
+    std::string res;
+    res.reserve(text.size());
+    for (const char c : text) {
+        switch (c) {
+        case '"':  res += "\\\""; break;
+        case '\\': res += "\\\\"; break;
+        case '\b': res += "\\b";  break;
+        case '\f': res += "\\f";  break;
+        case '\n': res += "\\n";  break;
+        case '\r': res += "\\r";  break;
+        case '\t': res += "\\t";  break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                res += format("\\u{:04x}", static_cast<unsigned>(static_cast<unsigned char>(c)));
+            } else {
+                res += c;
+            }
+            break;
+        }
+    }
+
+    return res;
+}
+
+/**
+ * @brief Writes every recorded measurement to @p path as JSON.
+ *
+ * The report holds the build metadata needed to compare two runs meaningfully - compiler, build type
+ * and the timing parameters - followed by the results in execution order, each tagged with the group
+ * it was printed under.
+ *
+ * @param path Destination file, overwritten if it exists.
+ * @return true on success, false if the file could not be written.
+ */
+bool WriteJsonReport(const std::string& path)
+{
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        return false;
+    }
+
+    file << "{\n";
+    file << format("  \"compiler\": \"{}\",\n", EscapeJson(CompilerName()));
+    file << format("  \"compilerTag\": \"{}\",\n", CompilerTag());
+    file << format("  \"build\": \"{}\",\n", BuildType());
+    file << format("  \"timestamp\": \"{}\",\n", Timestamp());
+    file << format("  \"timePerFunction\": {},\n", TIME_PER_FUNCTION);
+    file << format("  \"benchIterations\": {},\n", BENCH_ITERATIONS);
+    file << "  \"results\": [\n";
+    for (size_t i = 0; i < benchResults.size(); ++i) {
+        const auto& result = benchResults[i];
+        const char* separator = (i + 1 < benchResults.size()) ? "," : "";
+        file << format("    {{ \"group\": \"{}\", \"name\": \"{}\", \"iterationsPerSecond\": {} }}{}\n",
+                       EscapeJson(result.group), EscapeJson(result.name), result.ips, separator);
+    }
+    file << "  ]\n";
+    file << "}\n";
+    file.flush();
+
+    return file.good();
+}
+
+/**
  * @brief Main benchmark function
  */
 void bench()
 {
-#ifdef __clang__
-    auto compiler = format("Clang {}", __clang_version__);
-#elif defined(__GNUC__) || defined(__GNUG__)
-    auto compiler = "GCC";
-#elif defined(_MSC_VER)
-    auto compiler = format("MSVC {}.{}", _MSC_VER / 100, _MSC_VER - 100 * (_MSC_VER / 100));
-#else
-    auto compiler = "an unknown compiler";
-#endif
-    printf("Compiled with %s\n", compiler.c_str());
+    printf("Compiled with %s\n", CompilerName().c_str());
     printf("=========================\n");
     printf("Single threaded benchmark\n");
     printf("=========================\n");
 
     // run the function groups
     bench_comparison_operators(TIME_PER_FUNCTION);
-    bench_arithmatic(TIME_PER_FUNCTION);
+    bench_arithmetic(TIME_PER_FUNCTION);
     bench_exponents(TIME_PER_FUNCTION);
     bench_log_functions(TIME_PER_FUNCTION);
     bench_trig_functions(TIME_PER_FUNCTION);
@@ -1135,13 +1300,49 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)a; (void)b; (void)c; (void)f10; (void)fact_res;
 }
 
-int main()
+/**
+ * @brief Prints the command line usage of the benchmark.
+ * @param exeName Name the executable was invoked with.
+ */
+void PrintUsage(const char* exeName)
 {
+    printf("Usage: %s [-j|--json] [-h|--help]\n", exeName);
+    printf("  -j, --json  Write the results to a JSON file in addition to the terminal.\n");
+    printf("              The file is named after the compiler and build type, e.g. %s\n", JsonFileName().c_str());
+    printf("  -h, --help  Print this help text and exit.\n");
+}
+
+int main(int argc, char* argv[])
+{
+    bool jsonOutput = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "-j") == 0 || std::strcmp(argv[i], "--json") == 0) {
+            jsonOutput = true;
+        } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
+            PrintUsage(argv[0]);
+            return 0;
+        } else {
+            printf("Unknown option: %s\n", argv[i]);
+            PrintUsage(argv[0]);
+            return 1;
+        }
+    }
+
     // Force instantiation of all public methods and friend functions for I=1, 40 and 64.
     force_instantiation<1>();
     force_instantiation<40>();
     force_instantiation<64>();
 
     bench();
+
+    if (jsonOutput) {
+        const std::string path = JsonFileName();
+        if (!WriteJsonReport(path)) {
+            fprintf(stderr, "\nFailed to write the JSON report to '%s'\n", path.c_str());
+            return 1;
+        }
+        printf("\nJSON report written to %s\n", path.c_str());
+    }
+
     return 0;
 }

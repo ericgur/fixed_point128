@@ -82,7 +82,7 @@ class fp128_gtest;                          ///< Google test class (friend).
 template <int32_t I> class fixed_point128;  ///< Forward declaration of the main template class.
 
 // Note: Release builds will fail without these forward declarations. Hints towards compiler a bug (VS2022 v17.4)
-// The compiler and Intelisense don't match these functions in some cases and try to use the CRT versions which
+// The compiler and IntelliSense don't match these functions in some cases and try to use the CRT versions which
 // causes a compilation error.
 
 /// @name CRT-Style Math Functions (Forward Declarations)
@@ -142,7 +142,7 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  *
  * This template provides a floating point-like type that performs various math operations quickly compared to traditional high precision libraries.
  * The only template parameter <B>I</B> is the bit count of the integer part. The fraction part complements <B>I</B> to 128 bit.<BR>
- * <B>I</B> is limited to the range [1,64] in order to simplify the implementation and increase preformance.<BR>
+ * <B>I</B> is limited to the range [1,64] in order to simplify the implementation and increase performance.<BR>
  * This restriction is enforced at compile time.
  * All of fixed_point128's methods are inline for maximum performance.
  *
@@ -874,8 +874,8 @@ public:
      */
     FP128_FORCE_INLINE constexpr fixed_point128& operator*=(const fixed_point128& rhs) noexcept
     {
-        // Temporary arrays to store the result. They are uninitialzied to get 10-50% extra performance.
-        // Zero initialization is a 10% penalty and using a thread_local static varible lowers
+        // Temporary arrays to store the result. They are uninitialized to get 10-50% extra performance.
+        // Zero initialization is a 10% penalty and using a thread_local static variable lowers
         //  performance by >50%.
 
         uint64_t res[4];  // 256 bit of result
@@ -987,7 +987,7 @@ public:
             // for the most negative one.
             uint64_t magnitude = static_cast<uint64_t>(x);
             if constexpr (std::is_signed_v<T>) {
-                // alway do positive multiplication
+                // always do positive multiplication
                 if (x < 0) {
                     magnitude = 0ull - magnitude;
                     sign ^= 1;
@@ -1092,7 +1092,7 @@ public:
             // for the most negative one.
             uint64_t magnitude = static_cast<uint64_t>(x);
             if constexpr (std::is_signed_v<T>) {
-                // alway do positive division
+                // always do positive division
                 if (x < 0) {
                     magnitude = 0ull - magnitude;
                     sign ^= 1;
@@ -1357,13 +1357,13 @@ public:
         }
     }
     /**
-     * @brief Returns true if the value positive (incuding zero)
-     * @return True when the the value positive
+     * @brief Returns true if the value is positive (including zero)
+     * @return True when the value is positive
      */
     [[nodiscard]] FP128_INLINE constexpr bool is_positive() const noexcept { return 0 == sign; }
     /**
      * @brief Returns true if the value negative (smaller than zero)
-     * @return True when the the value negative
+     * @return True when the value is negative
      */
     [[nodiscard]] FP128_INLINE constexpr bool is_negative() const noexcept { return 1 == sign; }
     /**
@@ -1864,7 +1864,7 @@ private:
      */
     [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 fdim(const fixed_point128& x, const fixed_point128& y) noexcept { return (x > y) ? x - y : fixed_point128(0); }
     /**
-     * @brief Returns the minimun between x and y.
+     * @brief Returns the minimum between x and y.
      * @param x First value
      * @param y Second value
      * @return If x < y returns x. Otherwise y.
@@ -2211,7 +2211,7 @@ private:
     }
     /**
      * @brief Calculate the cosine function over a limited range [-0.5pi, 0.5pi]
-     * Since the sin1 function converges faster, call it with the modifed angle.
+     * Since the sin1 function converges faster, call it with the modified angle.
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Cosine of x
      */
