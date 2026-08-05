@@ -30,16 +30,17 @@ fp128_link_clang_builtins(fixed_point128_tests)
 fp128_link_static_runtime(fixed_point128_tests)
 
 ##
-# Two MSVC /W4 diagnostics fire on deliberate constructs in the library headers, and only from this
-# target: the benchmark instantiates neither code path. Both are suppressed here rather than on the
-# fixed_point128 INTERFACE target, so that consumers of the library keep full control of their own
-# warning settings.
+# Two MSVC /W4 diagnostics fire on deliberate constructs in the library headers. Both are suppressed
+# here rather than on the fixed_point128 INTERFACE target, so that consumers of the library keep full
+# control of their own warning settings.
 #
 #   C4201  float128 stores its 128 bits in an anonymous struct wrapping an anonymous union. The layout
 #          is the point of the type, and the extension is universally supported.
 #   C4702  MSVC reports the code after an `if constexpr` chain as unreachable for the instantiations
 #          where an earlier branch returns, even though it is live for all the others. A compiler
 #          limitation rather than dead code.
+#
+# The benchmark suppresses the same pair, for the same reasons; see bench/CMakeLists.txt.
 ##
 fp128_uses_msvc_frontend(FP128_TESTS_MSVC_FRONTEND)
 if(FP128_TESTS_MSVC_FRONTEND)

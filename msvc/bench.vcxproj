@@ -80,6 +80,13 @@
         Mirrors fp128_set_arch_flags() in cmake/FP128CompilerOptions.cmake.
       -->
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <!--
+        4201  float128 stores its 128 bits in an anonymous struct wrapping an anonymous union. The
+              layout is the point of the type.
+        4702  MSVC reports the code after an `if constexpr` chain as unreachable for the instantiations
+              where an earlier branch returns, even though it is live for all the others.
+      -->
+      <DisableSpecificWarnings>4201;4702;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
