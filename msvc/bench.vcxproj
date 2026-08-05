@@ -85,8 +85,12 @@
               layout is the point of the type.
         4702  MSVC reports the code after an `if constexpr` chain as unreachable for the instantiations
               where an earlier branch returns, even though it is live for all the others.
+        6326  The sign handling in int128_base::operator/= compares two values that are compile time
+              constants in the unsigned instantiation. That is the design - the doc comment on the
+              operator states that every sign related step folds away when the type is unsigned - and
+              the benchmark reaches it because it measures uint128_t.
       -->
-      <DisableSpecificWarnings>4201;4702;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4201;4702;6326;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
