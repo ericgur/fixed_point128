@@ -867,7 +867,7 @@ public:
      * @param x Right hand side operator (denominator)
      * @return this object.
      */
-    template <typename T> FP128_INLINE int128_base& operator/=(T x)
+    template <typename T> FP128_FORCE_INLINE int128_base& operator/=(T x)
     {
         if constexpr (is_signed) {
             return operator/=(int128_base(x));
@@ -1388,18 +1388,27 @@ public:
     template <typename T> [[nodiscard]] friend FP128_INLINE constexpr int128_base operator*(int128_base lhs, const T& rhs) noexcept { return lhs *= rhs; }
     /**
      * @brief Divides 2 values and returns the result.
+     *
+     * Forced inline rather than merely hinted: this is a one line forwarder to operator/=, but its
+     * operand and return value are both 16 byte class types, which the x64 ABI passes in memory. Left
+     * to its own judgement MSVC declines to inline it under /GL (whole program optimization) and the
+     * round trip through memory then costs ~10% of a 128 bit by 64 bit division.
+     *
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE int128_base operator/(int128_base lhs, const T& rhs) { return lhs /= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator/(int128_base lhs, const T& rhs) { return lhs /= rhs; }
     /**
      * @brief Performs modulo and returns the result.
+     *
+     * Forced inline for the same reason as operator/ above.
+     *
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE int128_base operator%(int128_base lhs, const T& rhs) { return lhs %= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator%(int128_base lhs, const T& rhs) { return lhs %= rhs; }
 
     //
     // Binary math operators
@@ -1584,7 +1593,7 @@ public:
      * @return log(x)
      * @throws std::domain_error when x is zero, or negative for the signed type.
      */
-    [[nodiscard]] friend FP128_INLINE uint64_t log(const int128_base& x)
+    [[nodiscard]] friend FP128_FORCE_INLINE uint64_t log(const int128_base& x)
     {
         if (x.is_negative() || x.is_zero()) {
             throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
@@ -1717,7 +1726,7 @@ public:
      * @return log10(x)
      * @throws std::domain_error when x is zero, or negative for the signed type.
      */
-    [[nodiscard]] friend FP128_INLINE uint64_t log10(const int128_base& x)
+    [[nodiscard]] friend FP128_FORCE_INLINE uint64_t log10(const int128_base& x)
     {
         if (x.is_negative() || x.is_zero()) {
             throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");

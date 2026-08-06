@@ -802,7 +802,7 @@ FP128_INLINE constexpr void shift_left128_inplace(uint64_t& l, uint64_t& h, int 
  * @param shift Bits to shift, between 1-inf
  * @return void
  */
-FP128_INLINE constexpr void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
+FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0);
     if (shift == 0)

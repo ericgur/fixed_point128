@@ -2174,7 +2174,7 @@ public:
      * @param rhs Right hand side operand
      * @return True when this object is smaller.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator<(const float128& lhs, const float128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const float128& lhs, const float128& rhs) noexcept
     {
         // A NaN is unordered with everything, so every relational test involving one is false.
         if (lhs.is_nan() || rhs.is_nan())
@@ -2207,7 +2207,7 @@ public:
      * @param rhs Right hand side operand
      * @return True when this object is smaller or equal.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator<=(const float128& lhs, const float128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<=(const float128& lhs, const float128& rhs) noexcept
     {
         // Not simply !(lhs > rhs): a NaN makes every relational test false, so negating the
         // opposite test would wrongly report that a NaN is less than or equal to everything.
@@ -2225,7 +2225,7 @@ public:
      * @param rhs Right hand side operand
      * @return True when this object is larger.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator>(const float128& lhs, const float128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const float128& lhs, const float128& rhs) noexcept
     {
         // A NaN is unordered with everything, so every relational test involving one is false.
         if (lhs.is_nan() || rhs.is_nan())
@@ -2257,7 +2257,7 @@ public:
      * @param rhs Right hand side operand
      * @return True when this objext is larger or equal.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator>=(const float128& lhs, const float128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const float128& lhs, const float128& rhs) noexcept
     {
         // see the note on operator<= about why this is not simply !(lhs < rhs)
         if (lhs.is_nan() || rhs.is_nan())

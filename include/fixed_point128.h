@@ -1192,7 +1192,7 @@ public:
      * @param shift Bits to shift. Negative or very high values cause undefined behavior.
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator>>=(int32_t shift) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator>>=(int32_t shift) noexcept
     {
         shift_right128_inplace_safe(low, high, shift);
         reset_sign_for_zero();
@@ -1203,7 +1203,7 @@ public:
      * @param shift Bits to shift. Negative or very high values cause undefined behavior.
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator<<=(int32_t shift) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator<<=(int32_t shift) noexcept
     {
         shift_left128_inplace_safe(low, high, shift);
         reset_sign_for_zero();
