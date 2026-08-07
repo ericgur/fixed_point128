@@ -1364,6 +1364,17 @@ public:
     //
     // Binary math operators
     //
+    // Each of these applies the compound assignment to the by value left hand side and then returns
+    // it on a line of its own. The shorter `return lhs OP= rhs;` is equivalent and was what these
+    // used to say, but it costs MSVC a factor of six on the multiplication: the compound assignment
+    // returns int128_base&, so the return statement copy constructs the result from an lvalue, and
+    // MSVC emits that copy as a 16 byte XMM load of the object whose two halves it has just written
+    // with 8 byte GPR stores. A load that overlaps two narrower stores cannot forward, so every
+    // evaluation ends in a store forwarding stall of about fifteen cycles - which is five times the
+    // multiplication itself. Returning the named parameter instead keeps it in registers.
+    // Clang generates identical code either way. Measured: uint128_t * uint128_t goes from 259M/s
+    // to 1.73G/s on MSVC 19.51, matching Clang.
+    //
 
     /**
      * @brief Adds 2 values and returns the result.
@@ -1371,21 +1382,33 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator+(int128_base lhs, const T& rhs) noexcept { return lhs += rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator+(int128_base lhs, const T& rhs) noexcept
+    {
+        lhs += rhs;
+        return lhs;
+    }
     /**
      * @brief Subtracts 2 values and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator-(int128_base lhs, const T& rhs) noexcept { return lhs -= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator-(int128_base lhs, const T& rhs) noexcept
+    {
+        lhs -= rhs;
+        return lhs;
+    }
     /**
      * @brief Multiplies 2 values and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator*(int128_base lhs, const T& rhs) noexcept { return lhs *= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator*(int128_base lhs, const T& rhs) noexcept
+    {
+        lhs *= rhs;
+        return lhs;
+    }
     /**
      * @brief Divides 2 values and returns the result.
      *
@@ -1397,7 +1420,11 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator/(int128_base lhs, const T& rhs) { return lhs /= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator/(int128_base lhs, const T& rhs)
+    {
+        lhs /= rhs;
+        return lhs;
+    }
     /**
      * @brief Performs modulo and returns the result.
      *
@@ -1405,7 +1432,11 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator%(int128_base lhs, const T& rhs) { return lhs %= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator%(int128_base lhs, const T& rhs)
+    {
+        lhs %= rhs;
+        return lhs;
+    }
 
     //
     // Binary math operators
@@ -1416,21 +1447,33 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator&(int128_base lhs, const T& rhs) { return lhs &= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator&(int128_base lhs, const T& rhs)
+    {
+        lhs &= rhs;
+        return lhs;
+    }
     /**
      * @brief Performs bitwise OR (|).
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator|(int128_base lhs, const T& rhs) { return lhs |= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator|(int128_base lhs, const T& rhs)
+    {
+        lhs |= rhs;
+        return lhs;
+    }
     /**
      * @brief Performs bitwise XOR (^).
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator^(int128_base lhs, const T& rhs) { return lhs ^= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator^(int128_base lhs, const T& rhs)
+    {
+        lhs ^= rhs;
+        return lhs;
+    }
 
     //
     // Binary math operators with the scalar on the left hand side

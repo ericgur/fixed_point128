@@ -1533,6 +1533,12 @@ private:
     /// @name Binary Math Operators (Friend)
     /// @{
 
+    // Each of these applies the compound assignment to the by value left hand side and then returns
+    // it on a line of its own, rather than the shorter `return lhs OP= rhs;`. The two are
+    // equivalent, but the short form makes the return statement copy construct from an lvalue, which
+    // MSVC compiles into a store forwarding stall. int128_base's binary operators carry the full
+    // explanation and the measurement.
+
     /**
      * @brief Adds 2 values and returns the result.
      * @param lhs left hand side operand
@@ -1540,7 +1546,11 @@ private:
      * @return Result of the operation
      */
     template <typename T>
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator+(fixed_point128 lhs, const T& rhs) noexcept { return lhs += rhs; }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator+(fixed_point128 lhs, const T& rhs) noexcept
+    {
+        lhs += rhs;
+        return lhs;
+    }
     /**
      * @brief subtracts the right hand side operand to this object to and returns the result.
      * @param lhs left hand side operand
@@ -1548,7 +1558,11 @@ private:
      * @return The fixed_point128 result
      */
     template <typename T>
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator-(fixed_point128 lhs, const T& rhs) noexcept { return lhs -= rhs; }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator-(fixed_point128 lhs, const T& rhs) noexcept
+    {
+        lhs -= rhs;
+        return lhs;
+    }
     /**
      * @brief Multiplies the right hand side operand with this object to and returns the result.
      * @param lhs left hand side operand
@@ -1556,21 +1570,33 @@ private:
      * @return The fixed_point128 result
      */
     template <typename T>
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator*(fixed_point128 lhs, const T& rhs) noexcept { return lhs *= rhs; }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator*(fixed_point128 lhs, const T& rhs) noexcept
+    {
+        lhs *= rhs;
+        return lhs;
+    }
     /**
      * @brief Divides this object by the right hand side operand and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 operator/(fixed_point128 lhs, const T& rhs) { return lhs /= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 operator/(fixed_point128 lhs, const T& rhs)
+    {
+        lhs /= rhs;
+        return lhs;
+    }
     /**
      * @brief Calculates modulo.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 operator%(fixed_point128 lhs, const T& rhs) { return lhs %= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 operator%(fixed_point128 lhs, const T& rhs)
+    {
+        lhs %= rhs;
+        return lhs;
+    }
 
     /// @}
 
@@ -1583,21 +1609,33 @@ private:
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator&(fixed_point128 lhs, const T& rhs) { return lhs &= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator&(fixed_point128 lhs, const T& rhs)
+    {
+        lhs &= rhs;
+        return lhs;
+    }
     /**
      * @brief Performs bitwise OR (|)
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator|(fixed_point128 lhs, const T& rhs) { return lhs |= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator|(fixed_point128 lhs, const T& rhs)
+    {
+        lhs |= rhs;
+        return lhs;
+    }
     /**
      * @brief Performs bitwise XOR (^)
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator^(fixed_point128 lhs, const T& rhs) { return lhs ^= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator^(fixed_point128 lhs, const T& rhs)
+    {
+        lhs ^= rhs;
+        return lhs;
+    }
 
     /// @}
 

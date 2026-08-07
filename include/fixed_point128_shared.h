@@ -409,6 +409,8 @@ FP128_FORCE_INLINE constexpr unsigned char subborrow_u64(unsigned char b, uint64
 
 #if defined(FP128_ARM64)
 #include <arm_neon.h>  // for the uint8x8_t type used as an operand of the NEON population count assembly
+#else
+#include <immintrin.h>  // for _subborrow_u64, see the note on subborrow_u64() below
 #endif
 
 /**
@@ -545,9 +547,17 @@ FP128_FORCE_INLINE static constexpr unsigned char addcarryx_u64(unsigned char c,
 /**
  * @brief 64-bit subtract with borrow (GCC/Clang fallback for _subborrow_u64).
  *
- * Unlike its addcarryx_u64 neighbour this has no hand written AArch64 variant. The subtraction of a
- * borrow is expressed naturally by the __uint128_t expression below, which Clang already lowers to
- * the SUBS/SBCS pair an assembly version would have spelled out, so there is nothing left to win.
+ * On x86 this calls the same intrinsic MSVC does, rather than leaving the __uint128_t expression
+ * below to be recognized. The recognition is not symmetric with addition: two chained
+ * addcarryx_u64 calls become the ADD/ADC pair they describe, but two chained calls to the portable
+ * form of this function do not become SUB/SBB. LLVM instead materializes the borrow into a register
+ * with `sbb reg, reg` and folds it back in with a second subtraction, which turns a two instruction
+ * operation into seven and lengthens the dependent chain from one cycle to about one and a half.
+ * That cost the uint128_t subtraction benchmark a third of its throughput against the addition it
+ * should tie with (3.47G/s against 5.10G/s on Clang 17; the intrinsic restores it to 5.10G/s).
+ *
+ * AArch64 has no such intrinsic and does not need one: there the __uint128_t expression already
+ * lowers to the SUBS/SBCS pair a hand written assembly variant would have spelled out.
  *
  * @param b Input borrow (0 or 1).
  * @param a Minuend.
@@ -558,6 +568,19 @@ FP128_FORCE_INLINE static constexpr unsigned char addcarryx_u64(unsigned char c,
 FP128_FORCE_INLINE static constexpr unsigned char subborrow_u64(unsigned char b, uint64_t a, uint64_t c, uint64_t* out) noexcept
 {
     FP128_ASSERT(out != nullptr);  // Caller must provide a valid pointer for the result. Compatibility with MSVC intrinsic.
+#if !defined(FP128_ARM64)
+    // Intrinsics are not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        // The intrinsic writes an unsigned long long, which is a distinct type from uint64_t on
+        // the LP64 targets even though both are 64 bit. Going through a local keeps the call free
+        // of a cast between two pointer types the optimizer is entitled to assume cannot alias.
+        unsigned long long diff = 0;
+        const unsigned char borrow = _subborrow_u64(b, a, c, &diff);
+        *out = static_cast<uint64_t>(diff);
+
+        return borrow;
+    }
+#endif
     __uint128_t r = (__uint128_t)a - c - b;
     *out = (uint64_t)r;
     // The difference wraps when it borrows, so bit 64 of the 128-bit result is the borrow out.

@@ -31,6 +31,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <format>
 #include <fstream>
@@ -43,8 +44,31 @@
 
 using namespace std;
 using namespace fp128;
-constexpr uint64_t BENCH_ITERATIONS = 5000;
-constexpr double TIME_PER_FUNCTION = 0.5;  // in seconds
+
+/** @brief Wall clock time each measured operation is given, in seconds. */
+constexpr double TIME_PER_FUNCTION = 0.5;
+
+/**
+ * @brief Shortest a timed batch is allowed to be, in seconds.
+ *
+ * Every batch is bracketed by two clock reads, and a clock read costs on the order of 20ns here. At
+ * two milliseconds a batch that is the only thing standing between them, they contribute about one
+ * part in a hundred thousand - far below the run to run scatter - which is what lets the harness
+ * measure a one cycle operation without the timer showing up in the result.
+ */
+constexpr double BENCH_MIN_BATCH_TIME = 0.002;
+
+/** @brief Iteration count the batch sizing starts from. */
+constexpr uint64_t BENCH_MIN_BATCH_ITERATIONS = 256;
+
+/**
+ * @brief Largest batch the sizing loop will produce.
+ *
+ * Only reached by a loop that costs nothing per iteration, which in practice means one the optimizer
+ * managed to delete. The cap keeps such a benchmark from running away; the absurd rate it then
+ * reports is the signal that the loop needs looking at.
+ */
+constexpr uint64_t BENCH_MAX_BATCH_ITERATIONS = 1ull << 30;
 
 /**
  * @brief Number of integer bits of the benchmarked fixed_point128 instantiation.
@@ -80,6 +104,14 @@ struct Duration {
 static volatile unsigned char benchSink = 0;
 
 /**
+ * @brief Volatile sink that swallows the addresses handed to Escape().
+ *
+ * Storing a pointer here is an observable side effect, so the address genuinely leaves the function
+ * and the optimizer has to assume that whatever it points at is reachable from outside.
+ */
+static void* volatile escapeSink = nullptr;
+
+/**
  * @brief Makes @p value observable so the computation that produced it cannot be eliminated.
  *
  * Every byte of the object is stored to a volatile sink, which forces the complete value to be
@@ -92,7 +124,7 @@ static volatile unsigned char benchSink = 0;
  * pair and MSVC then loses 24% on the addition benchmark, measuring the harness instead of the add.
  *
  * This is deliberately not cheap - it costs sizeof(T) volatile stores - so call it outside the timed
- * loop, never inside it.
+ * loop, never inside it. Escape() and Barrier() are what a timed loop uses.
  *
  * @tparam T Type of the consumed value.
  * @param value Value to make observable.
@@ -106,46 +138,43 @@ template <typename T> FP128_NO_INLINE void DoNotOptimize(T value) noexcept
 }
 
 /**
- * @brief Identity function used as the target of MakeOpaque()'s indirect call.
- * @tparam T Type of the value passed through.
- * @param value Value to return unchanged.
- * @return @p value.
+ * @brief Publishes the address of @p object, so the optimizer must treat it as externally reachable.
+ *
+ * On its own this only says that the object could be read or written from elsewhere; it does not by
+ * itself stop anything being hoisted. Paired with Barrier() inside the loop it does, because the
+ * barrier is a point at which that elsewhere could have run. The two are always used together:
+ * Escape() once during setup, Barrier() once per iteration.
+ *
+ * Escaping an object costs it its registers - it has to live in memory - but nothing per iteration
+ * beyond the loads and stores that implies, and on x86 those fold into the instructions that use
+ * them. This is the whole reason the harness is built on it rather than on an opaque call.
+ *
+ * @tparam T Type of the object.
+ * @param object Object whose address is published. Must outlive the loop that relies on it.
  */
-template <typename T> [[nodiscard]] FP128_NO_INLINE T Identity(T value) noexcept
+template <typename T> FP128_INLINE void Escape(T& object) noexcept
 {
-    return value;
+    escapeSink = static_cast<void*>(&object);
 }
 
-/** @brief Pointer to function type used by MakeOpaque(). */
-template <typename T> using IdentityFunc = T (*)(T) noexcept;
-
 /**
- * @brief Volatile pointer to Identity<T>(), reloaded from memory at every call.
+ * @brief Compiler only memory barrier: emits no instructions at all.
  *
- * Being volatile is the whole point: the optimizer may not assume which function the pointer
- * designates, so it can neither devirtualize the call nor propagate the argument through it.
+ * Placed at the top of a timed loop it does two jobs at once, both of which the loops here need:
+ * - An escaped operand read after it cannot have been read before it, so an expression computed
+ *   from that operand cannot be hoisted out of the loop, nor rewritten in closed form. Without this
+ *   Clang 17 turns the 128 bit addition benchmark into an AVX2 computation of the sum of an
+ *   arithmetic progression and reports over 10G/s - a rate no chain of 64 bit adds can reach.
+ * - A store to an escaped result made before it cannot be dropped in favour of the next iteration's
+ *   store, so the operation that produced the result stays alive without the loop having to feed it
+ *   back into itself.
+ *
+ * std::atomic_signal_fence() is the portable spelling: MSVC expands it to _ReadWriteBarrier() and
+ * Clang and GCC to a single thread fence, none of which generate code.
  */
-template <typename T> volatile IdentityFunc<T> identityPtr = &Identity<T>;
-
-/**
- * @brief Returns @p value through a call the optimizer cannot see through.
- *
- * Used on the *input* of a timed loop. Because the result is opaque, loop invariant code motion
- * cannot hoist an expression computed from it out of the loop, which would otherwise turn a timed
- * loop over a pure function into a single evaluation plus an empty loop.
- *
- * The cost is one volatile load plus an indirect call: measured at roughly 5 cycles under MSVC and
- * 18 under Clang, so it is noise for anything from sqrt() upwards, and a fixed floor under the cheap
- * arithmetic operators - which is why the loop carried benchmarks (addition, subtraction, Mandelbrot)
- * do not use it, being unhoistable on their own.
- *
- * @tparam T Type of the value passed through.
- * @param value Value to hide from the optimizer.
- * @return @p value, unchanged but opaque.
- */
-template <typename T> [[nodiscard]] FP128_INLINE T MakeOpaque(T value) noexcept
+FP128_INLINE void Barrier() noexcept
 {
-    return identityPtr<T>(value);
+    std::atomic_signal_fence(std::memory_order_acq_rel);
 }
 
 /**
@@ -214,6 +243,178 @@ void print_ips(const char* name, int64_t ips)
         const double dips = ips / 1000000000.0;
         printf("%s: %0.3lfG/s\n", name, dips);
     }
+}
+
+/**
+ * @brief Runs @p body in timed batches and returns the fastest per iteration rate observed.
+ *
+ * @p body runs a whole batch: it takes the iteration count, sets up its own operands, loops, and
+ * consumes whatever it produced. Owning its state is what lets its accumulators stay in registers -
+ * state passed in from here would have to be addressable, and the loop would then measure the
+ * memory traffic instead of the operation. It also bounds how far a benchmark that accumulates into
+ * itself can drift, since every batch starts from the same operands. bench_mandelbrot() is the one
+ * benchmark that deliberately does the opposite; the reason is on that function.
+ *
+ * Two things make this more accurate than timing one long run:
+ * - The batch is sized so it lasts at least BENCH_MIN_BATCH_TIME, which pushes the cost of the two
+ *   clock reads bracketing it below the noise floor however cheap a single iteration is.
+ * - The *fastest* batch is reported rather than the average over the whole budget. Every source of
+ *   error left - a scheduler tick, a migration to another core, a frequency excursion - can only
+ *   make a batch slower, so the fastest one is the sample least contaminated by them, and it is far
+ *   more repeatable from run to run than the mean. Measured over three consecutive runs, the spread
+ *   of a result is typically under half a percent.
+ *
+ * @tparam Body Callable invoked as body(uint64_t iterations).
+ * @param time_budget Time to spend measuring, in seconds. Excludes the sizing phase.
+ * @param body Batch to run.
+ * @return Iterations per second of the fastest batch, or 0 if no batch could be timed.
+ */
+template <typename Body> [[nodiscard]] int64_t MeasureRate(double time_budget, Body body)
+{
+    Duration dur;
+
+    // Sizing phase. It doubles as the warm up: by the time the last batch runs, the caches and the
+    // branch predictors have seen the loop and the core has had time to clock up.
+    uint64_t batch = BENCH_MIN_BATCH_ITERATIONS;
+    double elapsed = 0.0;
+    for (;;) {
+        dur.start();
+        body(batch);
+        elapsed = dur.cur_duration();
+        if (elapsed >= BENCH_MIN_BATCH_TIME || batch >= BENCH_MAX_BATCH_ITERATIONS) {
+            break;
+        }
+
+        // Aim at twice the target, so a batch that already nearly reaches it does not need several
+        // more rounds. The step is clamped because the first batches are too short to extrapolate
+        // from: below, so a batch delayed by an interrupt cannot stall the search, and above, so a
+        // clock that reported zero cannot overshoot the cap in one go.
+        const double growth = (elapsed > 0.0) ? (2.0 * BENCH_MIN_BATCH_TIME / elapsed) : 100.0;
+        batch = (uint64_t)((double)batch * std::clamp(growth, 2.0, 100.0));
+        batch = std::min(batch, BENCH_MAX_BATCH_ITERATIONS);
+    }
+
+    // Measurement phase.
+    double best_seconds = elapsed / (double)batch;
+    Duration budget;
+    budget.start();
+    while (budget.cur_duration() < time_budget) {
+        dur.start();
+        body(batch);
+        const double per_iteration = dur.cur_duration() / (double)batch;
+        best_seconds = std::min(best_seconds, per_iteration);
+    }
+
+    return (best_seconds > 0.0) ? (int64_t)(1.0 / best_seconds) : 0;
+}
+
+/**
+ * @brief Times a unary function applied to a fixed operand.
+ *
+ * The operand is escaped and a barrier runs at the top of every iteration, so the call cannot be
+ * hoisted out of the loop; the result is escaped too, so the store the loop makes to it on every
+ * iteration keeps the call from being deleted as dead. Both operand and result therefore live in
+ * memory, which on x86 costs the loads and stores only - they fold into the instructions around
+ * them - and nothing at all in extra instructions.
+ *
+ * @tparam T Operand type.
+ * @tparam Func Callable invoked as func(const T&).
+ * @param name Name to print the measurement under.
+ * @param time_per_function Time to spend measuring, in seconds.
+ * @param argument Value the function is applied to.
+ * @param func Function to measure.
+ */
+template <typename T, typename Func> void BenchUnary(const char* name, double time_per_function, T argument, Func func)
+{
+    const int64_t ips = MeasureRate(time_per_function, [argument, func](uint64_t count) {
+        T arg = argument;
+        auto result = func(arg);
+        Escape(arg);
+        Escape(result);
+        for (uint64_t i = count; i != 0; --i) {
+            Barrier();
+            result = func(arg);
+        }
+        DoNotOptimize(result);
+    });
+
+    print_ips(name, ips);
+}
+
+/**
+ * @brief Times a binary operation on two fixed operands.
+ *
+ * Both operands are escaped, not just the one that would be enough to defeat hoisting: leaving the
+ * right hand side visible would let the compiler specialize the operation for it, and a division by
+ * a literal 5 rewritten as a multiplication by its reciprocal is not the division this is meant to
+ * be timing.
+ *
+ * @tparam T Type of the left hand operand.
+ * @tparam U Type of the right hand operand.
+ * @tparam Func Callable invoked as func(const T&, const U&).
+ * @param name Name to print the measurement under.
+ * @param time_per_function Time to spend measuring, in seconds.
+ * @param left Left hand operand.
+ * @param right Right hand operand.
+ * @param func Operation to measure.
+ */
+template <typename T, typename U, typename Func> void BenchBinary(const char* name, double time_per_function, T left, U right, Func func)
+{
+    const int64_t ips = MeasureRate(time_per_function, [left, right, func](uint64_t count) {
+        T lhs = left;
+        U rhs = right;
+        auto result = func(lhs, rhs);
+        Escape(lhs);
+        Escape(rhs);
+        Escape(result);
+        for (uint64_t i = count; i != 0; --i) {
+            Barrier();
+            result = func(lhs, rhs);
+        }
+        DoNotOptimize(result);
+    });
+
+    print_ips(name, ips);
+}
+
+/**
+ * @brief Times an operation that folds the right hand side into an accumulator, in place.
+ *
+ * This measures the latency of the operation rather than its throughput, which is the honest thing
+ * to report for operators cheap enough that a dependent chain of them is what limits real code.
+ * Only the right hand side is escaped: the accumulator stays in registers, so the chain measured is
+ * the operation itself and not a round trip through the stack.
+ *
+ * @p func has to update the accumulator in place rather than return the new value. Written the
+ * other way round - acc = acc + rhs - MSVC materializes the operator's return value in a stack
+ * temporary and reads the accumulator back out of it on every iteration. The 16 byte store and the
+ * 8 byte reload that overlaps it do not forward, and the resulting stall costs a factor of 25 on
+ * the uint128_t addition benchmark. Nothing is lost by measuring the compound assignment instead:
+ * operator+ is defined as `lhs += rhs` on a copy, so this is the same operation with a copy removed
+ * that the measurement has no business including.
+ *
+ * @tparam T Operand type.
+ * @tparam Func Callable invoked as func(T& acc, const T& rhs), which must update acc in place.
+ * @param name Name to print the measurement under.
+ * @param time_per_function Time to spend measuring, in seconds.
+ * @param seed Initial value of the accumulator.
+ * @param operand Right hand operand, the same on every iteration.
+ * @param func Operation to measure.
+ */
+template <typename T, typename Func> void BenchAccumulate(const char* name, double time_per_function, T seed, T operand, Func func)
+{
+    const int64_t ips = MeasureRate(time_per_function, [seed, operand, func](uint64_t count) {
+        T rhs = operand;
+        T acc = seed;
+        Escape(rhs);
+        for (uint64_t i = count; i != 0; --i) {
+            Barrier();
+            func(acc, rhs);
+        }
+        DoNotOptimize(acc);
+    });
+
+    print_ips(name, ips);
 }
 
 /**
@@ -339,81 +540,38 @@ template <typename T> void bench_comparison_operators(double time_per_function =
     using Traits = BenchTraits<T>;
     PrintGroupHeader("Comparison operator benchmark");
 
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = Traits::operandB();
-    T f2 = Traits::operandC();
-    int64_t dummy = 0;
-    // start the clock
-    // Hiding one operand is enough to stop LICM from hoisting the loop invariant comparisons out of
-    // the loop, and costs half of what hiding both would. DoNotOptimize(dummy) after the loop keeps
-    // the accumulated result observable; the previous sink went through an int64_t overload of the
-    // opaque helper that MSVC proved pure and deleted, taking the whole loop body with it.
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            const auto v1 = MakeOpaque(f1);
-            dummy += (v1 > f2);
-            dummy += (v1 >= f2);
-            dummy += (v1 < f2);
-            dummy += (v1 <= f2);
+    // The four comparisons accumulate into a plain integer. That is enough to keep them alive and,
+    // unlike escaping their results, it leaves the accumulator in a register.
+    const int64_t ips = MeasureRate(time_per_function, [](uint64_t count) {
+        T f1 = Traits::operandB();
+        T f2 = Traits::operandC();
+        int64_t matches = 0;
+        Escape(f1);
+        Escape(f2);
+        for (uint64_t i = count; i != 0; --i) {
+            Barrier();
+            matches += (f1 > f2);
+            matches += (f1 >= f2);
+            matches += (f1 < f2);
+            matches += (f1 <= f2);
         }
-        total_iterations += 4 * BENCH_ITERATIONS;
-    }
-    DoNotOptimize(dummy);
+        DoNotOptimize(matches);
+    });
 
-    print_ips("Operators >, >=, <, <= (average of all 4)", (uint64_t)(total_iterations / dur.duration()));
+    // One iteration is four comparisons, and the reported figure is the average cost of one.
+    print_ips("Operators >, >=, <, <= (average of all 4)", 4 * ips);
 }
 
 template <typename T> void bench_addition(double time_per_function = 1.0)
 {
     using Traits = BenchTraits<T>;
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = Traits::operandA();
-    T f2 = Traits::operandB();
-    // f3 accumulates each iteration, creating a loop-carried dependency that
-    // prevents LICM from hoisting the addition out of the loop. DoNotOptimize(f3)
-    // after the loop stores f3 to a volatile sink, forcing it to be live and
-    // preventing dead-code elimination of the entire loop body.
-    T f3 = f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f3 + f1;
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f3);
-    print_ips("Addition", (uint64_t)(total_iterations / dur.duration()));
+    BenchAccumulate<T>("Addition", time_per_function, Traits::operandB(), Traits::operandA(), [](T& acc, const T& rhs) { acc += rhs; });
 }
 
 template <typename T> void bench_subtraction(double time_per_function = 1.0)
 {
     using Traits = BenchTraits<T>;
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = Traits::operandA();
-    T f2 = Traits::operandB();
-    // f3 accumulates each iteration, creating a loop-carried dependency that
-    // prevents LICM from hoisting the subtraction out of the loop. DoNotOptimize(f3)
-    // after the loop stores f3 to a volatile sink, forcing it to be live and
-    // preventing dead-code elimination of the entire loop body.
-    T f3 = f1;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = f3 - f2;
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f3);
-    print_ips("Subtraction", (uint64_t)(total_iterations / dur.duration()));
+    BenchAccumulate<T>("Subtraction", time_per_function, Traits::operandA(), Traits::operandB(), [](T& acc, const T& rhs) { acc -= rhs; });
 }
 
 template <typename T> void bench_multiplication(double time_per_function = 1.0)
@@ -421,214 +579,67 @@ template <typename T> void bench_multiplication(double time_per_function = 1.0)
     using Traits = BenchTraits<T>;
     using MulType = typename Traits::MulType;
     using IntMulType = typename Traits::IntMulType;
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    MulType f1 = Traits::mulA();
-    MulType f2 = Traits::mulB();
-    MulType f3;
 
-    // start the clock
-    total_iterations = 0;
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = MakeOpaque(f1) * f2;
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f3);
-    print_ips("Multiplication by 128-bit value", (uint64_t)(total_iterations / dur.duration()));
+    BenchBinary<MulType, MulType>("Multiplication by 128-bit value", time_per_function, Traits::mulA(), Traits::mulB(),
+                                  [](const MulType& lhs, const MulType& rhs) { return lhs * rhs; });
 
-    // The multiplicand is hidden behind MakeOpaque() rather than accumulated into a single value.
-    // The accumulating form (f10 = f10 * int_val) was degenerate: the low QWORD of the product does
-    // not depend on the high QWORD, so with nothing observing the result both compilers proved the
-    // high half dead. MSVC collapsed the whole operation into a single 64 bit mulx and Clang went
-    // further, vectorizing the remaining chain 4 wide - neither was timing a 128 bit multiply.
-    IntMulType f10 = Traits::intMulA();
-    IntMulType f11;
-    const uint32_t int_val = 123456789;
-    total_iterations = 0;
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f11 = MakeOpaque(f10) * int_val;
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f11);
-    print_ips("Multiplication by int32_t", (uint64_t)(total_iterations / dur.duration()));
+    // The result is escaped rather than accumulated. The accumulating form (f10 = f10 * int_val) was
+    // degenerate: the low QWORD of the product does not depend on the high QWORD, so with nothing
+    // observing the result both compilers proved the high half dead. MSVC collapsed the whole
+    // operation into a single 64 bit mulx and Clang went further, vectorizing the remaining chain
+    // 4 wide - neither was timing a 128 bit multiply.
+    BenchBinary<IntMulType, uint32_t>("Multiplication by int32_t", time_per_function, Traits::intMulA(), 123456789u,
+                                      [](const IntMulType& lhs, const uint32_t& rhs) { return lhs * rhs; });
 }
 
 template <typename T> void bench_division(double time_per_function = 1.0)
 {
     using Traits = BenchTraits<T>;
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = Traits::operandA();
-    T f3;
-    total_iterations = 0;
 
-    // start the clock
-    // MakeOpaque on the dividend each iteration prevents LICM from hoisting the
-    // loop-invariant division out of the loop, without causing value accumulation
-    // that would produce degenerate (zero/overflow) inputs.
-    double dval = MakeOpaque(64.0);
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = MakeOpaque(f1) / dval;
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f3);
-    print_ips("Division by double (exponent of 2)", (uint64_t)(total_iterations / dur.duration()));
+    BenchBinary<T, double>("Division by double (exponent of 2)", time_per_function, Traits::operandA(), 64.0,
+                           [](const T& lhs, const double& rhs) { return lhs / rhs; });
 
-    total_iterations = 0;
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = MakeOpaque(f1) / 5ll;
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f3);
-    print_ips("Division by int64", (uint64_t)(total_iterations / dur.duration()));
+    BenchBinary<T, int64_t>("Division by int64", time_per_function, Traits::operandA(), 5ll, [](const T& lhs, const int64_t& rhs) { return lhs / rhs; });
 
-    T f4 = 5;
-    total_iterations = 0;
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f3 = MakeOpaque(f1) / f4;
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f3);
-    print_ips("Division by 128-bit integer value", (uint64_t)(total_iterations / dur.duration()));
+    BenchBinary<T, T>("Division by 128-bit integer value", time_per_function, Traits::operandA(), T(5), [](const T& lhs, const T& rhs) { return lhs / rhs; });
 
     // Only meaningful where the divisor can hold a fraction. For the integer types this loop would
     // be the previous one with a different divisor.
     if constexpr (Traits::isFractional) {
-        T f5 = Traits::operandB();
-        total_iterations = 0;
-        dur.start();
-        while (dur.cur_duration() < time_per_function) {
-            for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-                f3 = MakeOpaque(f1) / f5;
-            }
-            total_iterations += BENCH_ITERATIONS;
-        }
-        DoNotOptimize(f3);
-        print_ips("Division by 128-bit fractional value", (uint64_t)(total_iterations / dur.duration()));
+        BenchBinary<T, T>("Division by 128-bit fractional value", time_per_function, Traits::operandA(), Traits::operandB(),
+                          [](const T& lhs, const T& rhs) { return lhs / rhs; });
     }
 }
 
 template <typename T> void bench_reciprocal(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = reciprocal(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("reciprocal", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("reciprocal", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return reciprocal(v); });
 }
 
 /**
  * @brief Benches sqrt().
  *
- * The result is held in `auto`: the integer types return the truncated integer root as a uint64_t
- * rather than a value of their own type.
+ * BenchUnary() holds the result in `auto`, which matters here: the integer types return the
+ * truncated integer root as a uint64_t rather than a value of their own type.
  */
 template <typename T> void bench_sqrt(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    auto f2 = sqrt(f1);
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = sqrt(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("sqrt", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("sqrt", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return sqrt(v); });
 }
 
 template <typename T> void bench_exp(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = exp(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("exp", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("exp", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return exp(v); });
 }
 
 template <typename T> void bench_exp2(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = exp2(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("exp2", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("exp2", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return exp2(v); });
 }
 
 template <typename T> void bench_expm1(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = expm1(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("expm1", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("expm1", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return expm1(v); });
 }
 
 /**
@@ -642,36 +653,16 @@ template <typename T> void bench_expm1(double time_per_function = 1.0)
 template <typename T> void bench_pow(double time_per_function = 1.0)
 {
     using Traits = BenchTraits<T>;
-    Duration dur;
-    uint64_t total_iterations = 0;
-    T f3;
-    // start the clock
+
     if constexpr (Traits::hasTranscendental) {
-        T f1 = Traits::operandB();
-        T f2 = Traits::operandC();
-        dur.start();
-        while (dur.cur_duration() < time_per_function) {
-            for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-                f3 = pow(MakeOpaque(f1), f2);
-            }
-            total_iterations += BENCH_ITERATIONS;
-        }
+        BenchBinary<T, T>("pow", time_per_function, Traits::operandB(), Traits::operandC(),
+                          [](const T& base, const T& exponent) { return pow(base, exponent); });
     } else {
         // A small base keeps the result inside 128 bits; the cost of the binary exponentiation
         // depends on the exponent, not on the base.
-        T f1 = T(7);
-        dur.start();
-        while (dur.cur_duration() < time_per_function) {
-            for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-                f3 = pow(MakeOpaque(f1), 5u);
-            }
-            total_iterations += BENCH_ITERATIONS;
-        }
+        BenchBinary<T, uint32_t>("pow (integer exponent)", time_per_function, T(7), 5u,
+                                 [](const T& base, const uint32_t& exponent) { return pow(base, exponent); });
     }
-    DoNotOptimize(f3);
-
-    print_ips((Traits::hasTranscendental) ? "pow" : "pow (integer exponent)",
-              (uint64_t)(total_iterations / dur.duration()));
 }
 
 /**
@@ -681,339 +672,114 @@ template <typename T> void bench_pow(double time_per_function = 1.0)
  */
 template <typename T> void bench_log(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    auto f2 = log(f1);
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = log(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("log", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("log", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return log(v); });
 }
 
 template <typename T> void bench_log2(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    auto f2 = log2(f1);
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = log2(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("log2", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("log2", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return log2(v); });
 }
 
 template <typename T> void bench_log10(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    auto f2 = log10(f1);
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = log10(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("log10", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("log10", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return log10(v); });
 }
 
 template <typename T> void bench_log1p(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB();
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = log1p(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("log1p", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("log1p", time_per_function, BenchTraits<T>::operandB(), [](const T& v) { return log1p(v); });
 }
 
 template <typename T> void bench_sin(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB() / 2;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = sin(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("sin", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("sin", time_per_function, BenchTraits<T>::operandB() / 2, [](const T& v) { return sin(v); });
 }
 
 template <typename T> void bench_asin(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandA() / 5;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = asin(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("asin", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("asin", time_per_function, BenchTraits<T>::operandA() / 5, [](const T& v) { return asin(v); });
 }
 
 template <typename T> void bench_cos(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB() / 2;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = cos(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("cos", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("cos", time_per_function, BenchTraits<T>::operandB() / 2, [](const T& v) { return cos(v); });
 }
 
 template <typename T> void bench_acos(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandA() / 5;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = acos(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("acos", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("acos", time_per_function, BenchTraits<T>::operandA() / 5, [](const T& v) { return acos(v); });
 }
 
 template <typename T> void bench_tan(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB() / 2;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = tan(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("tan", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("tan", time_per_function, BenchTraits<T>::operandB() / 2, [](const T& v) { return tan(v); });
 }
 
 template <typename T> void bench_atan(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandA() / 5;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = atan(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("atan", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("atan", time_per_function, BenchTraits<T>::operandA() / 5, [](const T& v) { return atan(v); });
 }
 
 template <typename T> void bench_sinh(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB() / 2;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = sinh(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("sinh", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("sinh", time_per_function, BenchTraits<T>::operandB() / 2, [](const T& v) { return sinh(v); });
 }
 
 template <typename T> void bench_asinh(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandA() / 5;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = asinh(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("asinh", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("asinh", time_per_function, BenchTraits<T>::operandA() / 5, [](const T& v) { return asinh(v); });
 }
 
 template <typename T> void bench_cosh(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB() / 2;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = cosh(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("cosh", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("cosh", time_per_function, BenchTraits<T>::operandB() / 2, [](const T& v) { return cosh(v); });
 }
 
 template <typename T> void bench_acosh(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB() / 2;  // x >= 1
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = acosh(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("acosh", (uint64_t)(total_iterations / dur.duration()));
+    // x >= 1
+    BenchUnary<T>("acosh", time_per_function, BenchTraits<T>::operandB() / 2, [](const T& v) { return acosh(v); });
 }
 
 template <typename T> void bench_tanh(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB() / 2;
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = tanh(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("tanh", (uint64_t)(total_iterations / dur.duration()));
+    BenchUnary<T>("tanh", time_per_function, BenchTraits<T>::operandB() / 2, [](const T& v) { return tanh(v); });
 }
 
 template <typename T> void bench_atanh(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
-    T f1 = BenchTraits<T>::operandB() / 4;  // abs(v) < 1
-    T f2;
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
-            f2 = atanh(MakeOpaque(f1));
-        }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(f2);
-
-    print_ips("atanh", (uint64_t)(total_iterations / dur.duration()));
+    // abs(v) < 1
+    BenchUnary<T>("atanh", time_per_function, BenchTraits<T>::operandB() / 4, [](const T& v) { return atanh(v); });
 }
 
+/**
+ * @brief Benches one Mandelbrot iteration.
+ *
+ * Unlike every other benchmark here, the state lives outside the batch and the orbit runs on across
+ * batch boundaries. It has to: the seed coordinates come from doubles, so the low two thirds of
+ * their fraction bits are zero, and it takes on the order of a million iterations for the products
+ * to fill them in. MSVC is roughly twice as slow over that transient as it is afterwards, so a
+ * benchmark that restarted the orbit for every batch would report a figure that depended on the
+ * batch size the sizing phase happened to pick - 68M/s at one batch length against 152M/s at
+ * another, for the same loop. Running the orbit on makes the transient a one time cost.
+ *
+ * The point is inside the set, so the orbit stays bounded for as long as it is iterated and no
+ * value ever leaves the range the type can hold.
+ */
 template <typename T> void bench_mandelbrot(double time_per_function = 1.0)
 {
-    Duration dur;
-    uint64_t total_iterations = 0;
-    // setup
+    // Both coordinates are escaped so the iteration cannot be constant folded; the orbit itself is
+    // loop carried, so nothing else here is hoistable and no result needs escaping to keep the body
+    // alive.
+    T x = T(-0.7294734415);
+    T y = T(0.242809);
     T usq, vsq, tmp, modulus, u, v;
-    // A point that doesn't diverge quickly. Both coordinates are hidden from the optimizer so the
-    // iteration cannot be constant folded; the orbit itself is loop carried, so nothing inside the
-    // loop is hoistable and no per-iteration barrier is needed.
-    T x = MakeOpaque(T(-0.7294734415));
-    T y = MakeOpaque(T(0.242809));
-    // start the clock
-    dur.start();
-    while (dur.cur_duration() < time_per_function) {
-        for (uint64_t i = BENCH_ITERATIONS; i != 0; --i) {
+    Escape(x);
+    Escape(y);
+
+    const int64_t ips = MeasureRate(time_per_function, [&](uint64_t count) {
+        for (uint64_t i = count; i != 0; --i) {
+            Barrier();
             // real
             tmp = usq - vsq + x;
 
@@ -1026,11 +792,10 @@ template <typename T> void bench_mandelbrot(double time_per_function = 1.0)
             // check uv vector amplitude is smaller than 2
             modulus = usq + vsq;
         }
-        total_iterations += BENCH_ITERATIONS;
-    }
-    DoNotOptimize(modulus);
+        DoNotOptimize(modulus);
+    });
 
-    print_ips("Mandelbrot", (uint64_t)(total_iterations / dur.duration()));
+    print_ips("Mandelbrot", ips);
 }
 
 /**
@@ -1305,13 +1070,27 @@ bool SelectType(const char* name, TypeSelection& selection)
     res.reserve(text.size());
     for (const char c : text) {
         switch (c) {
-        case '"':  res += "\\\""; break;
-        case '\\': res += "\\\\"; break;
-        case '\b': res += "\\b";  break;
-        case '\f': res += "\\f";  break;
-        case '\n': res += "\\n";  break;
-        case '\r': res += "\\r";  break;
-        case '\t': res += "\\t";  break;
+        case '"':
+            res += "\\\"";
+            break;
+        case '\\':
+            res += "\\\\";
+            break;
+        case '\b':
+            res += "\\b";
+            break;
+        case '\f':
+            res += "\\f";
+            break;
+        case '\n':
+            res += "\\n";
+            break;
+        case '\r':
+            res += "\\r";
+            break;
+        case '\t':
+            res += "\\t";
+            break;
         default:
             if (static_cast<unsigned char>(c) < 0x20) {
                 res += format("\\u{:04x}", static_cast<unsigned>(static_cast<unsigned char>(c)));
@@ -1369,15 +1148,15 @@ bool WriteJsonReport(const std::string& path)
     file << format("  \"build\": \"{}\",\n", BuildType());
     file << format("  \"timestamp\": \"{}\",\n", Timestamp());
     file << format("  \"timePerFunction\": {},\n", TIME_PER_FUNCTION);
-    file << format("  \"benchIterations\": {},\n", BENCH_ITERATIONS);
+    file << format("  \"minBatchTime\": {},\n", BENCH_MIN_BATCH_TIME);
+    file << "  \"sampling\": \"fastest batch\",\n";
     file << format("  \"types\": [{}],\n", typeList);
     file << "  \"results\": [\n";
     for (size_t i = 0; i < benchResults.size(); ++i) {
         const auto& result = benchResults[i];
         const char* separator = (i + 1 < benchResults.size()) ? "," : "";
-        file << format("    {{ \"type\": \"{}\", \"group\": \"{}\", \"name\": \"{}\", \"iterationsPerSecond\": {} }}{}\n",
-                       EscapeJson(result.type), EscapeJson(result.group), EscapeJson(result.name),
-                       result.ips, separator);
+        file << format("    {{ \"type\": \"{}\", \"group\": \"{}\", \"name\": \"{}\", \"iterationsPerSecond\": {} }}{}\n", EscapeJson(result.type),
+                       EscapeJson(result.group), EscapeJson(result.name), result.ips, separator);
     }
     file << "  ]\n";
     file << "}\n";
@@ -1427,26 +1206,26 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     using fp = fixed_point128<I>;
 
     // --- Constructors ---
-    fp def;                                               // default
-    fp from_double(1.5);                                  // double
-    fp copy_ctor(from_double);                            // copy
-    fp move_ctor(std::move(fp(2.0)));                     // move
-    fp from_u64((uint64_t)1);                             // uint64_t
-    fp from_i64((int64_t)1);                              // int64_t
-    fp from_u32((uint32_t)1);                             // uint32_t
-    fp from_i32((int32_t)1);                              // int32_t
-    fp from_cstr("1.5");                                  // const char*
-    fp from_str(std::string("1.5"));                      // std::string
-    fp from_raw(0ull, 1ull, 0u);                          // raw (low, high, sign)
+    fp def;                            // default
+    fp from_double(1.5);               // double
+    fp copy_ctor(from_double);         // copy
+    fp move_ctor(std::move(fp(2.0)));  // move
+    fp from_u64((uint64_t)1);          // uint64_t
+    fp from_i64((int64_t)1);           // int64_t
+    fp from_u32((uint32_t)1);          // uint32_t
+    fp from_i32((int32_t)1);           // int32_t
+    fp from_cstr("1.5");               // const char*
+    fp from_str(std::string("1.5"));   // std::string
+    fp from_raw(0ull, 1ull, 0u);       // raw (low, high, sign)
 
     // cross-template copy constructor (I2 = 10)
     fixed_point128<10> f10(1.5);
     fp cross_ctor(f10);
 
     // --- Assignment operators ---
-    def = copy_ctor;                                      // copy assign
-    def = std::move(fp(3.0));                             // move assign
-    def = f10;                                            // cross-template assign
+    def = copy_ctor;           // copy assign
+    def = std::move(fp(3.0));  // move assign
+    def = f10;                 // cross-template assign
 
     // --- Conversion operators ---
     (void)(uint64_t)from_double;
@@ -1483,9 +1262,9 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     c *= 2.0;
     c /= 2.0;
     c %= 1.5;
-    c *= (uint64_t)2;                                     // operator*=<uint64_t> specialization
-    c /= (uint64_t)2;                                     // operator/=<uint64_t> specialization
-    c /= (double)2.0;                                     // operator/=<double> specialization
+    c *= (uint64_t)2;  // operator*=<uint64_t> specialization
+    c /= (uint64_t)2;  // operator/=<uint64_t> specialization
+    c /= (double)2.0;  // operator/=<double> specialization
 
     // --- Binary arithmetic operators (friend) ---
     c = a + b;
@@ -1586,9 +1365,9 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     // friend trigonometric functions (require minimum template parameter I >= 4)
     if constexpr (I >= 4) {
         (void)sin(val);
-        (void)asin(half_val);                                 // |x| <= 1 required
+        (void)asin(half_val);  // |x| <= 1 required
         (void)cos(val);
-        (void)acos(half_val);                                 // |x| <= 1 required
+        (void)acos(half_val);  // |x| <= 1 required
         (void)tan(val);
         (void)atan(val);
         (void)atan2(val, val);
@@ -1601,10 +1380,23 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     }
 
     // suppress unused-variable warnings
-    (void)def; (void)from_double; (void)copy_ctor; (void)move_ctor;
-    (void)from_u64; (void)from_i64; (void)from_u32; (void)from_i32;
-    (void)from_cstr; (void)from_str; (void)from_raw; (void)cross_ctor;
-    (void)a; (void)b; (void)c; (void)f10; (void)fact_res;
+    (void)def;
+    (void)from_double;
+    (void)copy_ctor;
+    (void)move_ctor;
+    (void)from_u64;
+    (void)from_i64;
+    (void)from_u32;
+    (void)from_i32;
+    (void)from_cstr;
+    (void)from_str;
+    (void)from_raw;
+    (void)cross_ctor;
+    (void)a;
+    (void)b;
+    (void)c;
+    (void)f10;
+    (void)fact_res;
 }
 
 /**
