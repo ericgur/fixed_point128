@@ -2141,6 +2141,39 @@ public:
     {
         return float128(lhs) /= rhs;
     }
+    /**
+     * @brief Shifts a scalar left by a float128 shift count, scaling it by a power of two.
+     *
+     * The left operand is widened to float128 first, so the result is 128 bit rather than the
+     * builtin type of lhs.
+     *
+     * The count is rhs converted to int32_t, the same conversion the float128 on the left overload
+     * applies. Note that conversion rounds to nearest rather than truncating, so a count of 3.75
+     * shifts by 4. fixed_point128 truncates in the same place, its conversion being a plain shift.
+     *
+     * @param lhs Left operand, the value being shifted
+     * @param rhs Right operand, the shift count
+     * @return The float128 result
+     */
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 operator<<(const T& lhs, const float128& rhs) noexcept
+    {
+        return float128(lhs) <<= static_cast<int32_t>(rhs);
+    }
+    /**
+     * @brief Shifts a scalar right by a float128 shift count, scaling it by a power of two.
+     * The left operand is widened to float128 first, see operator<< above.
+     * @param lhs Left operand, the value being shifted
+     * @param rhs Right operand, the shift count
+     * @return The float128 result
+     */
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 operator>>(const T& lhs, const float128& rhs) noexcept
+    {
+        return float128(lhs) >>= static_cast<int32_t>(rhs);
+    }
 
     //
     // Comparison operators

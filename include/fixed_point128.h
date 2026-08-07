@@ -1601,6 +1601,111 @@ private:
 
     /// @}
 
+    /// @name Binary Operators With The Scalar On The Left Hand Side (Friend)
+    /// @brief Overloads that accept a builtin arithmetic type as the left operand.
+    ///
+    /// Without these, an expression like (1 + x) is ambiguous: converting the literal to
+    /// fixed_point128 and converting x to a builtin type are both one user defined conversion, so
+    /// neither overload wins. Restricting the left operand to the arithmetic types keeps these from
+    /// competing with the fixed_point128 on the left versions above, which would otherwise be an
+    /// equally good match. The comparison operators already carry the same pair of overloads.
+    ///
+    /// The scalar is widened to fixed_point128 rather than the object being narrowed to a builtin
+    /// type, so (1 - x) keeps the fraction of x instead of truncating it away.
+    /// @{
+
+    /// @brief Adds a scalar and a fixed_point128, in that order. @param lhs Left operand @param rhs Right operand @return The fixed_point128 result
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator+(const T& lhs, const fixed_point128& rhs) noexcept
+    {
+        return fixed_point128(lhs) += rhs;
+    }
+    /// @brief Subtracts a fixed_point128 from a scalar. @param lhs Left operand @param rhs Right operand @return The fixed_point128 result
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator-(const T& lhs, const fixed_point128& rhs) noexcept
+    {
+        return fixed_point128(lhs) -= rhs;
+    }
+    /// @brief Multiplies a scalar and a fixed_point128, in that order. @param lhs Left operand @param rhs Right operand @return The fixed_point128 result
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator*(const T& lhs, const fixed_point128& rhs) noexcept
+    {
+        return fixed_point128(lhs) *= rhs;
+    }
+    /// @brief Divides a scalar by a fixed_point128. @param lhs Left operand @param rhs Right operand @return The fixed_point128 result
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 operator/(const T& lhs, const fixed_point128& rhs)
+    {
+        return fixed_point128(lhs) /= rhs;
+    }
+    /// @brief Performs modulo of a scalar by a fixed_point128. @param lhs Left operand @param rhs Right operand @return The fixed_point128 result
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 operator%(const T& lhs, const fixed_point128& rhs)
+    {
+        return fixed_point128(lhs) %= rhs;
+    }
+    /// @brief Performs bitwise AND of a scalar and a fixed_point128. @param lhs Left operand @param rhs Right operand @return The fixed_point128 result
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator&(const T& lhs, const fixed_point128& rhs)
+    {
+        return fixed_point128(lhs) &= rhs;
+    }
+    /// @brief Performs bitwise OR of a scalar and a fixed_point128. @param lhs Left operand @param rhs Right operand @return The fixed_point128 result
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator|(const T& lhs, const fixed_point128& rhs)
+    {
+        return fixed_point128(lhs) |= rhs;
+    }
+    /// @brief Performs bitwise XOR of a scalar and a fixed_point128. @param lhs Left operand @param rhs Right operand @return The fixed_point128 result
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator^(const T& lhs, const fixed_point128& rhs)
+    {
+        return fixed_point128(lhs) ^= rhs;
+    }
+    /**
+     * @brief Shifts a scalar left by a fixed_point128 shift count.
+     *
+     * The left operand is widened to fixed_point128 first, so the result is 128 bit rather than the
+     * builtin type of lhs.
+     *
+     * The count is rhs converted to int32_t, the same conversion the fixed_point128 on the left
+     * overload applies. That conversion is a shift, so the fraction of rhs is truncated toward zero
+     * rather than rounded.
+     *
+     * @param lhs Left operand, the value being shifted
+     * @param rhs Right operand, the shift count
+     * @return The fixed_point128 result
+     */
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator<<(const T& lhs, const fixed_point128& rhs) noexcept
+    {
+        return fixed_point128(lhs) <<= static_cast<int32_t>(rhs);
+    }
+    /**
+     * @brief Shifts a scalar right by a fixed_point128 shift count.
+     * The left operand is widened to fixed_point128 first, see operator<< above.
+     * @param lhs Left operand, the value being shifted
+     * @param rhs Right operand, the shift count
+     * @return The fixed_point128 result
+     */
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator>>(const T& lhs, const fixed_point128& rhs) noexcept
+    {
+        return fixed_point128(lhs) >>= static_cast<int32_t>(rhs);
+    }
+
+    /// @}
+
     /// @name Comparison Operators
     /// @{
 

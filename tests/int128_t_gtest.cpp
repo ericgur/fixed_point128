@@ -1353,6 +1353,92 @@ TEST(int128_t, CompoundBitwiseAndShiftOperators)
     EXPECT_TRUE((int128_t(0ull, 0x4000000000000000ull) >> 126) == int128_t(1ll));
 }
 
+// A scalar on the left used to be ambiguous: converting it to int128_t and converting the int128_t
+// to a builtin type are both a single user defined conversion.
+TEST(int128_t, ScalarOnTheLeftHandSide)
+{
+    const int128_t x(10);
+    EXPECT_TRUE((1 + x) == int128_t(11));
+    EXPECT_TRUE((100 - x) == int128_t(90));
+    EXPECT_TRUE((3 * x) == int128_t(30));
+    EXPECT_TRUE((100 / x) == int128_t(10));
+    EXPECT_TRUE((105 % x) == int128_t(5));
+    EXPECT_TRUE((0xFF & x) == int128_t(10));
+    EXPECT_TRUE((1 | x) == int128_t(11));
+    EXPECT_TRUE((3 ^ x) == int128_t(9));
+
+    // subtracting past zero must keep the sign rather than wrap
+    EXPECT_TRUE((1 - x) == int128_t(-9));
+    EXPECT_TRUE((-1 * x) == int128_t(-10));
+
+    // The left operand is widened rather than the object being narrowed, so the result is 128 bit.
+    static_assert(std::is_same_v<decltype(1 + x), int128_t>);
+    static_assert(std::is_same_v<decltype(1 ^ x), int128_t>);
+}
+// The comparisons only existed with the int128_t on the left. A scalar there had nothing but the
+// builtin comparisons to choose from, and the conversion operators of int128_t make every one of
+// them equally good, so the call was ambiguous. Signedness is the point here: resolving to any of
+// the unsigned builtin conversions would order the negative values above the positive ones.
+TEST(int128_t, ScalarOnTheLeftHandSideComparisons)
+{
+    const int128_t x(10);
+    EXPECT_TRUE(10 == x);
+    EXPECT_TRUE(9 != x);
+    EXPECT_TRUE(9 < x);
+    EXPECT_FALSE(10 < x);
+    EXPECT_TRUE(9 <= x);
+    EXPECT_TRUE(10 <= x);
+    EXPECT_TRUE(11 > x);
+    EXPECT_FALSE(10 > x);
+    EXPECT_TRUE(11 >= x);
+    EXPECT_TRUE(10 >= x);
+
+    // across zero, where a narrowed unsigned comparison would give the opposite answer
+    const int128_t negative(-3);
+    EXPECT_TRUE(-3 == negative);
+    EXPECT_TRUE(-4 < negative);
+    EXPECT_TRUE(-2 > negative);
+    EXPECT_TRUE(0 > negative);
+    EXPECT_TRUE(1 > negative);
+    EXPECT_FALSE(0 < negative);
+    EXPECT_TRUE(0 > int128_t(-1));
+    EXPECT_TRUE(-1 < int128_t(0));
+
+    // a value no builtin type can hold must not compare through a narrowed conversion
+    const int128_t big = int128_t(1) << 100;
+    EXPECT_TRUE(1 < big);
+    EXPECT_FALSE(1 > big);
+    EXPECT_TRUE(1 != big);
+    EXPECT_TRUE(1 > -big);
+
+    // the int128_t on the left forms must still resolve
+    EXPECT_TRUE(x == 10);
+    EXPECT_TRUE(x > 9);
+    EXPECT_TRUE(x == int128_t(10));
+}
+// Widening the left operand is what makes (1 << 100) produce the expected power of two. The same
+// expression on a builtin int is undefined behavior, the shift count being wider than the operand.
+TEST(int128_t, ScalarOnTheLeftHandSideShifts)
+{
+    const int128_t ten(10);
+    EXPECT_TRUE((1 << ten) == int128_t(1024));
+    EXPECT_TRUE((1024 >> ten) == int128_t(1));
+    EXPECT_TRUE((3 << int128_t(2)) == int128_t(12));
+
+    const int128_t hundred(100);
+    EXPECT_TRUE((1 << hundred) == (int128_t(1) << 100));
+    EXPECT_TRUE((1 << hundred) != 0);
+    static_assert(std::is_same_v<decltype(1 << hundred), int128_t>);
+
+    // the right shift is arithmetic, as it is for the int128_t on the left form
+    EXPECT_TRUE((-1024 >> ten) == int128_t(-1));
+    EXPECT_TRUE((-8 >> int128_t(1)) == int128_t(-4));
+
+    // the int128_t on the left forms must still resolve
+    EXPECT_TRUE((ten << 1) == int128_t(20));
+    EXPECT_TRUE((ten >> 1) == int128_t(5));
+}
+
 /**********************************************************************
  * Compile time (constexpr) evaluation
  *

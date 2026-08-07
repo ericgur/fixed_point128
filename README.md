@@ -190,6 +190,7 @@ Template class `fixed_point128<I>` where **I** is the number of integer bits (ra
 **Features:**
 - Construction from integer types, `double`, C strings (accurate to 37 decimal digits), and raw components.
 - Full arithmetic operators including optimized 64-bit multiply path.
+- A builtin scalar may appear on either side of any binary operator. The scalar is widened rather than the object narrowed, so the result is `fixed_point128<I>` and `1 - f` keeps the fraction of `f`.
 - Cross-template assignment and conversion between different `I` values.
 - Comprehensive math library:
   - **Basic:** `fabs`, `floor`, `ceil`, `trunc`, `round`, `copysign`, `fmod`, `modf`, `fdim`, `fmin`, `fmax`.
@@ -211,7 +212,7 @@ IEEE 754-2008 binary128 (quadruple-precision) floating-point type, aligned to 16
 - Full IEEE 754 special-value handling: NaN propagation, infinity arithmetic, subnormals.
 - Classification queries: `is_zero`, `is_finite`, `is_normal`, `is_subnormal`, `is_nan`, `is_signaling`, `is_inf`, `is_special`, `is_int`, `is_negative`, `is_positive`, `is_exponent_of_2`.
 - Construction from `float`, `double`, integer types, and C strings (including scientific notation and special values).
-- Arithmetic operators: `+`, `-`, `*`, `/`, `<<`, `>>`.
+- Arithmetic operators: `+`, `-`, `*`, `/`, `<<`, `>>`. A builtin scalar may appear on either side, and the result is a `float128` either way.
 - Comprehensive math library (50+ functions):
   - **Basic:** `fabs`, `floor`, `ceil`, `trunc`, `round`, `copysign`, `fmod`, `modf`, `fdim`, `fmin`, `fmax`.
   - **Power / Root:** `sqr`, `sqrt`, `cbrt`, `pow`, `hypot`.
@@ -234,6 +235,7 @@ Signed 128-bit integer stored in two's complement representation, aligned to 16 
 - Construction from integer types, `double`, C strings, `std::string`, and raw `low`/`high` components.
 - Full arithmetic operators: `+`, `-`, `*`, `/`, `%`, `<<`, `>>`, `&`, `|`, `^`, and their assignment variants.
 - Comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`.
+- A builtin scalar may appear on either side of any of the above. The scalar is widened, so the result is 128 bit and the comparisons stay exact for values no builtin type can hold. This also makes `1 << n` produce the expected power of two where a builtin shift that wide would be undefined behavior.
 - Math functions: `abs`, `sqrt`, `log`, `log2`, `log10`, `pow`.
 - Conversions to `int64_t`, `uint64_t`, `float`, `double`, `long double`, and strings.
 - User-defined literal: `_int128` (e.g. `12345_int128`).
@@ -256,7 +258,7 @@ Implementation shared by both 128-bit integer types. `int128_t` and `uint128_t` 
 **Key contents:**
 - **`int128_base<IsSigned>`** - 16-byte aligned class template holding `uint64_t low` + `uint64_t high`. `int128_t` is `int128_base<true>`, `uint128_t` is `int128_base<false>`. Values are stored in two's complement, so the bit patterns of the shared operations match exactly between the signed and unsigned types.
 - **Constructors** - default, copy, move, `double`, any builtin integral type, and C strings (decimal or hexadecimal with an optional sign).
-- **Operator suite** - arithmetic, bitwise, shift and comparison operators, each with a template overload accepting any type convertible to `int128_base`.
+- **Operator suite** - arithmetic, bitwise, shift and comparison operators, each with a template overload accepting any type convertible to `int128_base`, plus a mirror overload constrained to `std::is_arithmetic_v` for a builtin scalar on the left. The constraint is what keeps the two sets from being an equally good match for each other.
 - **Free functions** - `abs`, `sqr`, `sqrt`, `log`, `log2`, `log10`, `pow`, `lzcnt128`.
 - **Conversions** - `operator double`, `operator float`, `operator std::string`.
 

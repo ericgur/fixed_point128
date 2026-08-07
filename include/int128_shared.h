@@ -1498,6 +1498,89 @@ public:
     {
         return int128_base(lhs) ^= rhs;
     }
+    /**
+     * @brief Shifts a scalar left by an int128_base shift count.
+     *
+     * The left operand is widened to int128_base first, so the result is 128 bit rather than the
+     * builtin type of lhs. This is what makes (1 << n) with a large n produce the expected power of
+     * two instead of the undefined behavior a builtin shift past the operand width would have.
+     *
+     * @param lhs Left operand, the value being shifted
+     * @param rhs Right operand, the shift count. Only its low 32 bits are used.
+     * @return Result of the operation
+     */
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator<<(const T& lhs, const int128_base& rhs) noexcept
+    {
+        return int128_base(lhs) <<= static_cast<int32_t>(rhs);
+    }
+    /**
+     * @brief Shifts a scalar right by an int128_base shift count.
+     * The left operand is widened to int128_base first, see operator<< above.
+     * @param lhs Left operand, the value being shifted
+     * @param rhs Right operand, the shift count. Only its low 32 bits are used.
+     * @return Result of the operation
+     */
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator>>(const T& lhs, const int128_base& rhs) noexcept
+    {
+        return int128_base(lhs) >>= static_cast<int32_t>(rhs);
+    }
+
+    //
+    // Comparison operators with the scalar on the left hand side
+    //
+    // The member comparisons above only cover an int128_base on the left. Without these, an
+    // expression like (1 == x) has nothing but the builtin comparisons to choose from, and the
+    // seven conversion operators of int128_base make every one of them equally good, so the call is
+    // ambiguous. Widening the scalar keeps the comparison exact at 128 bits instead of narrowing
+    // the object down to whichever builtin type the compiler happened to pick.
+    //
+
+    /// @brief Compares a scalar and an int128_base for equality. @param lhs Left operand @param rhs Right operand @return True when the two are equal
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const T& lhs, const int128_base& rhs) noexcept
+    {
+        return int128_base(lhs) == rhs;
+    }
+    /// @brief Compares a scalar and an int128_base for inequality. @param lhs Left operand @param rhs Right operand @return True when the two differ
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const T& lhs, const int128_base& rhs) noexcept
+    {
+        return int128_base(lhs) != rhs;
+    }
+    /// @brief Returns true when a scalar is smaller than an int128_base. @param lhs Left operand @param rhs Right operand @return True when lhs is smaller
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const T& lhs, const int128_base& rhs) noexcept
+    {
+        return int128_base(lhs) < rhs;
+    }
+    /// @brief Returns true when a scalar is smaller or equal to an int128_base. @param lhs Left operand @param rhs Right operand @return True when lhs is smaller or equal
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<=(const T& lhs, const int128_base& rhs) noexcept
+    {
+        return int128_base(lhs) <= rhs;
+    }
+    /// @brief Returns true when a scalar is larger than an int128_base. @param lhs Left operand @param rhs Right operand @return True when lhs is larger
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const T& lhs, const int128_base& rhs) noexcept
+    {
+        return int128_base(lhs) > rhs;
+    }
+    /// @brief Returns true when a scalar is larger or equal to an int128_base. @param lhs Left operand @param rhs Right operand @return True when lhs is larger or equal
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const T& lhs, const int128_base& rhs) noexcept
+    {
+        return int128_base(lhs) >= rhs;
+    }
 
     //
     // Various math functions, implemented as friend functions

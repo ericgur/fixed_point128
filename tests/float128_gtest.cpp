@@ -1795,6 +1795,37 @@ TEST(float128, RoundTripAccuracy)
     EXPECT_GT(exact * 100 / total, 60) << exact << " of " << total << " round tripped exactly";
 }
 
+// A float128 shift scales by a power of two. With a scalar on the left the left operand is widened,
+// so the result is a float128 rather than the builtin type of the scalar. The count is the right
+// operand converted to int32_t, which for float128 rounds to nearest.
+TEST(float128, ScalarOnTheLeftHandSideShifts)
+{
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 << float128(10)), 1024.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(1024 >> float128(10)), 1.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(3 << float128(2)), 12.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 >> float128(2)), 0.25);
+    EXPECT_DOUBLE_EQ(static_cast<double>(-1 << float128(3)), -8.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(2.5 << float128(2)), 10.0);
+
+    // A fractional shift count goes through operator int32_t, which rounds to nearest here rather
+    // than truncating, so 3.75 shifts by 4. The same overload picked with the float128 on the left
+    // has to agree, both reaching the count the same way.
+    EXPECT_TRUE((1 << float128(3.75)) == (1 << float128(4)));
+    EXPECT_TRUE((1 << float128(3.25)) == (1 << float128(3)));
+    EXPECT_TRUE((1 << float128(3.75)) == (float128(1) << float128(3.75)));
+
+    static_assert(std::is_same_v<decltype(1 << float128(3)), float128>);
+
+    // the float128 on the left forms must still resolve
+    EXPECT_TRUE((float128(4) << 1) == float128(8));
+    EXPECT_TRUE((float128(4) >> 1) == float128(2));
+
+    // the arithmetic scalar on the left forms that already existed must still resolve
+    EXPECT_TRUE((1 + float128(2)) == float128(3));
+    EXPECT_TRUE((1 - float128(2)) == float128(-1));
+    static_assert(std::is_same_v<decltype(1 + float128(2)), float128>);
+}
+
 /**********************************************************************
  * Compile time (constexpr) evaluation
  *

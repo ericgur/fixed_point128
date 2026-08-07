@@ -1039,6 +1039,58 @@ TEST(uint128_t, ScalarOnTheLeftHandSide)
     EXPECT_TRUE((x + 1) == uint128_t(11ull));
     EXPECT_TRUE((x + x) == uint128_t(20ull));
     EXPECT_TRUE((x * x) == uint128_t(100ull));
+
+    // The left operand is widened rather than the object being narrowed, so the result is 128 bit.
+    static_assert(std::is_same_v<decltype(1 + x), uint128_t>);
+    static_assert(std::is_same_v<decltype(1 ^ x), uint128_t>);
+}
+// The comparisons only existed with the uint128_t on the left. A scalar there had nothing but the
+// builtin comparisons to choose from, and the conversion operators of uint128_t make every one of
+// them equally good, so the call was ambiguous.
+TEST(uint128_t, ScalarOnTheLeftHandSideComparisons)
+{
+    const uint128_t x(10ull);
+    EXPECT_TRUE(10 == x);
+    EXPECT_FALSE(9 == x);
+    EXPECT_TRUE(9 != x);
+    EXPECT_FALSE(10 != x);
+    EXPECT_TRUE(9 < x);
+    EXPECT_FALSE(10 < x);
+    EXPECT_TRUE(9 <= x);
+    EXPECT_TRUE(10 <= x);
+    EXPECT_TRUE(11 > x);
+    EXPECT_FALSE(10 > x);
+    EXPECT_TRUE(11 >= x);
+    EXPECT_TRUE(10 >= x);
+
+    // A value no builtin type can hold must not compare through a narrowed conversion.
+    const uint128_t big = uint128_t(1ull) << 100;
+    EXPECT_TRUE(1 < big);
+    EXPECT_FALSE(1 > big);
+    EXPECT_TRUE(1 != big);
+
+    // the uint128_t on the left forms must still resolve
+    EXPECT_TRUE(x == 10);
+    EXPECT_TRUE(x > 9);
+    EXPECT_TRUE(x == uint128_t(10ull));
+}
+// Widening the left operand is what makes (1 << 100) produce the expected power of two. The same
+// expression on a builtin int is undefined behavior, the shift count being wider than the operand.
+TEST(uint128_t, ScalarOnTheLeftHandSideShifts)
+{
+    const uint128_t ten(10ull);
+    EXPECT_TRUE((1 << ten) == uint128_t(1024ull));
+    EXPECT_TRUE((1024 >> ten) == uint128_t(1ull));
+    EXPECT_TRUE((3 << uint128_t(2ull)) == uint128_t(12ull));
+
+    const uint128_t hundred(100ull);
+    EXPECT_TRUE((1 << hundred) == (uint128_t(1ull) << 100));
+    EXPECT_TRUE((1 << hundred) != 0ull);
+    static_assert(std::is_same_v<decltype(1 << hundred), uint128_t>);
+
+    // the uint128_t on the left forms must still resolve
+    EXPECT_TRUE((ten << 1) == uint128_t(20ull));
+    EXPECT_TRUE((ten >> 1) == uint128_t(5ull));
 }
 // The documentation claimed these return zero for a zero input, they throw.
 TEST(uint128_t, LogFunctionsRejectZero)

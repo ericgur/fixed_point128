@@ -1841,6 +1841,65 @@ TEST(fixed_point128, ConstructorFromStringEdgeCases)
     EXPECT_TRUE(fp(high_byte) == fp(12));
 }
 
+// A scalar on the left used to be ambiguous: converting it to fixed_point128 and converting the
+// fixed_point128 to a builtin type are both a single user defined conversion. The scalar is the one
+// that gets widened, so the fraction of the object survives instead of being truncated away.
+TEST(fixed_point128, ScalarOnTheLeftHandSide)
+{
+    typedef fixed_point128<20> fp;
+    const fp quarter = fp(1) / 4;  // 0.25
+
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 + quarter), 1.25);
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 - quarter), 0.75);
+    EXPECT_DOUBLE_EQ(static_cast<double>(3 * quarter), 0.75);
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 / quarter), 4.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(5 % fp(3)), 2.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(2.5 + quarter), 2.75);
+    EXPECT_DOUBLE_EQ(static_cast<double>(2.5 - quarter), 2.25);
+
+    // subtracting past zero must keep the sign
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 - fp(3)), -2.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(-1 + quarter), -0.75);
+
+    // the bitwise forms agree with the fixed_point128 on the left ones
+    EXPECT_TRUE((7 & fp(3)) == (fp(7) & 3));
+    EXPECT_TRUE((7 | fp(8)) == (fp(7) | 8));
+    EXPECT_TRUE((7 ^ fp(3)) == (fp(7) ^ 3));
+
+    // the fixed_point128 on the left forms must still resolve
+    EXPECT_TRUE((quarter + 1) == fp(1.25));
+    EXPECT_TRUE((quarter + quarter) == fp(0.5));
+    EXPECT_TRUE((quarter * quarter) == fp(0.0625));
+
+    // The left operand is widened rather than the object being narrowed, so the result is 128 bit.
+    // Narrowing instead would make (1 - quarter) an int and lose the fraction entirely.
+    static_assert(std::is_same_v<decltype(1 + quarter), fp>);
+    static_assert(std::is_same_v<decltype(1 ^ quarter), fp>);
+}
+// Widening the left operand keeps the shift at 128 bits. The count is the right operand converted
+// to int32_t, which for fixed_point128 is a shift and so truncates toward zero.
+TEST(fixed_point128, ScalarOnTheLeftHandSideShifts)
+{
+    typedef fixed_point128<20> fp;
+
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 << fp(3)), 8.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(8 >> fp(3)), 1.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(3 << fp(2)), 12.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 >> fp(2)), 0.25);
+
+    // A fractional shift count goes through operator int32_t, which truncates toward zero here, so
+    // 3.75 shifts by 3. The same overload picked with the fixed_point128 on the left has to agree,
+    // both reaching the count the same way. float128 rounds instead, see its matching test.
+    EXPECT_TRUE((1 << fp(3.75)) == (1 << fp(3)));
+    EXPECT_TRUE((1 << fp(3.75)) == (fp(1) << fp(3.75)));
+
+    static_assert(std::is_same_v<decltype(1 << fp(3)), fp>);
+
+    // the fixed_point128 on the left forms must still resolve
+    EXPECT_TRUE((fp(4) << 1) == fp(8));
+    EXPECT_TRUE((fp(4) >> 1) == fp(2));
+}
+
 /**********************************************************************
  * Compile time (constexpr) evaluation
  *
