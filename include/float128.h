@@ -236,24 +236,24 @@ public:
     /**
      * @brief Default constructor, creates an instance with a value of zero.
      */
-    FP128_INLINE constexpr float128() noexcept : low(0), high(0) {}
+    FP128_FORCE_INLINE constexpr float128() noexcept : low(0), high(0) {}
     /**
      * @brief Copy constructor
      * @param other Object to copy from
      */
-    FP128_INLINE constexpr float128(const float128& other) noexcept : low(other.low), high(other.high) {}
+    FP128_FORCE_INLINE constexpr float128(const float128& other) noexcept : low(other.low), high(other.high) {}
     /**
      * @brief Move constructor
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param other Object to copy from
      */
-    FP128_INLINE constexpr float128(float128&& other) noexcept : low(other.low), high(other.high) {}
+    FP128_FORCE_INLINE constexpr float128(float128&& other) noexcept : low(other.low), high(other.high) {}
     /**
      * @brief Low level constructor
      * @param l Low QWORD
      * @param h High QWORD
      */
-    FP128_INLINE constexpr float128(uint64_t l, uint64_t h) noexcept : low(l), high(h) {}
+    FP128_FORCE_INLINE constexpr float128(uint64_t l, uint64_t h) noexcept : low(l), high(h) {}
     /**
      * @brief Low level constructor
      * @param lf Low fraction part (bits 63:0)
@@ -261,7 +261,7 @@ public:
      * @param e Exponent
      * @param s sign
      */
-    FP128_INLINE constexpr float128(uint64_t lf, uint64_t hf, uint32_t e, uint32_t s) noexcept :
+    FP128_FORCE_INLINE constexpr float128(uint64_t lf, uint64_t hf, uint32_t e, uint32_t s) noexcept :
         low(lf), high((hf & FP128_MAX_VALUE_64(48)) | (((0x7FFFull & e) << 48)) | ((1ull & s) << 63))
     {
     }
@@ -659,7 +659,7 @@ public:
      * @param other Object to copy from
      * @return This object.
      */
-    constexpr FP128_INLINE float128& operator=(const float128& other) noexcept
+    constexpr FP128_FORCE_INLINE float128& operator=(const float128& other) noexcept
     {
         high = other.high;
         low = other.low;
@@ -670,7 +670,7 @@ public:
      * @param other Object to copy from
      * @return This object.
      */
-    constexpr FP128_INLINE float128& operator=(float128&& other) noexcept
+    constexpr FP128_FORCE_INLINE float128& operator=(float128&& other) noexcept
     {
         high = other.high;
         low = other.low;
@@ -731,7 +731,7 @@ public:
     /**
      * @brief operator float converts to a float
      */
-    [[nodiscard]] FP128_INLINE constexpr operator float() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator float() const noexcept
     {
         // TODO: write proper function
         double v = static_cast<double>(*this);
@@ -819,12 +819,12 @@ public:
      * @brief operator long double - converts to a long double
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator long double() const noexcept { return operator double(); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator long double() const noexcept { return operator double(); }
     /**
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
      */
-    [[nodiscard]] FP128_INLINE operator std::string() const noexcept { return operator char*(); }
+    [[nodiscard]] FP128_FORCE_INLINE operator std::string() const noexcept { return operator char*(); }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
      * @return object string representation
@@ -1012,6 +1012,14 @@ public:
     }
     /**
      * @brief Performs right shift operation.
+     *
+     * Hinted rather than forced, unlike the other one line forwarders (see FP128_FORCE_INLINE).
+     * What it forwards to is not cheap: operator>>= splits the value into components and
+     * reassembles it, which brings the subnormal handling of get_components() and
+     * set_components() along with it. Forcing this pair open cost ~9% of the float128 Mandelbrot
+     * benchmark, which shifts inside a loop that already inlines an add, a multiply and two
+     * squares. Left as a hint, the shift is still inlined wherever the caller has room for it.
+     *
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
      */
@@ -1022,6 +1030,7 @@ public:
     }
     /**
      * @brief Performs left shift operation.
+     * Hinted rather than forced, see operator>> above.
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
      */
@@ -1129,19 +1138,19 @@ public:
      * @param other Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr float128& operator+=(const T& other) { return operator+=(float128(other)); }
+    template <typename T> FP128_FORCE_INLINE constexpr float128& operator+=(const T& other) { return operator+=(float128(other)); }
     /**
      * @brief Subtract a value from this object
      * @param other Right hand side operand
      * @return This object.
      */
-    FP128_INLINE constexpr float128& operator-=(const float128& other) noexcept { return *this += (-other); }
+    FP128_FORCE_INLINE constexpr float128& operator-=(const float128& other) noexcept { return *this += (-other); }
     /**
      * @brief Subtract a value from this object
      * @param other Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr float128& operator-=(const T& other) { return operator+=(-float128(other)); }
+    template <typename T> FP128_FORCE_INLINE constexpr float128& operator-=(const T& other) { return operator+=(-float128(other)); }
     /**
      * @brief Multiply a value to this object
      * @param other Right hand side operand
@@ -1318,7 +1327,7 @@ public:
      * @param other Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr float128& operator*=(const T& other) { return operator*=(float128(other)); }
+    template <typename T> FP128_FORCE_INLINE constexpr float128& operator*=(const T& other) { return operator*=(float128(other)); }
     /**
      * @brief Divide this object by a value
      * @param other Right hand side operand
@@ -1396,7 +1405,7 @@ public:
      * @param other Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE float128& operator/=(const T& other) { return operator/=(float128(other)); }
+    template <typename T> FP128_FORCE_INLINE float128& operator/=(const T& other) { return operator/=(float128(other)); }
 
     //
     // unary operations
@@ -1404,21 +1413,21 @@ public:
     /**
      * @brief Convert to bool
      */
-    [[nodiscard]] FP128_INLINE constexpr operator bool() const noexcept { return !is_zero(); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator bool() const noexcept { return !is_zero(); }
     /**
      * @brief Logical not (!). Opposite of operator bool.
      * Uses is_zero() rather than testing the raw words: negative zero has its sign bit set and
      * would otherwise be reported as a non zero value.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator!() const noexcept { return is_zero(); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator!() const noexcept { return is_zero(); }
     /**
      * @brief Unary +. Returns a copy of the object.
      */
-    [[nodiscard]] FP128_INLINE constexpr float128 operator+() const noexcept { return *this; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr float128 operator+() const noexcept { return *this; }
     /**
      * @brief Unary -. Returns a copy of the object with sign inverted.
      */
-    [[nodiscard]] FP128_INLINE constexpr float128 operator-() const noexcept { return float128(low, high ^ SIGN_MASK); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr float128 operator-() const noexcept { return float128(low, high ^ SIGN_MASK); }
 
     //
     // useful public functions
@@ -1427,37 +1436,37 @@ public:
      * @brief Returns true if the value is positive (including zero and NaN)
      * @return True when the sign is 0
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_positive() const noexcept { return 0 == (high & SIGN_MASK); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_positive() const noexcept { return 0 == (high & SIGN_MASK); }
     /**
      * @brief Returns true if the value is negative (including zero and NaN).
      * @return True when the sign is 1
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_negative() const noexcept { return 0 != (high & SIGN_MASK); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_negative() const noexcept { return 0 != (high & SIGN_MASK); }
     /**
      * @brief Returns true if and only if the value is ±0.
      * @return Returns true if the value is zero
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_zero() const noexcept { return 0 == low && 0 == (high & ~SIGN_MASK); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_zero() const noexcept { return 0 == low && 0 == (high & ~SIGN_MASK); }
     /**
      * @brief Returns true if and only if x is zero, subnormal or normal (not infinite or NaN).
      * @return True if and only if x is zero, subnormal or normal (not infinite or NaN).
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_finite() const noexcept { return !is_special(); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_finite() const noexcept { return !is_special(); }
     /**
      * @brief Tests if the value is subnormal
      * @return True when the value is subnormal
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_subnormal() const noexcept { return get_exponent_bits() == 0; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_subnormal() const noexcept { return get_exponent_bits() == 0; }
     /**
      * @brief Tests if the value is normal (not zero, subnormal, infinite, or NaN)
      * @return True if and only if the value is normal
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_normal() const noexcept { return get_exponent_bits() != 0 && get_exponent_bits() != INF_EXP_BIASED; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_normal() const noexcept { return get_exponent_bits() != 0 && get_exponent_bits() != INF_EXP_BIASED; }
     /**
      * @brief Tests if this value is a NaN
      * @return True when the value is a NaN
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_nan() const
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_nan() const
     {
         // fraction is zero for +- INF, non-zero for NaN
         return get_exponent_bits() == INF_EXP_BIASED && (get_fraction_bits() != 0 || low != 0);
@@ -1466,7 +1475,7 @@ public:
      * @brief Tests if this value is a signaling NaN
      * @return True if this value is a signaling NaN
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_signaling() const
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_signaling() const
     {
         // TODO: support sNaN
         return false;
@@ -1475,7 +1484,7 @@ public:
      * @brief Tests if this value is an Infinite (negative or positive)
      * @return True when the value is an Infinite
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_inf() const
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_inf() const
     {
         // fraction is zero for +- INF, non-zero for NaN
         return get_exponent_bits() == INF_EXP_BIASED && get_fraction_bits() == 0;
@@ -1484,7 +1493,7 @@ public:
      * @brief Tests if the value is an exponent of 2 (fraction part is zero)
      * @return True when the value is an exponent of 2
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_exponent_of_2() const
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_exponent_of_2() const
     {
         // fraction is zero for +- INF, non-zero for NaN
         return get_fraction_bits() == 0 && low == 0;
@@ -1493,7 +1502,7 @@ public:
      * @brief return true when the value is either an inf or nan
      * @return true for inf and nan
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_special() const
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_special() const
     {
         // fraction is zero for +- INF, non-zero for NaN
         return get_exponent_bits() == INF_EXP_BIASED;
@@ -1502,7 +1511,7 @@ public:
      * @brief Returns if the value is an integer (fraction is zero).
      * @return True when the value is an integer.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_int() const
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_int() const
     {
         int32_t expo = get_exponent();
         if (expo < 0)
@@ -1516,7 +1525,7 @@ public:
      * @param bit bit to get [0,127]
      * @return 0 or 1. Undefined when bit > 127
      */
-    [[nodiscard]] FP128_INLINE constexpr int32_t get_bit(uint32_t bit) const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int32_t get_bit(uint32_t bit) const noexcept
     {
         if (bit < 64) {
             return FP128_GET_BIT(low, bit);
@@ -1568,34 +1577,34 @@ public:
      *
      * @return The biased exponent, in [0, 0x7FFF].
      */
-    [[nodiscard]] FP128_INLINE constexpr uint64_t get_exponent_bits() const noexcept { return (high >> EXP_SHIFT) & EXP_MASK; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t get_exponent_bits() const noexcept { return (high >> EXP_SHIFT) & EXP_MASK; }
     /**
      * @brief Sets the biased exponent field, leaving the fraction and the sign alone.
      * @param e Biased exponent. Bits above the 15 the field holds are dropped.
      */
-    FP128_INLINE constexpr void set_exponent_bits(uint64_t e) noexcept { high = (high & ~(EXP_MASK << EXP_SHIFT)) | ((e & EXP_MASK) << EXP_SHIFT); }
+    FP128_FORCE_INLINE constexpr void set_exponent_bits(uint64_t e) noexcept { high = (high & ~(EXP_MASK << EXP_SHIFT)) | ((e & EXP_MASK) << EXP_SHIFT); }
     /**
      * @brief Reads the upper 48 bits of the fraction out of the high QWORD.
      * @return Bits [111:64] of the fraction.
      */
-    [[nodiscard]] FP128_INLINE constexpr uint64_t get_fraction_bits() const noexcept { return high & UPPER_FRAC_MASK; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t get_fraction_bits() const noexcept { return high & UPPER_FRAC_MASK; }
     /**
      * @brief Sets the upper 48 bits of the fraction, leaving the exponent and the sign alone.
      * @param f Fraction bits. Bits above the 48 the field holds are dropped.
      */
-    FP128_INLINE constexpr void set_fraction_bits(uint64_t f) noexcept { high = (high & ~UPPER_FRAC_MASK) | (f & UPPER_FRAC_MASK); }
+    FP128_FORCE_INLINE constexpr void set_fraction_bits(uint64_t f) noexcept { high = (high & ~UPPER_FRAC_MASK) | (f & UPPER_FRAC_MASK); }
     /**
      * @brief Inverts the sign
      */
-    FP128_INLINE constexpr void invert_sign() noexcept { high ^= SIGN_MASK; }
+    FP128_FORCE_INLINE constexpr void invert_sign() noexcept { high ^= SIGN_MASK; }
     /**
      * @brief Sets the sign
      */
-    FP128_INLINE constexpr void set_sign(uint64_t s) noexcept { high = (high & ~SIGN_MASK) | ((s & 1) << 63); }
+    FP128_FORCE_INLINE constexpr void set_sign(uint64_t s) noexcept { high = (high & ~SIGN_MASK) | ((s & 1) << 63); }
     /**
      * @brief Gets the sign
      */
-    [[nodiscard]] FP128_INLINE constexpr uint32_t get_sign() const noexcept { return static_cast<uint32_t>(high >> 63); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr uint32_t get_sign() const noexcept { return static_cast<uint32_t>(high >> 63); }
     /**
      * @brief Classifies the float128 value according to IEEE 754.
      * @return The classification category (normal, subnormal, zero, inf, or NaN).
@@ -1623,12 +1632,12 @@ public:
      * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
      * @return Exponent of the number
      */
-    [[nodiscard]] FP128_INLINE constexpr int32_t get_exponent() const noexcept { return static_cast<int32_t>(get_exponent_bits()) - EXP_BIAS; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int32_t get_exponent() const noexcept { return static_cast<int32_t>(get_exponent_bits()) - EXP_BIAS; }
     /**
      * @brief Set the exponent
      * @param e Exponent value
      */
-    FP128_INLINE constexpr void set_exponent(int32_t e) noexcept
+    FP128_FORCE_INLINE constexpr void set_exponent(int32_t e) noexcept
     {
         e += EXP_BIAS;
         assert(e >= 0);
@@ -1961,32 +1970,32 @@ public:
      * @brief Return the infinite constant
      * @return INF
      */
-    [[nodiscard]] static constexpr float128 inf() { return float128(0, 0, INF_EXP_BIASED, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 inf() { return float128(0, 0, INF_EXP_BIASED, 0); }
     /**
      * @brief Return the quiet (non-signaling) NaN constant
      * @return NaN
      */
-    [[nodiscard]] static constexpr float128 nan() { return float128(1, 0, INF_EXP_BIASED, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 nan() { return float128(1, 0, INF_EXP_BIASED, 0); }
     /**
      * @brief Return the value of pi
      * @return pi
      */
-    [[nodiscard]] static constexpr float128 pi() { return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x4000, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 pi() { return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x4000, 0); }
     /**
      * @brief Return the value of pi / 2
      * @return pi / 2
      */
-    [[nodiscard]] static constexpr float128 half_pi() { return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x3FFF, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 half_pi() { return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x3FFF, 0); }
     /**
      * @brief Return the value of pi / 4
      * @return pi / 4
      */
-    [[nodiscard]] static constexpr float128 quarter_pi() { return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x3FFE, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 quarter_pi() { return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x3FFE, 0); }
     /**
      * @brief Return the value of e
      * @return e
      */
-    [[nodiscard]] static constexpr float128 e()
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 e()
     {
         // static const float128 e = "2.71828182845904523536028747135266249775724709369"; // 50 first digits of e
         // return e;
@@ -1996,7 +2005,7 @@ public:
      * @brief Returns a value of sqrt(2)
      * @return
      */
-    [[nodiscard]] static constexpr float128 sqrt_2() noexcept
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 sqrt_2() noexcept
     {
         // static const float128 sqrt_2 = "1.41421356237309504880168872420969807856967187537"; // 50 first digits of sqrt(2)
         // return sqrt_2;
@@ -2006,17 +2015,17 @@ public:
      * @brief  Returns a value of 1
      * @return 1
      */
-    [[nodiscard]] static constexpr float128 one() noexcept { return float128(0, 0, 0x3FFF, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 one() noexcept { return float128(0, 0, 0x3FFF, 0); }
     /**
      * @brief  Returns a value of 0.5
      * @return 0.5
      */
-    [[nodiscard]] static constexpr float128 half() noexcept { return float128(0, 0, 0x3FFE, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 half() noexcept { return float128(0, 0, 0x3FFE, 0); }
     /**
      * @brief Return 0.1 using maximum precision
      * @return
      */
-    [[nodiscard]] static constexpr float128 tenth() noexcept
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 tenth() noexcept
     {
         // 0.1 using maximum precision
         return float128(0x999999999999999A, 0x999999999999, EXP_BIAS - 4, 0u);
@@ -2071,28 +2080,28 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr float128 operator+(float128 lhs, const T& rhs) noexcept { return lhs += rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 operator+(float128 lhs, const T& rhs) noexcept { return lhs += rhs; }
     /**
      * @brief subtracts the right hand side operand to this object to and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The float128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr float128 operator-(float128 lhs, const T& rhs) noexcept { return lhs -= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 operator-(float128 lhs, const T& rhs) noexcept { return lhs -= rhs; }
     /**
      * @brief Multiplies the right hand side operand with this object to and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The float128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr float128 operator*(float128 lhs, const T& rhs) noexcept { return lhs *= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 operator*(float128 lhs, const T& rhs) noexcept { return lhs *= rhs; }
     /**
      * @brief Divides this object by the right hand side operand and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The float128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE float128 operator/(float128 lhs, const T& rhs) { return lhs /= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE float128 operator/(float128 lhs, const T& rhs) { return lhs /= rhs; }
 
     //
     // Binary math operators with the scalar on the left hand side
@@ -2107,28 +2116,28 @@ public:
     /// @brief Adds a scalar and a float128, in that order. @param lhs Left operand @param rhs Right operand @return The float128 result
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr float128 operator+(const T& lhs, const float128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 operator+(const T& lhs, const float128& rhs) noexcept
     {
         return float128(lhs) += rhs;
     }
     /// @brief Subtracts a float128 from a scalar. @param lhs Left operand @param rhs Right operand @return The float128 result
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr float128 operator-(const T& lhs, const float128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 operator-(const T& lhs, const float128& rhs) noexcept
     {
         return float128(lhs) -= rhs;
     }
     /// @brief Multiplies a scalar and a float128, in that order. @param lhs Left operand @param rhs Right operand @return The float128 result
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr float128 operator*(const T& lhs, const float128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 operator*(const T& lhs, const float128& rhs) noexcept
     {
         return float128(lhs) *= rhs;
     }
     /// @brief Divides a scalar by a float128. @param lhs Left operand @param rhs Right operand @return The float128 result
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE float128 operator/(const T& lhs, const float128& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE float128 operator/(const T& lhs, const float128& rhs)
     {
         return float128(lhs) /= rhs;
     }
@@ -2143,7 +2152,7 @@ public:
      * @param rhs Right hand side operand
      * @return True if this and other are equal.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator==(const float128& lhs, const float128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const float128& lhs, const float128& rhs) noexcept
     {
         // A NaN compares equal to nothing, not even to another NaN with the same bits.
         if (lhs.is_nan() || rhs.is_nan())
@@ -2154,20 +2163,23 @@ public:
         return lhs.high == rhs.high && lhs.low == rhs.low;
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator==(const float128& lhs, const T& rhs) noexcept { return lhs == float128(rhs); }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const float128& lhs, const T& rhs) noexcept { return lhs == float128(rhs); }
     /// @overload
-    template <typename T> friend FP128_INLINE constexpr bool operator==(const T& lhs, const float128& rhs) noexcept { return rhs == float128(lhs); }
+    template <typename T> friend FP128_FORCE_INLINE constexpr bool operator==(const T& lhs, const float128& rhs) noexcept { return rhs == float128(lhs); }
     /**
      * @brief Return true when objects are not equal. Can be used as logical XOR.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return True if not equal.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator!=(const float128& lhs, const float128& rhs) noexcept { return !(lhs == rhs); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const float128& lhs, const float128& rhs) noexcept { return !(lhs == rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator!=(const float128& lhs, const T& rhs) noexcept { return lhs != float128(rhs); }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const float128& lhs, const T& rhs) noexcept { return lhs != float128(rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator!=(const T& lhs, const float128& rhs) noexcept { return rhs != float128(lhs); }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const T& lhs, const float128& rhs) noexcept { return rhs != float128(lhs); }
     /**
      * @brief Return true if this object is small than the other
      * @param lhs left hand side operand
@@ -2198,9 +2210,11 @@ public:
         return (lhs_sign) ? lhs.high > rhs.high : lhs.high < rhs.high;
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator<(const float128& lhs, const T& rhs) noexcept { return lhs < float128(rhs); }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const float128& lhs, const T& rhs) noexcept { return lhs < float128(rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator<(const T& lhs, const float128& rhs) noexcept { return float128(lhs) < rhs; }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const T& lhs, const float128& rhs) noexcept { return float128(lhs) < rhs; }
     /**
      * @brief Return true this object is small or equal than the other
      * @param lhs left hand side operand
@@ -2216,9 +2230,11 @@ public:
         return !(lhs > rhs);
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator<=(const float128& lhs, const T& rhs) noexcept { return lhs <= float128(rhs); }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<=(const float128& lhs, const T& rhs) noexcept { return lhs <= float128(rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator<=(const T& lhs, const float128& rhs) noexcept { return float128(lhs) <= rhs; }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<=(const T& lhs, const float128& rhs) noexcept { return float128(lhs) <= rhs; }
     /**
      * @brief Return true this object is larger than the other
      * @param lhs left hand side operand
@@ -2248,9 +2264,11 @@ public:
         return (lhs_sign) ? lhs.high < rhs.high : lhs.high > rhs.high;
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator>(const float128& lhs, const T& rhs) noexcept { return lhs > float128(rhs); }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const float128& lhs, const T& rhs) noexcept { return lhs > float128(rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator>(const T& lhs, const float128& rhs) noexcept { return float128(lhs) > rhs; }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const T& lhs, const float128& rhs) noexcept { return float128(lhs) > rhs; }
     /**
      * @brief Return true this object is larger or equal than the other
      * @param lhs left hand side operand
@@ -2265,22 +2283,24 @@ public:
         return !(lhs < rhs);
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator>=(const float128& lhs, const T& rhs) noexcept { return lhs >= float128(rhs); }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const float128& lhs, const T& rhs) noexcept { return lhs >= float128(rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator>=(const T& lhs, const float128& rhs) noexcept { return float128(lhs) >= rhs; }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const T& lhs, const float128& rhs) noexcept { return float128(lhs) >= rhs; }
 
     /**
      * @brief Return the NaN constant
      * @param
      * @return
      */
-    [[nodiscard]] friend constexpr float128 nan(const float128&) { return float128::nan(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 nan(const float128&) { return float128::nan(); }
     /**
      * @brief Tests if the value is a NaN
      * @param x Value to test
      * @return True when the value is a NaN
      */
-    [[nodiscard]] friend constexpr bool isnan(const float128& x)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isnan(const float128& x)
     {
         // zero for +- INF, non-zero for NaN
         return x.is_nan();
@@ -2290,14 +2310,14 @@ public:
      * @param x Value to test
      * @return True when the value is an Infinite
      */
-    [[nodiscard]] friend constexpr bool isinf(const float128& x) { return x.is_inf(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isinf(const float128& x) { return x.is_inf(); }
 
     /**
      * @brief Returns the absolute value of x.
      * @param x Input value
      * @return |x|
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 fabs(const float128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fabs(const float128& x) noexcept
     {
         float128 temp = x;
         temp.set_sign(0);
@@ -2308,7 +2328,7 @@ public:
      * @param x Input value
      * @return A float128 holding the integer value. Overflow is not reported.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 floor(const float128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 floor(const float128& x) noexcept
     {
         float128 fraction = x.get_fraction();
         if (fraction.is_zero())
@@ -2324,7 +2344,7 @@ public:
      * @param x Input value
      * @return A float128 holding the integer value. Overflow is not reported.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 ceil(const float128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 ceil(const float128& x) noexcept
     {
         float128 fraction = x.get_fraction();
         if (fraction.is_zero())
@@ -2340,7 +2360,7 @@ public:
      * @param x Value to truncate
      * @return Integer value, rounded towards zero.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 trunc(const float128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 trunc(const float128& x) noexcept
     {
         float128 fraction = x.get_fraction();
         if (fraction.is_zero())
@@ -2354,7 +2374,7 @@ public:
      * @param x Value to round
      * @return Integer value, rounded towards the nearest integer.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 round(const float128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 round(const float128& x) noexcept
     {
         float128 h = (x.is_positive()) ? half() : -half();
         return trunc(x + h);
@@ -2364,14 +2384,14 @@ public:
      * @param x Input value
      * @return Nearest integer as int64_t. Returns 0 on overflow.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int64_t llrint(const float128& x) noexcept { return llround(x); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int64_t llrint(const float128& x) noexcept { return llround(x); }
     /**
      * @brief Rounds towards the nearest integer.
      * The halfway value (0.5) is rounded away from zero.
      * @param x Value to round
      * @return Integer value, rounded towards the nearest integer.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int64_t llround(const float128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int64_t llround(const float128& x) noexcept
     {
         float128 res = round(x);
         if (res.is_special() || res > INT64_MAX || res < INT64_MIN)
@@ -2383,14 +2403,14 @@ public:
      * @param x Input value
      * @return Nearest integer as int32_t. Returns 0 on overflow.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int32_t lrint(const float128& x) noexcept { return lround(x); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t lrint(const float128& x) noexcept { return lround(x); }
     /**
      * @brief Rounds towards the nearest integer.
      * The halfway value (0.5) is rounded away from zero.
      * @param x Value to round
      * @return Integer value, rounded towards the nearest integer.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int32_t lround(const float128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t lround(const float128& x) noexcept
     {
         float128 res = round(x);
         if (res.is_special() || res > INT32_MAX || res < INT32_MIN)
@@ -2403,14 +2423,14 @@ public:
      * @param x The specified value.
      * @return Integer value, rounded towards the nearest integer.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int32_t ilogb(const float128& x) noexcept { return x.get_exponent(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t ilogb(const float128& x) noexcept { return x.get_exponent(); }
     /**
      * @brief returns the value of x with the sign of y.
      * @param x The value that's returned as the magnitude of the result.
      * @param y The sign of the result.
      * @return The copysign functions return a floating-point value that combines the magnitude of x and the sign of y.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 copysign(const float128& x, const float128& y) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 copysign(const float128& x, const float128& y) noexcept
     {
         float128 temp = x;
         temp.set_sign(y.get_sign());
@@ -2460,7 +2480,7 @@ public:
      * @param iptr Pointer to float128 holding the integer part of x.
      * @return The fraction part of x. Undefined when iptr is nullptr.
      */
-    [[nodiscard]] friend constexpr float128 modf(const float128& x, float128* iptr) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 modf(const float128& x, float128* iptr) noexcept
     {
         if (iptr == nullptr)
             return 0;
@@ -2477,28 +2497,28 @@ public:
      * @param y Second value
      * @return If x > y returns x - y. Otherwise zero.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 fdim(const float128& x, const float128& y) noexcept { return (x > y) ? x - y : float128(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fdim(const float128& x, const float128& y) noexcept { return (x > y) ? x - y : float128(); }
     /**
      * @brief Returns the minimum between x and y.
      * @param x First value
      * @param y Second value
      * @return If x < y returns x. Otherwise y.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 fmin(const float128& x, const float128& y) noexcept { return (x < y) ? x : y; }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fmin(const float128& x, const float128& y) noexcept { return (x < y) ? x : y; }
     /**
      * @brief Returns the maximum between x and y.
      * @param x First value
      * @param y Second value
      * @return If x > y returns x. Otherwise y.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 fmax(const float128& x, const float128& y) noexcept { return (x > y) ? x : y; }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fmax(const float128& x, const float128& y) noexcept { return (x > y) ? x : y; }
     /**
      * @brief Calculates the hypotenuse. i.e. sqrt(x^2 + y^2)
      * @param x First value
      * @param y Second value
      * @return sqrt(x^2 + y^2).
      */
-    [[nodiscard]] friend FP128_INLINE float128 hypot(const float128& x, const float128& y) noexcept { return sqrt(sqr(x) + sqr(y)); }
+    [[nodiscard]] friend FP128_FORCE_INLINE float128 hypot(const float128& x, const float128& y) noexcept { return sqrt(sqr(x) + sqr(y)); }
     /**
      * @brief Calculates the square of a value. i.e. x^2
      *
@@ -2507,7 +2527,7 @@ public:
      * @param x Value to square
      * @return x^2, which is never negative.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr float128 sqr(float128 x) noexcept { return x.square(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 sqr(float128 x) noexcept { return x.square(); }
     /**
      * @brief Calculates the square root using Newton's method.
      * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw
@@ -2854,7 +2874,7 @@ public:
      * @param x A number specifying a power.
      * @return Exponent of x
      */
-    [[nodiscard]] friend FP128_INLINE float128 expm1(const float128& x) noexcept { return exp(x) - float128::one(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE float128 expm1(const float128& x) noexcept { return exp(x) - float128::one(); }
     /**
      * @brief Computes x to the power of y
      * @param x Base value
@@ -2992,13 +3012,13 @@ public:
      * @param x The number to perform log on.
      * @return logb(x)
      */
-    [[nodiscard]] friend FP128_INLINE float128 logb(float128 x) noexcept { return x.get_exponent(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE float128 logb(float128 x) noexcept { return x.get_exponent(); }
     /**
      * @brief Calculates the natural Log (base e) of 1 + x: log(1 + x)
      * @param x The number to perform log on.
      * @return log1p(x)
      */
-    [[nodiscard]] friend FP128_INLINE float128 log1p(float128 x) noexcept { return log(float128::one() + x); }
+    [[nodiscard]] friend FP128_FORCE_INLINE float128 log1p(float128 x) noexcept { return log(float128::one() + x); }
 
     //
     // Trigonometric functions
@@ -3168,7 +3188,7 @@ public:
      * @param x value
      * @return Tangent of x
      */
-    [[nodiscard]] friend FP128_INLINE float128 tan(float128 x) noexcept { return sin(x) / cos(x); }
+    [[nodiscard]] friend FP128_FORCE_INLINE float128 tan(float128 x) noexcept { return sin(x) / cos(x); }
     /**
      * @brief Calculate the inverse tangent function
      * @param x value
@@ -3266,7 +3286,7 @@ public:
      * @param x value
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_INLINE float128 sinh(const float128 x) noexcept { return (exp(x) - exp(-x)) >> 1; }
+    [[nodiscard]] friend FP128_FORCE_INLINE float128 sinh(const float128 x) noexcept { return (exp(x) - exp(-x)) >> 1; }
     /**
      * @brief Calculates the inverse hyperbolic sine
      * For positive x:
@@ -3290,7 +3310,7 @@ public:
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_INLINE float128 cosh(const float128 x) noexcept { return (exp(x) + exp(-x)) >> 1; }
+    [[nodiscard]] friend FP128_FORCE_INLINE float128 cosh(const float128 x) noexcept { return (exp(x) + exp(-x)) >> 1; }
     /**
      * @brief Calculates the inverse hyperbolic cosine
      * For x >= 1:
@@ -3511,7 +3531,7 @@ public:
      * @param x Input value
      * @return Non-zero if finite, zero otherwise.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int isfinite(const float128& x) noexcept { return x.is_finite(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int isfinite(const float128& x) noexcept { return x.is_finite(); }
     /**
      * @brief Computes (x * y) + z without losing precision between operations
      * @param x The first value to multiply.
@@ -3519,7 +3539,7 @@ public:
      * @param z The second value to multiply.
      * @return (x * y) + z
      */
-    [[nodiscard]] friend constexpr float128 fma(float128 x, float128 y, float128 z) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fma(float128 x, float128 y, float128 z) noexcept
     {
         // TODO: implement properly (w/o losing precision)
         return x * y + z;
@@ -3530,7 +3550,7 @@ public:
      * @param expptr Floating-point value.
      * @return Mantissa in the [0.5,1) range.
      */
-    [[nodiscard]] friend constexpr float128 frexp(float128 x, int* expptr) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 frexp(float128 x, int* expptr) noexcept
     {
         if (x.is_special() || x.is_zero()) {
             *expptr = 0;
@@ -3551,7 +3571,7 @@ public:
      * @param exp Integer exponent.
      * @return The ldexp functions return the value of x * 2^exp if successful. On overflow, and depending on the sign of x, ldexp returns +/- inf
      */
-    [[nodiscard]] friend constexpr float128 ldexp(float128 x, int exp) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 ldexp(float128 x, int exp) noexcept
     {
         if (x.is_zero())
             return x;

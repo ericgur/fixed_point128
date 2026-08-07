@@ -77,6 +77,31 @@
 #endif
 #endif  // FP128_NO_INLINE
 
+/**
+ * @def FP128_FORCE_INLINE
+ * @brief Marks a function the compiler must inline rather than merely may.
+ *
+ * Which of the two markers a member of the 128 bit types carries follows a single rule:
+ * <UL>
+ * <LI>FP128_FORCE_INLINE for the trivial members - accessors, comparisons, conversions between the
+ *     builtin types - and for every member that only converts its operand and delegates to another
+ *     member, such as the binary operators that forward to their compound assignment counterparts
+ *     and the mixed type overloads that wrap their argument in the class type.</LI>
+ * <LI>FP128_INLINE for everything with a body of its own: division and modulo, the string
+ *     conversions and the transcendental functions.</LI>
+ * </UL>
+ *
+ * The distinction matters because all four types are 16 bytes, which the x64 ABI passes and returns
+ * in memory. Left to its own judgement MSVC declines to inline these forwarders under /GL (whole
+ * program optimization), and the round trip through memory then costs more than the operation being
+ * forwarded to. Forcing the wrapper open does not force the callee open with it, so the code that
+ * does the actual work still gets outlined when the optimizer thinks that is better.
+ *
+ * The by value shift operators of float128 and fixed_point128 are the exception, and say why at
+ * their definitions: what they forward to is large enough that expanding the wrapper crowds out the
+ * arithmetic around it. Treat any addition to the forced set the same way - measure it, and record
+ * the number if the answer is surprising.
+ */
 #if FP128_DISABLE_INLINE != 0
 #define FP128_INLINE       FP128_NO_INLINE
 #define FP128_FORCE_INLINE FP128_NO_INLINE

@@ -149,7 +149,7 @@ private:
      * @param rhs Right hand side operand
      * @return True when this object's bit pattern is larger when read as an unsigned integer.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool MagnitudeGreaterThan(const int128_base& rhs) const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool MagnitudeGreaterThan(const int128_base& rhs) const noexcept
     {
         return high > rhs.high || (high == rhs.high && low > rhs.low);
     }
@@ -216,7 +216,7 @@ public:
      * Explicitly zeroing both QWORDs rather than defaulting the constructor keeps the type usable
      * in a constant expression, which a default initialized object with indeterminate members is not.
      */
-    constexpr int128_base() noexcept : low(0), high(0) {}
+    FP128_FORCE_INLINE constexpr int128_base() noexcept : low(0), high(0) {}
     /**
      * @brief Copy constructor
      * Defaulted, which is what makes the type trivially copyable.
@@ -312,7 +312,7 @@ public:
      */
     template <typename T>
         requires std::is_integral_v<T>
-    constexpr int128_base(T x) noexcept : low(static_cast<uint64_t>(x)), high(HighFromIntegral(x))
+    FP128_FORCE_INLINE constexpr int128_base(T x) noexcept : low(static_cast<uint64_t>(x)), high(HighFromIntegral(x))
     {
     }
     /**
@@ -415,7 +415,7 @@ public:
      * @param l Low QWORD
      * @param h High QWORD
      */
-    constexpr int128_base(uint64_t l, uint64_t h) noexcept : low(l), high(h) {}
+    FP128_FORCE_INLINE constexpr int128_base(uint64_t l, uint64_t h) noexcept : low(l), high(h) {}
     /**
      * @brief Destructor
      */
@@ -435,7 +435,7 @@ public:
      * @param rhs Value to copy from
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr int128_base& operator=(const T& rhs) noexcept
+    template <typename T> FP128_FORCE_INLINE constexpr int128_base& operator=(const T& rhs) noexcept
     {
         *this = int128_base(rhs);
         return *this;
@@ -448,22 +448,22 @@ public:
      * @brief operator uint64_t - converts to a uint64_t
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator uint64_t() const noexcept { return low; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator uint64_t() const noexcept { return low; }
     /**
      * @brief operator int64_t - converts to a int64_t
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator int64_t() const noexcept { return static_cast<int64_t>(low); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator int64_t() const noexcept { return static_cast<int64_t>(low); }
     /**
      * @brief operator uint32_t - converts to a uint32_t
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator uint32_t() const noexcept { return static_cast<uint32_t>(low); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator uint32_t() const noexcept { return static_cast<uint32_t>(low); }
     /**
      * @brief operator int32_t - converts to a int32_t
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator int32_t() const noexcept { return static_cast<int32_t>(low); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator int32_t() const noexcept { return static_cast<int32_t>(low); }
     /**
      * @brief operator float - converts to a float
      * The signed range fits within a float's exponent, so no signed value overflows. Unsigned
@@ -540,17 +540,17 @@ public:
      * @brief operator long double - converts to a long double
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator long double() const noexcept { return operator double(); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator long double() const noexcept { return operator double(); }
     /**
      * @brief Converts to a char* (slow) string holds all meaningful fraction bits.
      * @return object string representation
      */
-    [[nodiscard]] FP128_INLINE char* to_string() const noexcept { return operator char*(); }
+    [[nodiscard]] FP128_FORCE_INLINE char* to_string() const noexcept { return operator char*(); }
     /**
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
      */
-    [[nodiscard]] FP128_INLINE operator std::string() const { return operator char*(); }
+    [[nodiscard]] FP128_FORCE_INLINE operator std::string() const { return operator char*(); }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
      * The returned string is a statically, thread-allocated buffer.
@@ -625,7 +625,7 @@ public:
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
      */
-    [[nodiscard]] FP128_INLINE constexpr int128_base operator>>(int32_t shift) const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int128_base operator>>(int32_t shift) const noexcept
     {
         int128_base temp(*this);
         return temp >>= shift;
@@ -635,7 +635,7 @@ public:
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
      */
-    [[nodiscard]] FP128_INLINE constexpr int128_base operator<<(int32_t shift) const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int128_base operator<<(int32_t shift) const noexcept
     {
         int128_base temp(*this);
         return temp <<= shift;
@@ -646,7 +646,7 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator+=(const int128_base& rhs) noexcept
+    FP128_FORCE_INLINE constexpr int128_base& operator+=(const int128_base& rhs) noexcept
     {
         const uint8_t carry = addcarryx_u64(0, low, rhs.low, &low);
         addcarryx_u64(carry, high, rhs.high, &high);
@@ -658,14 +658,14 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr int128_base& operator+=(const T& rhs) noexcept { return operator+=(int128_base(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr int128_base& operator+=(const T& rhs) noexcept { return operator+=(int128_base(rhs)); }
     /**
      * @brief Subtract a value from this object
      * like other builtin integer types, underflow wraps around silently
      * @param rhs Right hand side operand
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator-=(const int128_base& rhs) noexcept
+    FP128_FORCE_INLINE constexpr int128_base& operator-=(const int128_base& rhs) noexcept
     {
         // Subtracting directly rather than adding the two's complement of rhs. Both are the same
         // difference modulo 2^128, but neither compiler folds the negate-and-add form back into a
@@ -682,7 +682,7 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr int128_base& operator-=(const T& rhs) noexcept { return operator-=(int128_base(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr int128_base& operator-=(const T& rhs) noexcept { return operator-=(int128_base(rhs)); }
     /**
      * @brief Multiplies a value to this object
      *
@@ -694,7 +694,7 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator*=(const int128_base& rhs) noexcept
+    FP128_FORCE_INLINE constexpr int128_base& operator*=(const int128_base& rhs) noexcept
     {
         // Snapshot both operands before writing anything. The multiply below overwrites both
         // QWORDs of this object, and rhs is allowed to alias it (e.g. a *= a), so reading
@@ -722,7 +722,7 @@ public:
      *
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& square() noexcept
+    FP128_FORCE_INLINE constexpr int128_base& square() noexcept
     {
         const uint64_t l = low, h = high;
 
@@ -744,7 +744,7 @@ public:
      * @param x Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr int128_base& operator*=(T x) noexcept
+    template <typename T> FP128_FORCE_INLINE constexpr int128_base& operator*=(T x) noexcept
     {
         // floating point values are converted first. Casting them straight to uint64_t below
         // would be undefined behavior for anything at or above 2^64 and would silently drop the
@@ -977,7 +977,7 @@ public:
      * @param x Modulo operand.
      * @return This object.
      */
-    template <typename T> FP128_INLINE int128_base& operator%=(T x) { return operator%=(int128_base(x)); }
+    template <typename T> FP128_FORCE_INLINE int128_base& operator%=(T x) { return operator%=(int128_base(x)); }
     /**
      * @brief Shift right this object.
      * The signed type shifts arithmetically, replicating the sign bit; the unsigned type shifts
@@ -1054,7 +1054,7 @@ public:
      * @param rhs AND mask.
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator&=(const int128_base& rhs) noexcept
+    FP128_FORCE_INLINE constexpr int128_base& operator&=(const int128_base& rhs) noexcept
     {
         low &= rhs.low;
         high &= rhs.high;
@@ -1065,13 +1065,13 @@ public:
      * @param rhs AND mask.
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr int128_base& operator&=(const T& rhs) noexcept { return operator&=(int128_base(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr int128_base& operator&=(const T& rhs) noexcept { return operator&=(int128_base(rhs)); }
     /**
      * @brief Bitwise OR=
      * @param rhs OR mask.
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator|=(const int128_base& rhs) noexcept
+    FP128_FORCE_INLINE constexpr int128_base& operator|=(const int128_base& rhs) noexcept
     {
         low |= rhs.low;
         high |= rhs.high;
@@ -1082,13 +1082,13 @@ public:
      * @param rhs OR mask.
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr int128_base& operator|=(const T& rhs) noexcept { return operator|=(int128_base(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr int128_base& operator|=(const T& rhs) noexcept { return operator|=(int128_base(rhs)); }
     /**
      * @brief Bitwise XOR=
      * @param rhs XOR mask.
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator^=(const int128_base& rhs) noexcept
+    FP128_FORCE_INLINE constexpr int128_base& operator^=(const int128_base& rhs) noexcept
     {
         low ^= rhs.low;
         high ^= rhs.high;
@@ -1099,12 +1099,12 @@ public:
      * @param rhs XOR mask.
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr int128_base& operator^=(const T& rhs) noexcept { return operator^=(int128_base(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr int128_base& operator^=(const T& rhs) noexcept { return operator^=(int128_base(rhs)); }
     /**
      * @brief Prefix ++ operation (++a)
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator++() noexcept
+    FP128_FORCE_INLINE constexpr int128_base& operator++() noexcept
     {
         *this += 1;
         return *this;
@@ -1113,7 +1113,7 @@ public:
      * @brief Postfix ++ operation (a++)
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base operator++(int32_t) noexcept
+    FP128_FORCE_INLINE constexpr int128_base operator++(int32_t) noexcept
     {
         int128_base temp(*this);
         ++*this;  // call the prefix implementation
@@ -1123,7 +1123,7 @@ public:
      * @brief Prefix -- operation (--a)
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator--() noexcept
+    FP128_FORCE_INLINE constexpr int128_base& operator--() noexcept
     {
         *this -= 1;
         return *this;
@@ -1132,7 +1132,7 @@ public:
      * @brief Postfix -- operation (a--)
      * @return This object.
      */
-    FP128_INLINE constexpr int128_base operator--(int32_t) noexcept
+    FP128_FORCE_INLINE constexpr int128_base operator--(int32_t) noexcept
     {
         int128_base temp(*this);
         --*this;  // call the prefix implementation
@@ -1145,15 +1145,15 @@ public:
     /**
      * @brief Convert to bool
      */
-    [[nodiscard]] FP128_INLINE constexpr operator bool() const noexcept { return high != 0 || low != 0; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator bool() const noexcept { return high != 0 || low != 0; }
     /**
      * @brief Logical not (!). Opposite of operator bool.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator!() const noexcept { return high == 0 && low == 0; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator!() const noexcept { return high == 0 && low == 0; }
     /**
      * @brief Bitwise not (~).
      */
-    [[nodiscard]] FP128_INLINE constexpr int128_base operator~() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int128_base operator~() const noexcept
     {
         int128_base temp(*this);
         temp.high = ~high;
@@ -1163,7 +1163,7 @@ public:
     /**
      * @brief Unary +. Returns a copy of the object.
      */
-    [[nodiscard]] FP128_INLINE constexpr int128_base operator+() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int128_base operator+() const noexcept
     {
         int128_base temp(*this);
         return temp;
@@ -1172,7 +1172,7 @@ public:
      * @brief Unary -. Returns a copy of the object with sign inverted.
      * Performs a 2's complement operation just like the native integer types
      */
-    [[nodiscard]] FP128_INLINE constexpr int128_base operator-() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int128_base operator-() const noexcept
     {
         int128_base temp = *this;
         twos_complement128(temp.low, temp.high);
@@ -1187,31 +1187,31 @@ public:
      * @param rhs Righthand operand
      * @return True if this and rhs are equal.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator==(const int128_base& rhs) const noexcept { return high == rhs.high && low == rhs.low; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator==(const int128_base& rhs) const noexcept { return high == rhs.high && low == rhs.low; }
     /**
      * @brief Compare logical/bitwise equal.
      * @param rhs Righthand operand
      * @return True if this and rhs are equal.
      */
-    template <typename T> [[nodiscard]] FP128_INLINE constexpr bool operator==(const T& rhs) const noexcept { return *this == int128_base(rhs); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator==(const T& rhs) const noexcept { return *this == int128_base(rhs); }
     /**
      * @brief Return true when objects are not equal. Can be used as logical XOR.
      * @param rhs Righthand operand.
      * @return True of not equal.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator!=(const int128_base& rhs) const noexcept { return low != rhs.low || high != rhs.high; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator!=(const int128_base& rhs) const noexcept { return low != rhs.low || high != rhs.high; }
     /**
      * @brief Return true when objects are not equal. Can be used as logical XOR.
      * @param rhs Righthand operand.
      * @return True of not equal.
      */
-    template <typename T> [[nodiscard]] FP128_INLINE constexpr bool operator!=(const T& rhs) const noexcept { return *this != int128_base(rhs); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator!=(const T& rhs) const noexcept { return *this != int128_base(rhs); }
     /**
      * @brief Return true if this object is small than the rhs
      * @param rhs Righthand operand.
      * @return True when this object is smaller.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator<(const int128_base& rhs) const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator<(const int128_base& rhs) const noexcept
     {
         if constexpr (is_signed) {
             const bool sign = is_negative();
@@ -1230,25 +1230,25 @@ public:
      * @param rhs Righthand operand.
      * @return True when this object is smaller.
      */
-    template <typename T> [[nodiscard]] FP128_INLINE constexpr bool operator<(const T& rhs) const noexcept { return *this < int128_base(rhs); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator<(const T& rhs) const noexcept { return *this < int128_base(rhs); }
     /**
      * @brief Return true this object is small or equal than the rhs
      * @param rhs Righthand operand.
      * @return True when this object is smaller or equal.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator<=(const int128_base& rhs) const noexcept { return !(*this > rhs); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator<=(const int128_base& rhs) const noexcept { return !(*this > rhs); }
     /**
      * @brief Return true this object is small or equal than the rhs
      * @param rhs Righthand operand.
      * @return True when this object is smaller or equal.
      */
-    template <typename T> [[nodiscard]] FP128_INLINE constexpr bool operator<=(const T& rhs) const noexcept { return !(*this > int128_base(rhs)); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator<=(const T& rhs) const noexcept { return !(*this > int128_base(rhs)); }
     /**
      * @brief Return true this object is larger than the rhs
      * @param rhs Righthand operand.
      * @return True when this objext is larger.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator>(const int128_base& rhs) const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator>(const int128_base& rhs) const noexcept
     {
         if constexpr (is_signed) {
             const bool sign = is_negative();
@@ -1267,19 +1267,19 @@ public:
      * @param rhs Righthand operand.
      * @return True when this objext is larger.
      */
-    template <typename T> [[nodiscard]] FP128_INLINE constexpr bool operator>(const T& rhs) const noexcept { return *this > int128_base(rhs); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator>(const T& rhs) const noexcept { return *this > int128_base(rhs); }
     /**
      * @brief Return true this object is larger or equal than the rhs
      * @param rhs Righthand operand.
      * @return True when this objext is larger or equal.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator>=(const int128_base& rhs) const noexcept { return !(*this < rhs); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator>=(const int128_base& rhs) const noexcept { return !(*this < rhs); }
     /**
      * @brief Return true this object is larger or equal than the rhs
      * @param rhs Righthand operand.
      * @return True when this objext is larger or equal.
      */
-    template <typename T> [[nodiscard]] FP128_INLINE constexpr bool operator>=(const T& rhs) const noexcept { return !(*this < int128_base(rhs)); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator>=(const T& rhs) const noexcept { return !(*this < int128_base(rhs)); }
 
     //
     // useful public functions
@@ -1288,13 +1288,13 @@ public:
      * @brief Returns true if the value is an int (fraction is zero)
      * @return True when the fraction is zero.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_int() const noexcept { return true; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_int() const noexcept { return true; }
     /**
      * @brief Returns true if the value is positive (including zero)
      * Always true for the unsigned type, which lets the sign tests in the shared code fold away.
      * @return True when the value is positive
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_positive() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_positive() const noexcept
     {
         if constexpr (is_signed) {
             return 0ull == high >> 63;
@@ -1307,7 +1307,7 @@ public:
      * Always false for the unsigned type, which lets the sign tests in the shared code fold away.
      * @return True when the value is negative
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_negative() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_negative() const noexcept
     {
         if constexpr (is_signed) {
             return 1ull == high >> 63;
@@ -1319,13 +1319,13 @@ public:
      * @brief Returns true if the value is zero
      * @return Returns true if the value is zero
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_zero() const noexcept { return 0 == low && 0 == high; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_zero() const noexcept { return 0 == low && 0 == high; }
     /**
      * @brief get a specific bit within the 128 data
      * @param bit bit to get [0,127]
      * @return 0 or 1. Undefined when bit > 127
      */
-    [[nodiscard]] FP128_INLINE constexpr int32_t get_bit(uint32_t bit) const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int32_t get_bit(uint32_t bit) const noexcept
     {
         if (bit < 64) {
             return FP128_GET_BIT(low, bit);
@@ -1337,7 +1337,7 @@ public:
      * @param l Reference to the low QWORD
      * @param h Reference to the high QWORD
      */
-    FP128_INLINE constexpr void get_components(uint64_t& l, uint64_t& h) const noexcept
+    FP128_FORCE_INLINE constexpr void get_components(uint64_t& l, uint64_t& h) const noexcept
     {
         l = low;
         h = high;
@@ -1346,7 +1346,7 @@ public:
      * @brief Return an instance of int128_base with the value of 1
      * @return 1
      */
-    [[nodiscard]] FP128_INLINE static constexpr int128_base one() noexcept { return int128_base(1u); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr int128_base one() noexcept { return int128_base(1u); }
     /**
      * @brief Converts this object to a hex C string.
      * The returned string is a statically thread-allocated buffer.
@@ -1371,28 +1371,27 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr int128_base operator+(int128_base lhs, const T& rhs) noexcept { return lhs += rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator+(int128_base lhs, const T& rhs) noexcept { return lhs += rhs; }
     /**
      * @brief Subtracts 2 values and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr int128_base operator-(int128_base lhs, const T& rhs) noexcept { return lhs -= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator-(int128_base lhs, const T& rhs) noexcept { return lhs -= rhs; }
     /**
      * @brief Multiplies 2 values and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr int128_base operator*(int128_base lhs, const T& rhs) noexcept { return lhs *= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator*(int128_base lhs, const T& rhs) noexcept { return lhs *= rhs; }
     /**
      * @brief Divides 2 values and returns the result.
      *
-     * Forced inline rather than merely hinted: this is a one line forwarder to operator/=, but its
-     * operand and return value are both 16 byte class types, which the x64 ABI passes in memory. Left
-     * to its own judgement MSVC declines to inline it under /GL (whole program optimization) and the
-     * round trip through memory then costs ~10% of a 128 bit by 64 bit division.
+     * Forced inline like every other forwarder here, see FP128_FORCE_INLINE. This one is where the
+     * cost was first measured: leaving the decision to MSVC under /GL (whole program optimization)
+     * lands on a round trip through memory worth ~10% of a 128 bit by 64 bit division.
      *
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
@@ -1401,8 +1400,6 @@ public:
     template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator/(int128_base lhs, const T& rhs) { return lhs /= rhs; }
     /**
      * @brief Performs modulo and returns the result.
-     *
-     * Forced inline for the same reason as operator/ above.
      *
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
@@ -1419,21 +1416,21 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr int128_base operator&(int128_base lhs, const T& rhs) { return lhs &= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator&(int128_base lhs, const T& rhs) { return lhs &= rhs; }
     /**
      * @brief Performs bitwise OR (|).
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr int128_base operator|(int128_base lhs, const T& rhs) { return lhs |= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator|(int128_base lhs, const T& rhs) { return lhs |= rhs; }
     /**
      * @brief Performs bitwise XOR (^).
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr int128_base operator^(int128_base lhs, const T& rhs) { return lhs ^= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator^(int128_base lhs, const T& rhs) { return lhs ^= rhs; }
 
     //
     // Binary math operators with the scalar on the left hand side
@@ -1448,56 +1445,56 @@ public:
     /// @brief Adds a scalar and an int128_base, in that order. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr int128_base operator+(const T& lhs, const int128_base& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator+(const T& lhs, const int128_base& rhs) noexcept
     {
         return int128_base(lhs) += rhs;
     }
     /// @brief Subtracts an int128_base from a scalar. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr int128_base operator-(const T& lhs, const int128_base& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator-(const T& lhs, const int128_base& rhs) noexcept
     {
         return int128_base(lhs) -= rhs;
     }
     /// @brief Multiplies a scalar and an int128_base, in that order. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr int128_base operator*(const T& lhs, const int128_base& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator*(const T& lhs, const int128_base& rhs) noexcept
     {
         return int128_base(lhs) *= rhs;
     }
     /// @brief Divides a scalar by an int128_base. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE int128_base operator/(const T& lhs, const int128_base& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator/(const T& lhs, const int128_base& rhs)
     {
         return int128_base(lhs) /= rhs;
     }
     /// @brief Performs modulo of a scalar by an int128_base. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE int128_base operator%(const T& lhs, const int128_base& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE int128_base operator%(const T& lhs, const int128_base& rhs)
     {
         return int128_base(lhs) %= rhs;
     }
     /// @brief Performs bitwise AND of a scalar and an int128_base. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr int128_base operator&(const T& lhs, const int128_base& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator&(const T& lhs, const int128_base& rhs)
     {
         return int128_base(lhs) &= rhs;
     }
     /// @brief Performs bitwise OR of a scalar and an int128_base. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr int128_base operator|(const T& lhs, const int128_base& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator|(const T& lhs, const int128_base& rhs)
     {
         return int128_base(lhs) |= rhs;
     }
     /// @brief Performs bitwise XOR of a scalar and an int128_base. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_INLINE constexpr int128_base operator^(const T& lhs, const int128_base& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator^(const T& lhs, const int128_base& rhs)
     {
         return int128_base(lhs) ^= rhs;
     }
@@ -1517,7 +1514,7 @@ public:
      * @param x input value.
      * @return |x|
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int128_base abs(const int128_base& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base abs(const int128_base& x) noexcept
         requires IsSigned
     {
         return x.is_positive() ? x : -x;
@@ -1530,13 +1527,16 @@ public:
      * @param x Value to square
      * @return x^2, truncated to 128 bit
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int128_base sqr(int128_base x) noexcept { return x.square(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base sqr(int128_base x) noexcept { return x.square(); }
     /**
      * @brief Calculates the left zero count of value x.
      * @param x input value.
      * @return lzc (uint32_t) of the result.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr uint64_t lzcnt128(const int128_base& x) noexcept { return (x.high != 0) ? lzcnt64(x.high) : 64 + lzcnt64(x.low); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr uint64_t lzcnt128(const int128_base& x) noexcept
+    {
+        return (x.high != 0) ? lzcnt64(x.high) : 64 + lzcnt64(x.low);
+    }
     /**
      * @brief Calculates the square root using Newton's method.
      * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw
@@ -1579,7 +1579,7 @@ public:
      * @return log2(x), which is also the bit position of the msb.
      * @throws std::domain_error when x is zero, or negative for the signed type.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr uint64_t log2(const int128_base& x)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr uint64_t log2(const int128_base& x)
     {
         if (x.is_negative() || x.is_zero()) {
             throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");

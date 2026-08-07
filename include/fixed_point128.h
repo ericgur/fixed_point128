@@ -275,18 +275,18 @@ public:
     /**
      * @brief Default constructor, creates an instance with a value of zero.
      */
-    constexpr fixed_point128() noexcept : low(0), high(0), sign(0) {}
+    FP128_FORCE_INLINE constexpr fixed_point128() noexcept : low(0), high(0), sign(0) {}
     /**
      * @brief Copy constructor
      * @param rhs Object to copy from
      */
-    FP128_INLINE constexpr fixed_point128(const fixed_point128& rhs) noexcept : low(rhs.low), high(rhs.high), sign(rhs.sign) {}
+    FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128& rhs) noexcept : low(rhs.low), high(rhs.high), sign(rhs.sign) {}
     /**
      * @brief cross-template Copy constructor, can be used between two different fixed_point128 templates
      * @param rhs fixed_point128 instance with from a different template instance.
      * @return This object.
      */
-    template <int32_t I2> FP128_INLINE constexpr fixed_point128(const fixed_point128<I2>& rhs) noexcept
+    template <int32_t I2> FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128<I2>& rhs) noexcept
     {
         sign = rhs.sign;
         if constexpr (I == I2) {
@@ -314,7 +314,7 @@ public:
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param rhs Object to copy from
      */
-    FP128_INLINE constexpr fixed_point128(fixed_point128&& rhs) noexcept : low(rhs.low), high(rhs.high), sign(rhs.sign) {}
+    FP128_FORCE_INLINE constexpr fixed_point128(fixed_point128&& rhs) noexcept : low(rhs.low), high(rhs.high), sign(rhs.sign) {}
     /**
      * @brief Constructor from the double type
      * Underflow goes to zero. Overflow, NaN and +-INF go to max supported positive value.
@@ -385,7 +385,7 @@ public:
      * @brief Constructor from uint64_t type
      * @param x Input value
      */
-    FP128_INLINE constexpr fixed_point128(uint64_t x) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128(uint64_t x) noexcept
     {
         low = 0;
         sign = 0;
@@ -395,7 +395,7 @@ public:
      * @brief Constructor from int64_t type
      * @param x Input value
      */
-    FP128_INLINE constexpr fixed_point128(int64_t x) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128(int64_t x) noexcept
     {
         low = 0;
         sign = FP128_GET_BIT(x, 63);
@@ -409,7 +409,7 @@ public:
      * @brief Constructor from uint32_t type
      * @param x Input value
      */
-    FP128_INLINE constexpr fixed_point128(uint32_t x) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128(uint32_t x) noexcept
     {
         low = 0;
         sign = 0;
@@ -419,7 +419,7 @@ public:
      * @brief Constructor from int32_t type
      * @param x Input value
      */
-    FP128_INLINE constexpr fixed_point128(int32_t x) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128(int32_t x) noexcept
     {
         low = 0;
         sign = FP128_GET_BIT(x, 31);
@@ -553,7 +553,7 @@ public:
      * @param h High QWORD
      * @param s Sign - zero for positive, 1 for negative.
      */
-    FP128_INLINE constexpr fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept : low(l), high(h), sign(s != 0) {}
+    FP128_FORCE_INLINE constexpr fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept : low(l), high(h), sign(s != 0) {}
 
     /**
      * @brief Destructor
@@ -564,7 +564,7 @@ public:
      * @param rhs Object to copy from
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator=(const fixed_point128& rhs) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator=(const fixed_point128& rhs) noexcept
     {
         high = rhs.high;
         low = rhs.low;
@@ -576,7 +576,7 @@ public:
      * @param rhs Object to copy from
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator=(fixed_point128&& rhs) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator=(fixed_point128&& rhs) noexcept
     {
         high = rhs.high;
         low = rhs.low;
@@ -588,7 +588,7 @@ public:
      * @param rhs fixed_point128 instance with from a different template instance.
      * @return This object.
      */
-    template <int32_t I2> FP128_INLINE constexpr fixed_point128<I>& operator=(const fixed_point128<I2>& rhs) noexcept
+    template <int32_t I2> FP128_FORCE_INLINE constexpr fixed_point128<I>& operator=(const fixed_point128<I2>& rhs) noexcept
     {
         sign = rhs.sign;
         if constexpr (I == I2) {
@@ -623,12 +623,12 @@ public:
      * @brief operator uint64_t - converts to a uint64_t
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator uint64_t() const noexcept { return (high >> upper_frac_bits) & UINT64_MAX; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator uint64_t() const noexcept { return (high >> upper_frac_bits) & UINT64_MAX; }
     /**
      * @brief operator int64_t - converts to a int64_t
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator int64_t() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator int64_t() const noexcept
     {
         const int64_t res = (sign) ? -1ll : 1ll;
         return res * ((high >> upper_frac_bits) & UINT64_MAX);
@@ -637,12 +637,12 @@ public:
      * @brief operator uint32_t - converts to a uint32_t
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator uint32_t() const noexcept { return (high >> upper_frac_bits) & UINT32_MAX; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator uint32_t() const noexcept { return (high >> upper_frac_bits) & UINT32_MAX; }
     /**
      * @brief operator int32_t - converts to a int32_t
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator int32_t() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator int32_t() const noexcept
     {
         int32_t res = (sign) ? -1 : 1;
         return res * ((int32_t)((int64_t)high >> upper_frac_bits) & (UINT32_MAX));
@@ -713,12 +713,12 @@ public:
      * @brief operator long double - converts to a long double
      * @return Object value.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator long double() const noexcept { return operator double(); }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator long double() const noexcept { return operator double(); }
     /**
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
      */
-    [[nodiscard]] FP128_INLINE operator std::string() const noexcept { return operator char*(); }
+    [[nodiscard]] FP128_FORCE_INLINE operator std::string() const noexcept { return operator char*(); }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
      * @return object string representation
@@ -815,6 +815,14 @@ public:
 
     /**
      * @brief Performs right shift operation.
+     *
+     * Hinted rather than forced, unlike the other one line forwarders (see FP128_FORCE_INLINE).
+     * operator>>= is itself forced, so forcing this one too would expand the whole shift, its
+     * sign fixup included, at every use of the by value form. The equivalent pair in float128
+     * measurably hurt a loop that shifts alongside other arithmetic; this one is left hinted for
+     * the same reason. The callee being forced means the shift is inlined either way once the
+     * compiler decides to inline this wrapper.
+     *
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
      */
@@ -825,6 +833,7 @@ public:
     }
     /**
      * @brief Performs left shift operation.
+     * Hinted rather than forced, see operator>> above.
      * @param shift bits to shift
      * @return Temporary object with the result of the operation
      */
@@ -847,7 +856,7 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr fixed_point128& operator+=(const T& rhs) noexcept { return operator+=(fixed_point128(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr fixed_point128& operator+=(const T& rhs) noexcept { return operator+=(fixed_point128(rhs)); }
     /**
      * @brief Subtract a value to this object
      * @param rhs Right hand side operand
@@ -866,7 +875,7 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr fixed_point128& operator-=(const T& rhs) noexcept { return operator-=(fixed_point128(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr fixed_point128& operator-=(const T& rhs) noexcept { return operator-=(fixed_point128(rhs)); }
     /**
      * @brief Multiplies a value to this object
      * @param rhs Right hand side operand
@@ -976,7 +985,7 @@ public:
      * @param x Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr fixed_point128& operator*=(T x) noexcept
+    template <typename T> FP128_FORCE_INLINE constexpr fixed_point128& operator*=(T x) noexcept
     {
         // floating point
         if constexpr (std::is_floating_point_v<T>) {
@@ -1002,7 +1011,7 @@ public:
      * @param x Right hand side operand
      * @return This object.
      */
-    template <> FP128_INLINE constexpr fixed_point128& operator*= <uint64_t>(uint64_t x) noexcept
+    template <> FP128_FORCE_INLINE constexpr fixed_point128& operator*= <uint64_t>(uint64_t x) noexcept
     {
         uint64_t temp;
 
@@ -1082,7 +1091,7 @@ public:
      * @param x Denominator.
      * @return This object.
      */
-    template <typename T> FP128_INLINE fixed_point128& operator/=(T x)
+    template <typename T> FP128_FORCE_INLINE fixed_point128& operator/=(T x)
     {
         if constexpr (std::is_floating_point_v<T>) {
             return operator/=(static_cast<double>(x));
@@ -1107,7 +1116,7 @@ public:
      * @param x Denominator.
      * @return This object.
      */
-    template <> FP128_INLINE fixed_point128& operator/= <double>(double x)
+    template <> FP128_FORCE_INLINE fixed_point128& operator/= <double>(double x)
     {
         if (0 == x)
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
@@ -1186,7 +1195,7 @@ public:
      * @param rhs Divisor
      * @return This object.
      */
-    template <typename T> FP128_INLINE fixed_point128& operator%=(T rhs) { return operator%=(fixed_point128(rhs)); }
+    template <typename T> FP128_FORCE_INLINE fixed_point128& operator%=(T rhs) { return operator%=(fixed_point128(rhs)); }
     /**
      * @brief Shift right this object.
      * @param shift Bits to shift. Negative or very high values cause undefined behavior.
@@ -1214,7 +1223,7 @@ public:
      * @param rhs AND mask.
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator&=(const fixed_point128& rhs) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator&=(const fixed_point128& rhs) noexcept
     {
         low &= rhs.low;
         high &= rhs.high;
@@ -1225,13 +1234,13 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr fixed_point128& operator&=(const T& rhs) { return operator&=(fixed_point128(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr fixed_point128& operator&=(const T& rhs) { return operator&=(fixed_point128(rhs)); }
     /**
      * @brief Bitwise OR= of the object's, the sign of the object is untouched
      * @param rhs OR mask.
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator|=(const fixed_point128& rhs) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator|=(const fixed_point128& rhs) noexcept
     {
         low |= rhs.low;
         high |= rhs.high;
@@ -1242,13 +1251,13 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr fixed_point128& operator|=(const T& rhs) { return operator|=(fixed_point128(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr fixed_point128& operator|=(const T& rhs) { return operator|=(fixed_point128(rhs)); }
     /**
      * @brief Bitwise XOR= of the object's, the sign of the object is untouched
      * @param rhs XOR mask.
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator^=(const fixed_point128& rhs) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator^=(const fixed_point128& rhs) noexcept
     {
         low ^= rhs.low;
         high ^= rhs.high;
@@ -1259,12 +1268,12 @@ public:
      * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_INLINE constexpr fixed_point128& operator^=(const T& rhs) { return operator^=(fixed_point128(rhs)); }
+    template <typename T> FP128_FORCE_INLINE constexpr fixed_point128& operator^=(const T& rhs) { return operator^=(fixed_point128(rhs)); }
     /**
      * @brief Prefix ++ operation (++a)
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator++() noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator++() noexcept
     {
         *this += one();
         return *this;
@@ -1273,7 +1282,7 @@ public:
      * @brief Postfix ++ operation (a++)
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128 operator++(int32_t) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128 operator++(int32_t) noexcept
     {
         fixed_point128 temp(*this);
         ++*this;  // call the prefix implementation
@@ -1283,7 +1292,7 @@ public:
      * @brief Prefix -- operation (--a)
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128& operator--() noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128& operator--() noexcept
     {
         *this -= one();
         return *this;
@@ -1292,7 +1301,7 @@ public:
      * @brief Postfix -- operation (a--)
      * @return This object.
      */
-    FP128_INLINE constexpr fixed_point128 operator--(int32_t) noexcept
+    FP128_FORCE_INLINE constexpr fixed_point128 operator--(int32_t) noexcept
     {
         fixed_point128 temp(*this);
         --*this;  // call the prefix implementation
@@ -1305,15 +1314,15 @@ public:
     /**
      * @brief Convert to bool
      */
-    [[nodiscard]] FP128_INLINE constexpr operator bool() const noexcept { return high != 0 || low != 0; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator bool() const noexcept { return high != 0 || low != 0; }
     /**
      * @brief Logical not (!). Opposite of operator bool.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool operator!() const noexcept { return high == 0 && low == 0; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator!() const noexcept { return high == 0 && low == 0; }
     /**
      * @brief Bitwise not (~).
      */
-    [[nodiscard]] FP128_INLINE constexpr fixed_point128 operator~() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr fixed_point128 operator~() const noexcept
     {
         fixed_point128 temp(*this);
         temp.high = ~high;
@@ -1324,7 +1333,7 @@ public:
     /**
      * @brief Unary +. Returns a copy of the object.
      */
-    [[nodiscard]] FP128_INLINE constexpr fixed_point128 operator+() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr fixed_point128 operator+() const noexcept
     {
         fixed_point128 temp(*this);
         return temp;
@@ -1332,7 +1341,7 @@ public:
     /**
      * @brief Unary -. Returns a copy of the object with sign inverted.
      */
-    [[nodiscard]] FP128_INLINE constexpr fixed_point128 operator-() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr fixed_point128 operator-() const noexcept
     {
         fixed_point128 temp(*this);
         temp.sign ^= 1;
@@ -1349,7 +1358,7 @@ public:
      * @brief Returns true if the value is an int (fraction is zero)
      * @return True when the fraction is zero.
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_int() const noexcept {
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_int() const noexcept {
         if constexpr (I == 64) {
             return 0 == low;
         } else {
@@ -1360,23 +1369,23 @@ public:
      * @brief Returns true if the value is positive (including zero)
      * @return True when the value is positive
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_positive() const noexcept { return 0 == sign; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_positive() const noexcept { return 0 == sign; }
     /**
      * @brief Returns true if the value negative (smaller than zero)
      * @return True when the value is negative
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_negative() const noexcept { return 1 == sign; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_negative() const noexcept { return 1 == sign; }
     /**
      * @brief Returns true if the value is zero
      * @return Returns true if the value is zero
      */
-    [[nodiscard]] FP128_INLINE constexpr bool is_zero() const noexcept { return 0 == low && 0 == high; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_zero() const noexcept { return 0 == low && 0 == high; }
     /**
      * @brief get a specific bit within the 128 fixed point data
      * @param bit bit to get [0,127]
      * @return 0 or 1. Undefined when bit > 127
      */
-    [[nodiscard]] FP128_INLINE constexpr int32_t get_bit(uint32_t bit) const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int32_t get_bit(uint32_t bit) const noexcept
     {
         if (bit < 64) {
             return FP128_GET_BIT(low, bit);
@@ -1388,7 +1397,7 @@ public:
      * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
      * @return Exponent of the number
      */
-    [[nodiscard]] FP128_INLINE constexpr int32_t get_exponent() const noexcept
+    [[nodiscard]] FP128_FORCE_INLINE constexpr int32_t get_exponent() const noexcept
     {
         const int32_t s = static_cast<int32_t>(lzcnt128(*this));
         return I - 1 - s;
@@ -1455,25 +1464,25 @@ public:
      * time constant instead of a lazily initialized static.
      * @return 1
      */
-    [[nodiscard]] FP128_INLINE static constexpr fixed_point128 one() noexcept { return fixed_point128(1); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr fixed_point128 one() noexcept { return fixed_point128(1); }
     /**
      * @brief Return an instance of fixed_point128 with the value of 0.5
      * Shifting one() right is exact for any <B>I</B>. Note that 0.5 lands in the low QWORD when
      * <B>I</B> is 64, which rules out spelling it as a constant of the upper QWORD alone.
      * @return 0.5
      */
-    [[nodiscard]] FP128_INLINE static constexpr fixed_point128 half() noexcept { return one() >> 1; }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr fixed_point128 half() noexcept { return one() >> 1; }
     /**
      * @brief Return an instance of fixed_point128 with the smallest positive value possible
      * @return 1
      */
-    [[nodiscard]] FP128_INLINE static constexpr fixed_point128 epsilon() noexcept { return fixed_point128(1, 0, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr fixed_point128 epsilon() noexcept { return fixed_point128(1, 0, 0); }
 
 private:
     /**
      * @brief Set the sign to 0 when both low and high are zero, i.e. avoid having negative zero value
      */
-    FP128_INLINE constexpr void reset_sign_for_zero() noexcept { sign &= (0 != low || 0 != high); }
+    FP128_FORCE_INLINE constexpr void reset_sign_for_zero() noexcept { sign &= (0 != low || 0 != high); }
 
     /**
      * @brief Adds the magnitude of rhs to this object, treating rhs as if it carried sign rhsSign.
@@ -1530,35 +1539,38 @@ private:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 operator+(fixed_point128 lhs, const T& rhs) noexcept { return lhs += rhs; }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator+(fixed_point128 lhs, const T& rhs) noexcept { return lhs += rhs; }
     /**
      * @brief subtracts the right hand side operand to this object to and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 operator-(fixed_point128 lhs, const T& rhs) noexcept { return lhs -= rhs; }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator-(fixed_point128 lhs, const T& rhs) noexcept { return lhs -= rhs; }
     /**
      * @brief Multiplies the right hand side operand with this object to and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 operator*(fixed_point128 lhs, const T& rhs) noexcept { return lhs *= rhs; }
+    template <typename T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator*(fixed_point128 lhs, const T& rhs) noexcept { return lhs *= rhs; }
     /**
      * @brief Divides this object by the right hand side operand and returns the result.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE fixed_point128 operator/(fixed_point128 lhs, const T& rhs) { return lhs /= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 operator/(fixed_point128 lhs, const T& rhs) { return lhs /= rhs; }
     /**
      * @brief Calculates modulo.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE fixed_point128 operator%(fixed_point128 lhs, const T& rhs) { return lhs %= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 operator%(fixed_point128 lhs, const T& rhs) { return lhs %= rhs; }
 
     /// @}
 
@@ -1571,21 +1583,21 @@ private:
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 operator&(fixed_point128 lhs, const T& rhs) { return lhs &= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator&(fixed_point128 lhs, const T& rhs) { return lhs &= rhs; }
     /**
      * @brief Performs bitwise OR (|)
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 operator|(fixed_point128 lhs, const T& rhs) { return lhs |= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator|(fixed_point128 lhs, const T& rhs) { return lhs |= rhs; }
     /**
      * @brief Performs bitwise XOR (^)
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return The fixed_point128 result
      */
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 operator^(fixed_point128 lhs, const T& rhs) { return lhs ^= rhs; }
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 operator^(fixed_point128 lhs, const T& rhs) { return lhs ^= rhs; }
 
     /// @}
 
@@ -1598,17 +1610,17 @@ private:
      * @param rhs Right hand side operand
      * @return True if this and rhs are equal.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator==(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
     {
         return lhs.sign == rhs.sign && lhs.high == rhs.high && lhs.low == rhs.low;
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator==(const fixed_point128& lhs, const T& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const fixed_point128& lhs, const T& rhs) noexcept
     {
         return lhs == fixed_point128(rhs);
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator==(const T& lhs, const fixed_point128& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const T& lhs, const fixed_point128& rhs) noexcept
     {
         return rhs == fixed_point128(lhs);
     }
@@ -1618,17 +1630,17 @@ private:
      * @param rhs Right hand side operand
      * @return True if not equal.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator!=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
     {
         return lhs.sign != rhs.sign || lhs.high != rhs.high || lhs.low != rhs.low;
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator!=(const fixed_point128& lhs, const T& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const fixed_point128& lhs, const T& rhs) noexcept
     {
         return lhs != fixed_point128(rhs);
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator!=(const T& lhs, const fixed_point128& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const T& lhs, const fixed_point128& rhs) noexcept
     {
         return rhs != fixed_point128(lhs);
     }
@@ -1638,7 +1650,7 @@ private:
      * @param rhs Right hand side operand
      * @return True when this object is smaller.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator<(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
     {
         // signs are different
         if (lhs.sign != rhs.sign)
@@ -1651,12 +1663,12 @@ private:
         return (lhs.sign) ? lhs.high > rhs.high : lhs.high < rhs.high;
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator<(const fixed_point128& lhs, const T& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const fixed_point128& lhs, const T& rhs) noexcept
     {
         return lhs < fixed_point128(rhs);
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator<(const T& lhs, const fixed_point128& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const T& lhs, const fixed_point128& rhs) noexcept
     {
         return fixed_point128(lhs) < rhs;
     }
@@ -1666,14 +1678,14 @@ private:
      * @param rhs Right hand side operand
      * @return True when this object is smaller or equal.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator<=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept { return !(lhs > rhs); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept { return !(lhs > rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator<=(const fixed_point128& lhs, const T& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<=(const fixed_point128& lhs, const T& rhs) noexcept
     {
         return !(lhs > fixed_point128(rhs));
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator<=(const T& lhs, const fixed_point128& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<=(const T& lhs, const fixed_point128& rhs) noexcept
     {
         return !(fixed_point128(lhs) > rhs);
     }
@@ -1683,7 +1695,7 @@ private:
      * @param rhs Right hand side operand
      * @return True when this object is larger.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator>(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
     {
         // signs are different
         if (lhs.sign != rhs.sign)
@@ -1696,12 +1708,12 @@ private:
         return (lhs.sign) ? lhs.high < rhs.high : lhs.high > rhs.high;
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator>(const fixed_point128& lhs, const T& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const fixed_point128& lhs, const T& rhs) noexcept
     {
         return lhs > fixed_point128(rhs);
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator>(const T& lhs, const fixed_point128& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const T& lhs, const fixed_point128& rhs) noexcept
     {
         return fixed_point128(lhs) > rhs;
     }
@@ -1711,14 +1723,14 @@ private:
      * @param rhs Right hand side operand
      * @return True when this objext is larger or equal.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr bool operator>=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept { return !(lhs < rhs); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept { return !(lhs < rhs); }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator>=(const fixed_point128& lhs, const T& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const fixed_point128& lhs, const T& rhs) noexcept
     {
         return !(lhs < fixed_point128(rhs));
     }
     /// @overload
-    template <typename T> [[nodiscard]] friend FP128_INLINE constexpr bool operator>=(const T& lhs, const fixed_point128& rhs) noexcept
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const T& lhs, const fixed_point128& rhs) noexcept
     {
         return !(fixed_point128(lhs) < rhs);
     }
@@ -1734,7 +1746,7 @@ private:
      * @param x Input value
      * @return A copy of x with sign removed
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 fabs(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 fabs(const fixed_point128& x) noexcept
     {
         fixed_point128 temp = x;
         temp.sign = 0;
@@ -1745,7 +1757,7 @@ private:
      * @param x Input value
      * @return A fixed_point128 holding the integer value. Overflow is not reported.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 floor(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 floor(const fixed_point128& x) noexcept
     {
         if (x.is_int())
             return x;
@@ -1763,7 +1775,7 @@ private:
      * @param x Input value
      * @return A fixed_point128 holding the integer value. Overflow is not reported.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 ceil(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 ceil(const fixed_point128& x) noexcept
     {
         if (x.is_int())
             return x;
@@ -1782,7 +1794,7 @@ private:
      * @param x Value to truncate
      * @return Integer value, rounded towards zero.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 trunc(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 trunc(const fixed_point128& x) noexcept
     {
         // truncating a value below one produces zero, which must not keep the sign of the input.
         // The comparison operators test the sign field, so a negative zero would compare unequal
@@ -1797,7 +1809,7 @@ private:
      * @param x Value to round
      * @return Integer value, rounded towards the nearest integer.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 round(const fixed_point128& x) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 round(const fixed_point128& x) noexcept
     {
         // save the sign
         auto sign = x.sign;
@@ -1813,14 +1825,14 @@ private:
      * @param x The specified value.
      * @return Integer value, rounded towards the nearest integer.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr int32_t ilogb(const fixed_point128& x) noexcept { return x.get_exponent(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t ilogb(const fixed_point128& x) noexcept { return x.get_exponent(); }
     /**
      * @brief returns the value of x with the sign of y.
      * @param x The value that's returned as the magnitude of the result.
      * @param y The sign of the result.
      * @return The copysign functions return a floating-point value that combines the magnitude of x and the sign of y.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 copysign(const fixed_point128& x, const fixed_point128& y) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 copysign(const fixed_point128& x, const fixed_point128& y) noexcept
     {
         fixed_point128 res = x;
         res.sign = y.sign;
@@ -1833,7 +1845,7 @@ private:
      * @param y Denominator
      * @return A fixed_point128 holding the modulo value.
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y) { return x % y; }
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y) { return x % y; }
     /**
      * @brief Split into integer and fraction parts.
      * Both results carry the sign of the input variable.
@@ -1841,7 +1853,7 @@ private:
      * @param iptr Pointer to fixed_point128 holding the integer part of x.
      * @return The fraction part of x. Undefined when iptr is nullptr.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 modf(const fixed_point128& x, fixed_point128* iptr) noexcept
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 modf(const fixed_point128& x, fixed_point128* iptr) noexcept
     {
         if (iptr == nullptr)
             return 0;
@@ -1862,28 +1874,31 @@ private:
      * @param y Second value
      * @return If x > y returns x - y. Otherwise zero.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 fdim(const fixed_point128& x, const fixed_point128& y) noexcept { return (x > y) ? x - y : fixed_point128(0); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 fdim(const fixed_point128& x, const fixed_point128& y) noexcept
+    {
+        return (x > y) ? x - y : fixed_point128(0);
+    }
     /**
      * @brief Returns the minimum between x and y.
      * @param x First value
      * @param y Second value
      * @return If x < y returns x. Otherwise y.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 fmin(const fixed_point128& x, const fixed_point128& y) noexcept { return (x < y) ? x : y; }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 fmin(const fixed_point128& x, const fixed_point128& y) noexcept { return (x < y) ? x : y; }
     /**
      * @brief Returns the maximum between x and y.
      * @param x First value
      * @param y Second value
      * @return If x > y returns x. Otherwise y.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 fmax(const fixed_point128& x, const fixed_point128& y) noexcept { return (x > y) ? x : y; }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 fmax(const fixed_point128& x, const fixed_point128& y) noexcept { return (x > y) ? x : y; }
     /**
      * @brief Calculates the hypotenuse. i.e. sqrt(x^2 + y^2)
      * @param x First value
      * @param y Second value
      * @return sqrt(x^2 + y^2).
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 hypot(const fixed_point128& x, const fixed_point128& y) noexcept { return sqrt(sqr(x) + sqr(y)); }
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 hypot(const fixed_point128& x, const fixed_point128& y) noexcept { return sqrt(sqr(x) + sqr(y)); }
     /**
      * @brief Calculates the square of a value. i.e. x^2
      *
@@ -1893,13 +1908,16 @@ private:
      * @param x Value to square
      * @return x^2, which is never negative.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 sqr(fixed_point128 x) noexcept { return x.square(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 sqr(fixed_point128 x) noexcept { return x.square(); }
     /**
      * @brief Calculates the left zero count of value x, ignoring the sign.
      * @param x input value.
      * @return lzc (uint32_t) of th result.
      */
-    [[nodiscard]] friend FP128_INLINE constexpr uint64_t lzcnt128(const fixed_point128& x) noexcept { return (x.high != 0) ? lzcnt64(x.high) : 64 + lzcnt64(x.low); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr uint64_t lzcnt128(const fixed_point128& x) noexcept
+    {
+        return (x.high != 0) ? lzcnt64(x.high) : 64 + lzcnt64(x.low);
+    }
     /**
      * @brief Calculates the square root using Newton's method.
      * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw
@@ -2463,7 +2481,7 @@ private:
      * @param x value
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept requires (I >= 4)
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept requires (I >= 4)
     {
         return (exp(x) - exp(-x)) >> 1;
         // the below code while faster, produces lower precision results
@@ -2517,7 +2535,7 @@ private:
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Cosine of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept requires (I >= 4)
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept requires (I >= 4)
     {
         return (exp(x) + exp(-x)) >> 1;
 
@@ -2662,7 +2680,7 @@ private:
      * @param x A number specifying a power.
      * @return Exponent of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 expm1(const fixed_point128& x) noexcept { return exp(x) - fixed_point128::one(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 expm1(const fixed_point128& x) noexcept { return exp(x) - fixed_point128::one(); }
     /**
      * @brief Computes 2 to the power of x
      * @param x Exponent value
@@ -2782,7 +2800,7 @@ private:
      * @return log1p(x)
      * @throws std::domain_error when x is -1 or below.
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 log1p(fixed_point128 x) { return log(fixed_point128::one() + x); }
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 log1p(fixed_point128 x) { return log(fixed_point128::one() + x); }
     /**
      * @brief Calculates Log base 10 of x: log10(x)
      * @param x The number to perform log on.
@@ -2807,7 +2825,7 @@ private:
      * @param x The number to perform log on.
      * @return logb(x)
      */
-    [[nodiscard]] friend FP128_INLINE constexpr fixed_point128 logb(fixed_point128 x)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 logb(fixed_point128 x)
     {
         if (x.is_zero() || x.is_negative()) {
             throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
