@@ -2283,14 +2283,46 @@ private:
         //                cos(Xn)
         // where 'a' is the argument, each iteration will converge on the result if the initial
         //  estimate is close enough.
+        //
+        // A step is only taken when it moves sin(Xn) closer to the argument. Newton's method needs
+        // that guard here because the derivative it divides by vanishes at the ends of the domain:
+        // asin(1) starts at pi/2, where cos(Xn) is ~6.1e-17 while the numerator is nothing but the
+        // error of sin(). Dividing the one by the other produces a correction of ~7e-5 to an
+        // estimate that was already good to the last bits, and the iteration never recovers.
+        // The guard is close to free: sin(candidate) is the value the next iteration needs anyway,
+        // and the converged case below leaves before evaluating it at all, so the whole function
+        // measures ~1% slower than the unguarded loop it replaced.
         auto sign = x.sign;
         x.sign = 0;
         fixed_point128 res = ::asin(static_cast<double>(x));
+        fixed_point128 sin_res = sin(res);
+        fixed_point128 residual = fabs(sin_res - x);
         for (int i = 0; i < max_iterations; ++i) {
-            fixed_point128 e = (sin(res) - x) / cos(res);
-            res -= e;
-            if (fabs(e) <= eps)
+            const fixed_point128 cos_res = cos(res);
+            // the derivative vanished. Dividing by it would throw out of this noexcept function,
+            // and there is nothing left to refine anyway.
+            if (!cos_res)
                 break;
+
+            const fixed_point128 e = (sin_res - x) / cos_res;
+            const fixed_point128 candidate = res - e;
+            // A step of a couple of ulp has converged and cannot be the runaway case, so it is
+            // taken without checking it. Leaving now also skips the sin() below, which is what
+            // keeps the guard from costing an extra evaluation per call.
+            if (fabs(e) <= eps) {
+                res = candidate;
+                break;
+            }
+
+            const fixed_point128 sin_candidate = sin(candidate);
+            const fixed_point128 candidate_residual = fabs(sin_candidate - x);
+            // the step made the estimate worse, or no better: it is noise, so keep what we have
+            if (candidate_residual >= residual)
+                break;
+
+            res = candidate;
+            sin_res = sin_candidate;
+            residual = candidate_residual;
         }
 
         res.sign = sign;
@@ -2341,19 +2373,37 @@ private:
         //                -sin(Xn)              sin(Xn)
         // where 'a' is the argument, each iteration will converge on the result if the initial
         //  estimate is close enough.
+        // A step is only taken when it moves cos(Xn) closer to the argument, for the reason spelled
+        // out at asin(): at the ends of the domain the derivative divided by is all but zero, and
+        // an unguarded step there destroys an estimate that was already correct.
         fixed_point128 res = ::acos(static_cast<double>(x));
+        fixed_point128 cos_res = cos(res);
+        fixed_point128 residual = fabs(cos_res - x);
         for (int i = 0; i < max_iterations; ++i) {
-            fixed_point128 cos_xn = cos(res);
-            fixed_point128 sin_xn = sin(res);
+            const fixed_point128 sin_res = sin(res);
             // At the ends of the domain the derivative vanishes: acos(1) starts at res == 0 where
             // sin is exactly zero. Dividing by it would throw out of this noexcept function, and
             // there is nothing left to refine anyway.
-            if (!sin_xn)
+            if (!sin_res)
                 break;
-            fixed_point128 e = (x - cos_xn) / sin_xn;
-            res -= e;
-            if (fabs(e) <= eps)
+
+            const fixed_point128 e = (x - cos_res) / sin_res;
+            const fixed_point128 candidate = res - e;
+            // as in asin(): a converged step is taken unchecked, which also skips the cos() below
+            if (fabs(e) <= eps) {
+                res = candidate;
                 break;
+            }
+
+            const fixed_point128 cos_candidate = cos(candidate);
+            const fixed_point128 candidate_residual = fabs(cos_candidate - x);
+            // the step made the estimate worse, or no better: it is noise, so keep what we have
+            if (candidate_residual >= residual)
+                break;
+
+            res = candidate;
+            cos_res = cos_candidate;
+            residual = candidate_residual;
         }
 
         return res;

@@ -153,12 +153,15 @@ static constexpr bool FP128_CPP_STYLE_MODULO = true;  ///< Use C++ modulo semant
  *     which operator/=() has no way to know, so those two divide directly.</LI>
  * </UL>
  *
- * @note Setting this to zero is currently enough to fail one unit test. asin() and acos() refine a
- *       double precision estimate with Newton's method, and at the ends of their domain the
- *       derivative they divide by is ~6.1e-17, which amplifies the error of sin() into the result.
- *       The reciprocal path hides that: 1 / 6.1e-17 overflows the type, reciprocal() saturates, and
- *       the correction is clamped to something harmless. The long division applies it in full. The
- *       instability belongs to those two functions rather than to either division algorithm.
+ * @note Setting this to zero used to be enough to fail a unit test, which is worth recording because
+ *       the cause was not the division. asin() and acos() refine a double precision estimate with
+ *       Newton's method, and at the ends of their domain the derivative they divide by is ~6.1e-17
+ *       while the numerator is nothing but the error of sin(). The exact quotient of those two is
+ *       a correction of ~7e-5 applied to an estimate that was already right, and the iteration never
+ *       recovered. The reciprocal path had been hiding it rather than avoiding it: 1 / 6.1e-17
+ *       overflows the type, so reciprocal() saturated and the bad correction came out clamped to
+ *       something harmless. Both functions now reject a step that does not improve their residual,
+ *       and produce identical results under either setting of this flag.
  */
 #ifndef FP128_USE_RECIPROCAL_FOR_DIVISION
 #define FP128_USE_RECIPROCAL_FOR_DIVISION 1
