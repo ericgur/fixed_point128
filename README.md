@@ -274,6 +274,18 @@ Foundation header providing platform-specific intrinsic wrappers and common help
 - **Bit manipulation** - `lzcnt128`, `popcnt128`, `log2`, and `twos_complement128`.
 - **IEEE 754 unions** - `Double` and `Float` structs for accessing bit fields of native floating-point values.
 
+**Overridable macros:** two of the build configuration macros are meant to be set from the build, either on the command line or by defining them before the first include of a library header.
+
+| Macro | Default | Effect |
+| --- | --- | --- |
+| `FP128_DISABLE_INLINE` | `0` | Set it to `1` to turn every `FP128_INLINE` and `FP128_FORCE_INLINE` into `noinline`, so that a profile attributes time to the function it was actually spent in. |
+| `FP128_USE_RECIPROCAL_FOR_DIVISION` | `1` | Selects how `fixed_point128` divides by a value that is neither a power of two nor an integer: `a * reciprocal(b)` when non-zero, long division when zero. The reciprocal is 1.4x-1.8x faster and up to 1.7 ulp less accurate. Only `fixed_point128` reads it - for `float128` the reciprocal measures both slower and less accurate, and the integer types have no reciprocal to multiply by. The comment on the macro carries the measurements. |
+
+```sh
+cl  /DFP128_USE_RECIPROCAL_FOR_DIVISION=0 ...   # MSVC, clang-cl
+c++ -DFP128_USE_RECIPROCAL_FOR_DIVISION=0 ...   # Clang, GCC
+```
+
 ## Platform Support
 
 The library targets 64-bit platforms and provides optimized intrinsic paths for:

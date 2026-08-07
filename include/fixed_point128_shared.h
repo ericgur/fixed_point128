@@ -116,8 +116,53 @@
 #endif
 #endif
 
-static constexpr bool FP128_CPP_STYLE_MODULO = true;             ///< Use C++ modulo semantics (false = Python-style).
-static constexpr bool FP128_USE_RECIPROCAL_FOR_DIVISION = true;  ///< Use reciprocal approximation for division.
+static constexpr bool FP128_CPP_STYLE_MODULO = true;  ///< Use C++ modulo semantics (false = Python-style).
+
+/**
+ * @def FP128_USE_RECIPROCAL_FOR_DIVISION
+ * @brief Selects how fixed_point128 divides by a value that is neither a power of two nor an integer.
+ *
+ * Non zero (the default) computes <tt>a / b</tt> as <tt>a * reciprocal(b)</tt>, where reciprocal()
+ * refines a double precision estimate with Newton iterations. Zero selects the hand written long
+ * division instead. Only the general case is affected either way: a power of two divisor is still
+ * turned into a shift, and an integral divisor that fits in 64 bit still goes through div_64bit().
+ *
+ * Override it on the command line (<tt>/DFP128_USE_RECIPROCAL_FOR_DIVISION=0</tt> or
+ * <tt>-DFP128_USE_RECIPROCAL_FOR_DIVISION=0</tt>) or by defining it before including any header of
+ * this library, exactly as with FP128_DISABLE_INLINE.
+ *
+ * The default is non zero because the reciprocal is the faster of the two. Measured over a table of
+ * 256 random divisors, it runs at 1.4x to 1.7x the rate of the long division for fixed_point128<10>
+ * and 1.8x for fixed_point128<32>, on both MSVC and clang-cl. What it buys with that is accuracy:
+ * the two algorithms disagree on roughly 40% of those divisors, by up to 1.7 ulp, and comparing the
+ * residual <tt>|a - q * b|</tt> of each puts the long division closer to the exact quotient every
+ * single time it differs. Divide with this off when the last two bits have to be right.
+ *
+ * The flag is deliberately specific to fixed_point128. The other three types are not built the same
+ * way, and measuring them says to leave them alone:
+ * <UL>
+ * <LI>float128 loses on both counts - multiplying by a reciprocal runs at 0.47x (MSVC) to 0.55x
+ *     (clang-cl) of its long division, and is the less accurate of the two by the same residual test.
+ *     reciprocal() is the slower half: it normalizes its operand and then runs two or three float128
+ *     multiplications, each of which renormalizes and rounds, where the fixed_point128 equivalent
+ *     multiplies raw 128 bit words. So float128::operator/=() always divides.</LI>
+ * <LI>uint128_t and int128_t have no reciprocal to multiply by - 1 / b is zero for every |b| > 1 in
+ *     an integer representation. Their equivalent is a scaled reciprocal, floor(2^k / b) followed by
+ *     a multiply and a correction, and computing that scaled reciprocal is itself a division of the
+ *     kind it is meant to replace. It only pays when one divisor is reused across many dividends,
+ *     which operator/=() has no way to know, so those two divide directly.</LI>
+ * </UL>
+ *
+ * @note Setting this to zero is currently enough to fail one unit test. asin() and acos() refine a
+ *       double precision estimate with Newton's method, and at the ends of their domain the
+ *       derivative they divide by is ~6.1e-17, which amplifies the error of sin() into the result.
+ *       The reciprocal path hides that: 1 / 6.1e-17 overflows the type, reciprocal() saturates, and
+ *       the correction is clamped to something harmless. The long division applies it in full. The
+ *       instability belongs to those two functions rather than to either division algorithm.
+ */
+#ifndef FP128_USE_RECIPROCAL_FOR_DIVISION
+#define FP128_USE_RECIPROCAL_FOR_DIVISION 1
+#endif
 
 /***********************************************************************************
  *                                  Macros

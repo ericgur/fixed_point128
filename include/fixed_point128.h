@@ -1054,7 +1054,7 @@ public:
             } else {  // error
                 FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
             }
-        } else if constexpr (FP128_USE_RECIPROCAL_FOR_DIVISION) {
+        } else if constexpr (FP128_USE_RECIPROCAL_FOR_DIVISION != 0) {
             *this *= fabs(reciprocal(rhs));
         } else {
             uint64_t q[4] {};
