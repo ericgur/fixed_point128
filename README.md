@@ -36,6 +36,7 @@
 include/     the library - header only, this is all a consumer needs
 bench/       benchmark program
 tests/       GoogleTest suite
+tools/       maintenance tools for log2: table generator and accuracy harness
 external/    third party dependencies (GoogleTest, as a git submodule)
 cmake/       CMake helper modules
 msvc/        Visual Studio project files (the solution lives at the repository root)

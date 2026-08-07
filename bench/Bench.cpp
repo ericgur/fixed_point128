@@ -309,31 +309,73 @@ template <typename Body> [[nodiscard]] int64_t MeasureRate(double time_budget, B
 }
 
 /**
- * @brief Times a unary function applied to a fixed operand.
+ * @brief Number of distinct arguments a timed loop cycles through. Must be a power of two.
  *
- * The operand is escaped and a barrier runs at the top of every iteration, so the call cannot be
+ * Sixty four arguments of at most 24 bytes stay inside L1, so cycling through them costs an L1 load
+ * per iteration and nothing else.
+ */
+constexpr uint64_t BENCH_ARG_COUNT = 64;
+
+/**
+ * @brief Fills @p args with values that differ in their low order bits but not in their magnitude.
+ *
+ * Calling a function on one argument for half a second measures something no caller ever sees. The
+ * branch predictor learns the whole sequence of data dependent branches inside the function and
+ * then gets it right every time: fixed_point128<10>::log2() runs 118 iterations with one such
+ * branch each, and timing it on a single argument overstates it by about 20%.
+ *
+ * Worse, a fixed argument can invert a comparison rather than just shift it. Making the rounding
+ * step inside square() branchless measures 10% *slower* on a fixed argument and 16% faster on
+ * varying ones, on the same compiler - so the benchmark would have rejected a change that is worth
+ * having.
+ *
+ * The perturbation is deliberately small, at most a part in 2^10. The arguments have to stay inside
+ * the domain their caller picked them for - asin() needs |x| <= 1, acosh() needs x >= 1 - and they
+ * have to keep the magnitude they were chosen with, since the series based functions iterate a
+ * number of times that depends on it and the results would otherwise stop being comparable with
+ * earlier runs.
+ *
+ * @tparam T Argument type.
+ * @param args Array of BENCH_ARG_COUNT elements to fill.
+ * @param base Argument the benchmark would otherwise have used on its own. Becomes args[0].
+ */
+template <typename T> void BuildArgs(T* args, const T& base)
+{
+    const T step = base >> 16;
+    for (uint64_t i = 0; i < BENCH_ARG_COUNT; ++i) {
+        args[i] = base + step * static_cast<uint32_t>(i);
+    }
+}
+
+/**
+ * @brief Times a unary function over a rotating set of operands.
+ *
+ * The operands are escaped and a barrier runs at the top of every iteration, so the call cannot be
  * hoisted out of the loop; the result is escaped too, so the store the loop makes to it on every
- * iteration keeps the call from being deleted as dead. Both operand and result therefore live in
+ * iteration keeps the call from being deleted as dead. Operands and result therefore live in
  * memory, which on x86 costs the loads and stores only - they fold into the instructions around
  * them - and nothing at all in extra instructions.
+ *
+ * See BuildArgs() for why the loop cycles through a set of arguments rather than reusing one.
  *
  * @tparam T Operand type.
  * @tparam Func Callable invoked as func(const T&).
  * @param name Name to print the measurement under.
  * @param time_per_function Time to spend measuring, in seconds.
- * @param argument Value the function is applied to.
+ * @param argument Value the function is applied to, and the base the rest are derived from.
  * @param func Function to measure.
  */
 template <typename T, typename Func> void BenchUnary(const char* name, double time_per_function, T argument, Func func)
 {
     const int64_t ips = MeasureRate(time_per_function, [argument, func](uint64_t count) {
-        T arg = argument;
-        auto result = func(arg);
-        Escape(arg);
+        T args[BENCH_ARG_COUNT];
+        BuildArgs(args, argument);
+        auto result = func(args[0]);
+        Escape(args[0]);
         Escape(result);
         for (uint64_t i = count; i != 0; --i) {
             Barrier();
-            result = func(arg);
+            result = func(args[i & (BENCH_ARG_COUNT - 1)]);
         }
         DoNotOptimize(result);
     });
@@ -342,34 +384,39 @@ template <typename T, typename Func> void BenchUnary(const char* name, double ti
 }
 
 /**
- * @brief Times a binary operation on two fixed operands.
+ * @brief Times a binary operation over a rotating set of left hand operands.
  *
  * Both operands are escaped, not just the one that would be enough to defeat hoisting: leaving the
  * right hand side visible would let the compiler specialize the operation for it, and a division by
  * a literal 5 rewritten as a multiplication by its reciprocal is not the division this is meant to
  * be timing.
  *
+ * Only the left hand side rotates. That is enough to keep the operation's data dependent branches
+ * from repeating - see BuildArgs() - and it leaves the right hand side free to be a type that has
+ * no arithmetic of its own, such as the uint32_t exponent of the integer pow().
+ *
  * @tparam T Type of the left hand operand.
  * @tparam U Type of the right hand operand.
  * @tparam Func Callable invoked as func(const T&, const U&).
  * @param name Name to print the measurement under.
  * @param time_per_function Time to spend measuring, in seconds.
- * @param left Left hand operand.
- * @param right Right hand operand.
+ * @param left Left hand operand, and the base the rest of the rotating set is derived from.
+ * @param right Right hand operand, the same on every iteration.
  * @param func Operation to measure.
  */
 template <typename T, typename U, typename Func> void BenchBinary(const char* name, double time_per_function, T left, U right, Func func)
 {
     const int64_t ips = MeasureRate(time_per_function, [left, right, func](uint64_t count) {
-        T lhs = left;
+        T args[BENCH_ARG_COUNT];
+        BuildArgs(args, left);
         U rhs = right;
-        auto result = func(lhs, rhs);
-        Escape(lhs);
+        auto result = func(args[0], rhs);
+        Escape(args[0]);
         Escape(rhs);
         Escape(result);
         for (uint64_t i = count; i != 0; --i) {
             Barrier();
-            result = func(lhs, rhs);
+            result = func(args[i & (BENCH_ARG_COUNT - 1)], rhs);
         }
         DoNotOptimize(result);
     });
@@ -542,14 +589,23 @@ template <typename T> void bench_comparison_operators(double time_per_function =
 
     // The four comparisons accumulate into a plain integer. That is enough to keep them alive and,
     // unlike escaping their results, it leaves the accumulator in a register.
+    //
+    // The right hand side is taken from the middle of the rotating set rather than from
+    // operandC(). Rotating the left hand side alone would not have helped: every value BuildArgs()
+    // produces is within a part in 2^10 of the base, so all of them would still land on the same
+    // side of an unrelated constant and every comparison would take the branch it took last time.
+    // Sitting the right hand side inside the set splits the outcomes evenly, which is what a
+    // comparison in real code does.
     const int64_t ips = MeasureRate(time_per_function, [](uint64_t count) {
-        T f1 = Traits::operandB();
-        T f2 = Traits::operandC();
+        T args[BENCH_ARG_COUNT];
+        BuildArgs(args, Traits::operandB());
+        T f2 = args[BENCH_ARG_COUNT / 2];
         int64_t matches = 0;
-        Escape(f1);
+        Escape(args[0]);
         Escape(f2);
         for (uint64_t i = count; i != 0; --i) {
             Barrier();
+            const T& f1 = args[i & (BENCH_ARG_COUNT - 1)];
             matches += (f1 > f2);
             matches += (f1 >= f2);
             matches += (f1 < f2);

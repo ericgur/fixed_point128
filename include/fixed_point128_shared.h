@@ -891,6 +891,37 @@ FP128_INLINE constexpr void shift_left128_inplace(uint64_t& l, uint64_t& h, int 
     l <<= shift;
 }
 /**
+ * @brief Adds a rounding bit into a 128 bit value held as two QWORDs, as l and h are named there.
+ *
+ * A macro rather than a function because the two QWORDs are always members of the caller, and
+ * taking references to them is what a function would have to do. MSVC then keeps them in memory
+ * for the whole of the surrounding routine even with __forceinline, which costs more than this
+ * whole operation is worth: written as a function it made fixed_point128<10>::log2() 40% slower.
+ *
+ * The two expansions compute the same thing and differ only in how they compile. Clang turns the
+ * carry propagating form into four instructions and the branch into nine, and is 40% faster on
+ * log2() with it - that function reaches this code once for every bit of its result, so a third of
+ * its inner loop was the rounding. MSVC is the other way round by about 10%: it compiles the branch
+ * into a conditional move and schedules that better than an unconditional add sitting on the
+ * dependency chain.
+ *
+ * Both figures come from the benchmark cycling through a set of arguments, so neither is an
+ * artifact of a branch the predictor had memorized. Timed on a single repeated argument the two
+ * spellings compare the other way round on both compilers, which is what the rotating arguments in
+ * bench/Bench.cpp are there to avoid.
+ */
+#if defined(FP128_CLANG)
+#define FP128_ADD_ROUND_BIT(l, h, round_up) ((h) += addcarryx_u64(0, (l), static_cast<uint64_t>(round_up), &(l)))
+#else
+#define FP128_ADD_ROUND_BIT(l, h, round_up)      \
+    do {                                         \
+        if (round_up) {                          \
+            ++(l); /* wraps around to zero */    \
+            (h) += (l) == 0;                     \
+        }                                        \
+    } while (0)
+#endif
+/**
  * @brief Right shift a 128 bit integer (inplace) with rounding.
  * Handles any positive shift value.
  * @param l Low QWORD
@@ -1311,6 +1342,250 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
 {
     return (x) ? 31ull - lzcnt32(x) : 0;
 }
+
+/**
+ * @brief Upper 128 bits of the product of two 128 bit unsigned values.
+ *
+ * Used by the argument reduction in fixed_point128::log2(), which needs a multiplication of two
+ * pure fractions and only the leading half of the result. Working on the raw QWORDs rather than on
+ * fixed_point128 keeps the reduction independent of that type's template parameter: both operands
+ * are values in [0,1) scaled by 2^128 whatever the caller's scaling happens to be.
+ *
+ * The lowest QWORD of the 256 bit product is discarded. Nothing is added into that column, so it
+ * produces no carry and the result is the exact product truncated - low by less than 2^-256 of a
+ * relative unit, which is far below anything the caller can represent.
+ *
+ * @param a_low Low QWORD of the first operand.
+ * @param a_high High QWORD of the first operand.
+ * @param b_low Low QWORD of the second operand.
+ * @param b_high High QWORD of the second operand.
+ * @param res_low Receives the low QWORD of the upper half of the product.
+ * @param res_high Receives the high QWORD of the upper half of the product.
+ */
+FP128_INLINE constexpr void mul128_high(uint64_t a_low, uint64_t a_high, uint64_t b_low, uint64_t b_high, uint64_t& res_low, uint64_t& res_high) noexcept
+{
+    uint64_t ll_high = 0, lh_high = 0, hl_high = 0, hh_high = 0;
+    [[maybe_unused]] const uint64_t ll_low = mulx_u64(a_low, b_low, &ll_high);
+    const uint64_t lh_low = mulx_u64(a_low, b_high, &lh_high);
+    const uint64_t hl_low = mulx_u64(a_high, b_low, &hl_high);
+    const uint64_t hh_low = mulx_u64(a_high, b_high, &hh_high);
+
+    // Column at 2^64: the high half of low*low plus the low halves of both cross products. Its
+    // carries move up into the 2^128 column, which is the first one that is kept.
+    uint64_t mid = 0;
+    uint8_t carry = addcarryx_u64(0, ll_high, lh_low, &mid);
+    uint64_t mid_carries = carry;
+    carry = addcarryx_u64(0, mid, hl_low, &mid);
+    mid_carries += carry;
+
+    // Column at 2^128 and above.
+    uint64_t low = 0, high = 0;
+    carry = addcarryx_u64(0, hh_low, lh_high, &low);
+    high = hh_high + carry;
+    carry = addcarryx_u64(0, low, hl_high, &low);
+    high += carry;
+    carry = addcarryx_u64(0, low, mid_carries, &low);
+    high += carry;
+
+    // Round to nearest on the discarded half rather than truncating. The top bit of the 2^64
+    // column decides it, and rounding rather than truncating halves this function's contribution
+    // to the error of the log2 it was written for.
+    carry = addcarryx_u64(0, low, mid >> 63, &low);
+    high += carry;
+
+    res_low = low;
+    res_high = high;
+}
+
+/**
+ * @brief 1/(1 + j/64) as a 128 bit fraction, the reciprocals fixed_point128::log2() reduces with.
+ *
+ * Entry zero would be exactly one, which is not a 128 bit fraction, so it holds the largest value
+ * below one instead. That makes the reduction a near no-op rather than an exact one, and
+ * log2_value_table absorbs the difference.
+ */
+inline constexpr uint64_t log2_recip_table[][2] = {
+    {0xFFFFFFFFFFFFFFFFull, 0xFFFFFFFFFFFFFFFFull},
+    {0xFC0FC0FC0FC0FC0Full, 0xC0FC0FC0FC0FC0FCull},
+    {0xF83E0F83E0F83E0Full, 0x83E0F83E0F83E0F8ull},
+    {0xF4898D5F85BB3950ull, 0x3D226357E16ECE54ull},
+    {0xF0F0F0F0F0F0F0F0ull, 0xF0F0F0F0F0F0F0F1ull},
+    {0xED7303B5CC0ED730ull, 0x3B5CC0ED7303B5CCull},
+    {0xEA0EA0EA0EA0EA0Eull, 0xA0EA0EA0EA0EA0EAull},
+    {0xE6C2B4481CD85689ull, 0x039B0AD12073615Aull},
+    {0xE38E38E38E38E38Eull, 0x38E38E38E38E38E4ull},
+    {0xE070381C0E070381ull, 0xC0E070381C0E0704ull},
+    {0xDD67C8A60DD67C8Aull, 0x60DD67C8A60DD67Dull},
+    {0xDA740DA740DA740Dull, 0xA740DA740DA740DAull},
+    {0xD79435E50D79435Eull, 0x50D79435E50D7943ull},
+    {0xD4C77B03531DEC0Dull, 0x4C77B03531DEC0D5ull},
+    {0xD20D20D20D20D20Dull, 0x20D20D20D20D20D2ull},
+    {0xCF6474A8819EC8E9ull, 0x51033D91D2A2067Bull},
+    {0xCCCCCCCCCCCCCCCCull, 0xCCCCCCCCCCCCCCCDull},
+    {0xCA4587E6B74F0329ull, 0x161F9ADD3C0CA458ull},
+    {0xC7CE0C7CE0C7CE0Cull, 0x7CE0C7CE0C7CE0C8ull},
+    {0xC565C87B5F9D4D1Bull, 0xC2503159721ED7E7ull},
+    {0xC30C30C30C30C30Cull, 0x30C30C30C30C30C3ull},
+    {0xC0C0C0C0C0C0C0C0ull, 0xC0C0C0C0C0C0C0C1ull},
+    {0xBE82FA0BE82FA0BEull, 0x82FA0BE82FA0BE83ull},
+    {0xBC52640BC52640BCull, 0x52640BC52640BC52ull},
+    {0xBA2E8BA2E8BA2E8Bull, 0xA2E8BA2E8BA2E8BAull},
+    {0xB81702E05C0B8170ull, 0x2E05C0B81702E05Cull},
+    {0xB60B60B60B60B60Bull, 0x60B60B60B60B60B6ull},
+    {0xB40B40B40B40B40Bull, 0x40B40B40B40B40B4ull},
+    {0xB21642C8590B2164ull, 0x2C8590B21642C859ull},
+    {0xB02C0B02C0B02C0Bull, 0x02C0B02C0B02C0B0ull},
+    {0xAE4C415C9882B931ull, 0x0572620AE4C415CAull},
+    {0xAC7691840AC76918ull, 0x40AC7691840AC769ull},
+    {0xAAAAAAAAAAAAAAAAull, 0xAAAAAAAAAAAAAAABull},
+    {0xA8E83F5717C0A8E8ull, 0x3F5717C0A8E83F57ull},
+    {0xA72F05397829CBC1ull, 0x4E5E0A72F0539783ull},
+    {0xA57EB50295FAD40Aull, 0x57EB50295FAD40A5ull},
+    {0xA3D70A3D70A3D70Aull, 0x3D70A3D70A3D70A4ull},
+    {0xA237C32B16CFD772ull, 0x0F353A4C0A237C33ull},
+    {0xA0A0A0A0A0A0A0A0ull, 0xA0A0A0A0A0A0A0A1ull},
+    {0x9F1165E7254813E2ull, 0x2CBCE4A9027C4598ull},
+    {0x9D89D89D89D89D89ull, 0xD89D89D89D89D89Eull},
+    {0x9C09C09C09C09C09ull, 0xC09C09C09C09C09Cull},
+    {0x9A90E7D95BC609A9ull, 0x0E7D95BC609A90E8ull},
+    {0x991F1A515885FB37ull, 0x072D753BD02647C7ull},
+    {0x97B425ED097B425Eull, 0xD097B425ED097B42ull},
+    {0x964FDA6C0964FDA6ull, 0xC0964FDA6C0964FEull},
+    {0x94F2094F2094F209ull, 0x4F2094F2094F2095ull},
+    {0x939A85C40939A85Cull, 0x40939A85C40939A8ull},
+    {0x9249249249249249ull, 0x2492492492492492ull},
+    {0x90FDBC090FDBC090ull, 0xFDBC090FDBC090FEull},
+    {0x8FB823EE08FB823Eull, 0xE08FB823EE08FB82ull},
+    {0x8E78356D1408E783ull, 0x56D1408E78356D14ull},
+    {0x8D3DCB08D3DCB08Dull, 0x3DCB08D3DCB08D3Eull},
+    {0x8C08C08C08C08C08ull, 0xC08C08C08C08C08Cull},
+    {0x8AD8F2FBA9386822ull, 0xB63CBEEA4E1A08AEull},
+    {0x89AE4089AE4089AEull, 0x4089AE4089AE408Aull},
+    {0x8888888888888888ull, 0x8888888888888889ull},
+    {0x8767AB5F34E47EF1ull, 0x30A9419637021D9Full},
+    {0x864B8A7DE6D1D608ull, 0x64B8A7DE6D1D6086ull},
+    {0x8534085340853408ull, 0x5340853408534085ull},
+    {0x8421084210842108ull, 0x4210842108421084ull},
+    {0x83126E978D4FDF3Bull, 0x645A1CAC083126E9ull},
+    {0x8208208208208208ull, 0x2082082082082082ull},
+    {0x8102040810204081ull, 0x0204081020408102ull},
+};
+
+/**
+ * @brief -log2 of the matching log2_recip_table entry, as a 128 bit fraction.
+ *
+ * Derived from the reciprocal that is actually stored rather than from 1 + j/64, so that
+ * log2(m) = log2(m * recip) - log2(recip) holds exactly whatever the reciprocal rounded to. That is
+ * what keeps the argument reduction from contributing any error of its own.
+ */
+inline constexpr uint64_t log2_value_table[][2] = {
+    {0x0000000000000000ull, 0x0000000000000001ull},
+    {0x05B9E5A170B48A62ull, 0x9B89F8846042BE52ull},
+    {0x0B5D69BAC77EC398ull, 0x9B03784B5BE08491ull},
+    {0x10EB389FA29F9AB3ull, 0xCF74BAB999217067ull},
+    {0x1663F6FAC913167Cull, 0xCC53826144575AC4ull},
+    {0x1BC84240ADABBA63ull, 0xB2C5A6E5197AB879ull},
+    {0x2118B119B4F3C72Cull, 0x4F78DFA14AA5157Bull},
+    {0x2655D3C4F15C343Eull, 0xA3E580EB4E974C9Bull},
+    {0x2B803473F7AD0F3Full, 0x401624140D175BA2ull},
+    {0x309857A05E0765FBull, 0xA4491DCEC752AE1Eull},
+    {0x359EBC5B69D927DFull, 0xC23D9780306C6969ull},
+    {0x3A93DC9864B2DF91ull, 0xE96ACA04740A8839ull},
+    {0x3F782D7204D01447ull, 0x51B3314F09DE6BE5ull},
+    {0x444C1F6B4C2DD72Cull, 0x25C169E5693A7F06ull},
+    {0x49101EAC381CE609ull, 0x16E52E91300EFEEFull},
+    {0x4DC4933A9337B366ull, 0x44CDB2581FB9186Full},
+    {0x5269E12F346E2BF9ull, 0x24AFDBFD36BF6D33ull},
+    {0x570068E7EF5A1E7Eull, 0x802C48281A2EB745ull},
+    {0x5B8887367433795Eull, 0x35482D13DC0F110Cull},
+    {0x6002958C587150CAull, 0xBAD827D37DEB2237ull},
+    {0x646EEA247C5C22D2ull, 0xCAD415AE1A715618ull},
+    {0x68CDD829FD814275ull, 0xF1035E5E7B16C7F7ull},
+    {0x6D1FAFDCE20A8290ull, 0x51BBE3F6289E3AB7ull},
+    {0x7164BEB4A56D59F9ull, 0xFB952BBBCCC314F1ull},
+    {0x759D4F80CBA83BF8ull, 0xFAF866415554D6C0ull},
+    {0x79C9AA879D534831ull, 0x46784BD1C44CCD5Full},
+    {0x7DEA15A32C1B3B38ull, 0x64C6001143D6C8D6ull},
+    {0x81FED45CBCCBF99Cull, 0xA1A3202B3D68F965ull},
+    {0x86082806B1D532C4ull, 0x12BA94DB12EF0AA8ull},
+    {0x8A064FD50F2A1CF0ull, 0xAD29518B0252C226ull},
+    {0x8DF988F4AE806F1Dull, 0xA89D4EE66C3700E3ull},
+    {0x91E20EA1393E4040ull, 0x76630D4C409DD918ull},
+    {0x95C01A39FBD6879Full, 0xA00B120A068BADD0ull},
+    {0x9993E355A4E53643ull, 0x5C902FD21101093Aull},
+    {0x9D5D9FD5010B3666ull, 0x5592074827CB508Eull},
+    {0xA11D83F4C3554B38ull, 0x3B0E8A55626C3263ull},
+    {0xA4D3C25E68DC57F2ull, 0x495FB7FA6D7EDA66ull},
+    {0xA8808C384547C6EFull, 0x4A49BC591348F145ull},
+    {0xAC241134C4E99E1Cull, 0x6C5E946B4AE30894ull},
+    {0xAFBE7FA0F04D75C6ull, 0x58D602E66B04D3B5ull},
+    {0xB35004723C465E69ull, 0x76DA1C872983511Dull},
+    {0xB6D8CB53B0CA4ECBull, 0xEF83F1AB5130C34Cull},
+    {0xBA58FEB2703A9E37ull, 0x2BC1FE8A8648E9EBull},
+    {0xBDD0C7C9A817204Full, 0x55BBF90CE3F6815Aull},
+    {0xC1404EADF38396DEull, 0xE021361E13A30974ull},
+    {0xC4A7BA58377C5A03ull, 0x75163EC8D56242F8ull},
+    {0xC80730B0001667F2ull, 0x1FA8423E8C1443F3ull},
+    {0xCB5ED69565AFAF7Full, 0x6248A98A36F8173Cull},
+    {0xCEAECFEA80859B33ull, 0x2AC903A413E5A848ull},
+    {0xD1F73F9C70C0F683ull, 0xCC68D510B4A2B099ull},
+    {0xD53847AC00A69BE6ull, 0xF1BE4359106A19B6ull},
+    {0xD8720935E6435EBDull, 0x376A70D849AE77DCull},
+    {0xDBA4A47AA996D25Aull, 0x5B8A19B1C637671Eull},
+    {0xDED038E633F36DA8ull, 0xB6F0409B369AACC0ull},
+    {0xE1F4E5170D02A99Bull, 0x4C5A724DBD8180F7ull},
+    {0xE512C6E54998B1AFull, 0xF71C8605583D030Aull},
+    {0xE829FB693044B398ull, 0xC4BAEE073D4B1B03ull},
+    {0xEB3A9F01975077F1ull, 0xF5F0CC82AAA9AD7Eull},
+    {0xEE44CD59FFAB62F3ull, 0x39D5D6A218C633A0ull},
+    {0xF148A170700A00FDull, 0xD5533F1DE29ABEDEull},
+    {0xF446359B13539551ull, 0x0D1E3F80FBC71454ull},
+    {0xF73DA38D9D4A83EBull, 0x6E0F93F7A43E479Cull},
+    {0xFA2F045E7832AA72ull, 0x6ADF27B820FD03EAull},
+    {0xFD1A708BBE119B14ull, 0x945CF6BA73D491EAull},
+};
+
+/**
+ * @brief 1/(n*ln2) for n = 1 upwards, already in fixed_point128<1> form; entry [i] holds 1/((i+1)*ln2).
+ *
+ * Stored pre-scaled because the series loop reads one entry per iteration, and shifting a raw
+ * fraction into place every time would cost more than the multiply the entry is used for.
+ *
+ * The division by ln(2) that turns the natural logarithm into a base two one is folded into these
+ * constants rather than applied once at the end. That removes a multiply from every call and, more
+ * importantly, the rounding that came with it - which mattered for the instantiations whose own
+ * precision is close to the 127 bits the series runs at. Entry zero is 1/ln2 = 1.4427, still inside
+ * the range of fixed_point128<1>, and the accumulator peaks around 1.47.
+ */
+inline constexpr uint64_t log2_inv_n_table[][2] = {
+    {0xB8AA3B295C17F0BBull, 0xBE87FED0691D3E89ull},
+    {0x5C551D94AE0BF85Dull, 0xDF43FF68348E9F44ull},
+    {0x3D8E13B87407FAE9ull, 0x3F82AA45785F14D8ull},
+    {0x2E2A8ECA5705FC2Eull, 0xEFA1FFB41A474FA2ull},
+    {0x24EED8A1DF37FCF2ull, 0x594E6629AE9F72E8ull},
+    {0x1EC709DC3A03FD74ull, 0x9FC15522BC2F8A6Cull},
+    {0x1A61762A7ADED93Full, 0x645C921DC5DF9B38ull},
+    {0x171547652B82FE17ull, 0x77D0FFDA0D23A7D1ull},
+    {0x1484B13D7C02A8F8ull, 0x6A80E36C7D7506F3ull},
+    {0x12776C50EF9BFE79ull, 0x2CA73314D74FB974ull},
+    {0x10C9A84994022D28ull, 0x5723A2CD20D41CF5ull},
+    {0x0F6384EE1D01FEBAull, 0x4FE0AA915E17C536ull},
+    {0x0E347AB4698BB00Eull, 0x711E274B1BC72C32ull},
+    {0x0D30BB153D6F6C9Full, 0xB22E490EE2EFCD9Cull},
+    {0x0C4F9D8B4A67FEFBull, 0x731A220DE4DFD0F8ull},
+    {0x0B8AA3B295C17F0Bull, 0xBBE87FED0691D3E9ull},
+    {0x0ADCD64DBA1F86A1ull, 0xA1CBC3B1E810C771ull},
+    {0x0A42589EBE01547Cull, 0x354071B63EBA8379ull},
+    {0x09B81E0FA687FF32ull, 0x4D65793363D91E3Dull},
+    {0x093BB62877CDFF3Cull, 0x9653998A6BA7DCBAull},
+    {0x08CB27637E4A486Aull, 0x76C98609EC9FDE68ull},
+    {0x0864D424CA011694ull, 0x2B91D166906A0E7Bull},
+    {0x080766BF04010A77ull, 0x77969BC6475A50A2ull},
+    {0x07B1C2770E80FF5Dull, 0x27F05548AF0BE29Bull},
+};
+
+/** @brief Bits of argument reduction fixed_point128::log2() applies; log2_recip_table has 2^this entries. */
+inline constexpr int32_t log2_reduction_bits = 6;
 
 }  // namespace fp128
 

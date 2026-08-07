@@ -47,6 +47,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(FP128_BUILD_BENCH "Build the fixed_point128 benchmark" ${PROJECT_IS_TOP_LEVEL})
 option(FP128_BUILD_TESTS "Build the fixed_point128 unit tests" ${PROJECT_IS_TOP_LEVEL})
+option(FP128_BUILD_TOOLS "Build the fixed_point128 maintenance tools (see tools/README.md)" OFF)
 
 ##
 # The library target.
@@ -72,4 +73,14 @@ if(FP128_BUILD_TESTS)
     enable_testing()
     add_subdirectory(external)
     add_subdirectory(tests)
+endif()
+
+##
+# The tools are added unconditionally so the target exists and can be built on demand, but they are
+# excluded from the default build unless FP128_BUILD_TOOLS is on. They are run by hand when log2()
+# changes, and there is no reason to pay for them on an ordinary build.
+##
+add_subdirectory(tools EXCLUDE_FROM_ALL)
+if(FP128_BUILD_TOOLS)
+    set_target_properties(log2_ulp_dump PROPERTIES EXCLUDE_FROM_ALL OFF)
 endif()

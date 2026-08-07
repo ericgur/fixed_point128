@@ -1185,6 +1185,11 @@ public:
         uint64_t l1, h1, l2, h2;
         get_components(l1, h1, expo, sign);
         other.get_components(l2, h2, other_expo, other_sign);
+        // Deliberately asked of the objects rather than derived from the mantissas above, even
+        // though get_components() has just produced the bits this needs. Testing the raw value
+        // leaves the question independent of the extraction, so it can be answered alongside it;
+        // phrasing it as (h1 == FRAC_UNITY && l1 == 0) chains it behind instead and costs Clang
+        // 15% of the multiply benchmark, against no gain on MSVC.
         bool is_exp2 = is_exponent_of_2();
         bool other_is_exp2 = other.is_exponent_of_2();
 
@@ -1243,7 +1248,7 @@ public:
         //     h1 += l1 == 0;
         // }
 
-        norm_fraction_sticky(l1, h1, expo, sticky_bits != 0);
+        norm_product(l1, h1, expo, sticky_bits != 0);
         set_components(l1, h1, expo, sign ^ other_sign);
         return *this;
     }
@@ -1318,7 +1323,7 @@ public:
         h = shift_right128(res[index + 1], res[index + 2], lsb);
         --expo;
 
-        norm_fraction_sticky(l, h, expo, sticky_bits != 0);
+        norm_product(l, h, expo, sticky_bits != 0);
         set_components(l, h, expo, 0);
         return *this;
     }
@@ -1682,6 +1687,49 @@ public:
      * @param e Unbiased exponent, can be any value.
      * @param s Sign (1 is negative)
      */
+    /**
+     * @brief Number of Mercator series terms log2() needs.
+     *
+     * The reduction leaves |z| <= 2^-6, so term n is bounded by 2^(-6n), and the series is cut off
+     * once that is below the last bit of a 113 bit mantissa with eight bits to spare.
+     */
+    static constexpr int32_t LOG2_TERMS = (FRAC_BITS + 1 + 8 + log2_reduction_bits - 1) / log2_reduction_bits;
+
+    /**
+     * @brief Builds a float128 from a 128 bit fraction, a value in [0,1).
+     *
+     * The counterpart of reading a mantissa out with get_components(): log2() does its argument
+     * reduction and series on plain 128 bit fractions, and this is how the two results it ends up
+     * with re-enter floating point.
+     *
+     * @param low Low QWORD of the fraction.
+     * @param high High QWORD of the fraction.
+     * @return The value the fraction stands for, or zero if it is zero.
+     */
+    [[nodiscard]] static FP128_INLINE float128 from_fraction128(uint64_t low, uint64_t high) noexcept
+    {
+        if ((low | high) == 0) {
+            return float128();
+        }
+
+        // Bring the leading one to bit 127, then keep the top 113 bits as the mantissa.
+        const int32_t leading_zeros = static_cast<int32_t>(lzcnt128(low, high));
+        shift_left128_inplace_safe(low, high, leading_zeros);
+        shift_right128_inplace_safe(low, high, 127 - FRAC_BITS);
+        int32_t expo = -(leading_zeros + 1);
+
+        // That last shift rounds, and rounding up can carry into a 114th bit.
+        if (high > (FRAC_UNITY | UPPER_FRAC_MASK)) {
+            shift_right128_inplace_safe(low, high, 1);
+            ++expo;
+        }
+
+        float128 res;
+        res.set_components(low, high, expo, 0);
+
+        return res;
+    }
+
     FP128_INLINE constexpr void set_components(uint64_t l, uint64_t h, int32_t e, uint32_t s) noexcept
     {
         // overflow
@@ -1828,6 +1876,46 @@ public:
      * @param e Unbiased exponent, adjusted to match the normalized fraction
      * @param sticky True when the caller already dropped one or more set bits below l
      */
+    /**
+     * @brief Normalizes the product of two mantissas to bit 112, rounding half to even.
+     *
+     * The multiply and the square both arrive here with (h:l) equal to their 256 bit product shifted
+     * right by 111. Both operands were normalized to [2^112, 2^113) by get_components(), so the
+     * product is in [2^224, 2^226) and (h:l) is in [2^113, 2^115): its leading one is at bit 113 or
+     * bit 114 and nowhere else, which makes the remaining shift 1 or 2.
+     *
+     * norm_fraction_sticky() would reach the same answer, but it has to find the leading one with a
+     * count of leading zeros first and then handle a shift that could be anything from negative to
+     * past the end of a QWORD. Here the choice is a single bit test and the two shift widths are
+     * small enough that none of its range handling applies. The rounding is deliberately identical
+     * to it, down to the carry out case, so the two produce the same bits for every input.
+     *
+     * @param l Low part of the shifted product, replaced by the normalized fraction
+     * @param h High part of the shifted product, replaced by the normalized fraction
+     * @param e Unbiased exponent, adjusted to match the normalized fraction
+     * @param sticky True when the caller already dropped one or more set bits below l
+     */
+    FP128_INLINE static constexpr void norm_product(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) noexcept
+    {
+        // bit 114 of the product decides between the two, and it is bit 50 of the high QWORD
+        const int32_t shift = 1 + static_cast<int32_t>(h >> 50);
+        e += shift;
+
+        // the highest dropped bit decides the direction, everything under it is sticky
+        const uint64_t guard = (l >> (shift - 1)) & 1;
+        const bool below = sticky || (shift == 2 && (l & 1) != 0);
+
+        l = shift_right128(l, h, shift);
+        h >>= shift;
+
+        if (guard && (below || (l & 1))) {
+            if (++l == 0)
+                ++h;
+            // a carry out of the fraction moves to the next power of two
+            if ((h >> 48) != 1)
+                ++e;
+        }
+    }
     FP128_INLINE constexpr void norm_fraction_sticky(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) const noexcept
     {
         if (l == 0 && h == 0) {
@@ -3008,8 +3096,14 @@ public:
     }
     /**
      * @brief Calculates the Log base 2 of x: y = log2(x)
+     *
+     * Accurate relative to its own result, which matters most for an argument close to one: the
+     * answer is then proportional to the mantissa's fraction, and that fraction is carried through
+     * exactly rather than being rounded onto a grid it would barely register on. The earlier
+     * implementation built the answer as a fixed point fraction of 112 bits before returning it as
+     * a float, which left log2(1 + 2^-112) with no correct significant bits at all.
+     *
      * @param x The number to perform log2 on.
-     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log2(x)
      */
     [[nodiscard]] friend FP128_INLINE float128 log2(float128 x) noexcept
@@ -3019,36 +3113,97 @@ public:
         }
 
         // Calculate the log in 2 steps:
-        // - The integer part (iy) is simple and fast via the get_exponent() function.
-        // - The fraction part (fy) is trickier. Uses Binary Logarithm
+        // - The integer part is simple and fast via the get_exponent() function.
+        // - The fraction part is log2 of the mantissa, by argument reduction and a short series.
         // The result is the sum of the two. Based on the identity:
         // log(x + y) = log(x) + log(y)
+        const int32_t expo = x.get_exponent();
 
-        // bring x to the range [1,2)
-        auto expo = x.get_exponent();
-        float128 iy = expo;  // integer part of the result
-        // x is an exponent of 2.
-        if (x.is_exponent_of_2())
-            return iy;
-
-        x.set_exponent(0);
-
-        static const float128 two(2);
-        float128 b = float128::half();  // 0.5
-        float128 fy;                    // fraction part of the result
-        for (size_t i = 0; i < float128::FRAC_BITS; ++i) {
-            x.square();
-            // if x is greater than 2, we have another bit in the result
-            if (x >= two) {
-                // divide x by 2 using shifts
-                x >>= 1;
-                fy += b;
-            }
-            // divide 2 using shifts
-            b >>= 1;
+        // x is an exponent of 2, so the mantissa contributes nothing. This also keeps the earlier
+        // handling of infinity, whose fraction bits are zero.
+        if (x.is_exponent_of_2()) {
+            return float128(expo);
         }
 
-        return iy + fy;
+        uint64_t frac_low = 0, frac_high = 0;
+        int32_t mantissa_expo = 0;
+        uint32_t mantissa_sign = 0;
+        x.get_components(frac_low, frac_high, mantissa_expo, mantissa_sign);
+        frac_high &= UPPER_FRAC_MASK;  // drop the unity bit, leaving f in [0,1) scaled by 2^112
+
+        // The leading log2_reduction_bits fraction bits choose the reciprocal to reduce with.
+        const size_t j = static_cast<size_t>(frac_high >> (FRAC_BITS - 64 - log2_reduction_bits));
+
+        // z, the reduced argument, as a 128 bit fraction. The series below needs |z| <= 2^-6.
+        uint64_t z_low = 0, z_high = 0;
+        uint32_t z_sign = 0;
+        if (j == 0) {
+            // Already inside the series' range, so no reduction is applied - and none is wanted.
+            // f is exact here, and multiplying it by a rounded reciprocal would cost it every
+            // significant bit it has when it is small. That is what makes log2 near 1 accurate:
+            // the answer is then proportional to f, and f survives intact.
+            z_low = frac_low << 16;
+            z_high = (frac_high << 16) | (frac_low >> 48);
+        } else {
+            // mantissa/2 as a 128 bit fraction, which is in [0.5,1)
+            const uint64_t m_low = frac_low << 15;
+            const uint64_t m_high = (1ull << 63) | (frac_high << 15) | (frac_low >> 49);
+            uint64_t p_low = 0, p_high = 0;
+            mul128_high(m_low, m_high, log2_recip_table[j][1], log2_recip_table[j][0], p_low, p_high);
+
+            // z = 2 * (mantissa/2 * recip) - 1. Normally non negative; a reciprocal that rounded
+            // down can take it just below zero.
+            constexpr uint64_t one_half = 1ull << 63;
+            uint64_t d_low = 0, d_high = 0;
+            if (p_high >= one_half) {
+                d_low = p_low;
+                d_high = p_high - one_half;
+            } else {
+                d_low = 0ull - p_low;
+                d_high = one_half - p_high - ((p_low != 0) ? 1ull : 0ull);
+                z_sign = 1;
+            }
+            z_low = d_low << 1;
+            z_high = (d_high << 1) | (d_low >> 63);
+        }
+
+        // Horner over 1/(n*ln2), from the last term down, giving A = log2(1+z)/z.
+        //
+        // Every value here is halved relative to the mathematics - log2_inv_n_table already holds
+        // 1/(2n*ln2) - so that all of them stay below one and can be held as plain 128 bit
+        // fractions. A is about 1.44 and would not fit otherwise. The accumulator stays inside
+        // [0.019, 0.734] throughout, so neither the subtraction nor the addition can leave range.
+        uint64_t acc_low = log2_inv_n_table[LOG2_TERMS - 1][1];
+        uint64_t acc_high = log2_inv_n_table[LOG2_TERMS - 1][0];
+        for (int32_t n = LOG2_TERMS - 1; n >= 1; --n) {
+            uint64_t term_low = 0, term_high = 0;
+            mul128_high(z_low, z_high, acc_low, acc_high, term_low, term_high);
+            const uint64_t q_low = log2_inv_n_table[n - 1][1], q_high = log2_inv_n_table[n - 1][0];
+            if (z_sign) {
+                const uint8_t carry = addcarryx_u64(0, q_low, term_low, &acc_low);
+                addcarryx_u64(carry, q_high, term_high, &acc_high);
+            } else {
+                const uint8_t borrow = subborrow_u64(0, q_low, term_low, &acc_low);
+                subborrow_u64(borrow, q_high, term_high, &acc_high);
+            }
+        }
+
+        // The product is formed in float128 rather than in the fraction arithmetic above. A fraction
+        // grid is absolute, and log2(1+z) is proportional to z, so holding the product on that grid
+        // would leave a small result with only as many significant bits as it has room above 2^-128.
+        // Multiplying an exact z by an A that is accurate in its own right keeps the answer accurate
+        // relative to its own size, which is what a floating point type is expected to do.
+        float128 series = from_fraction128(z_low, z_high) * from_fraction128(acc_low, acc_high);
+        series <<= 1;  // undo the halving the table carries
+        series.set_sign(z_sign);
+
+        // -log2(recip), the part of the answer the reduction removed. Zero when nothing was reduced.
+        const float128 table_value = (j != 0) ? from_fraction128(log2_value_table[j][1], log2_value_table[j][0]) : float128();
+
+        // The two fraction parts are summed before the exponent is added in. Both are below one, so
+        // that first addition rounds against a small value; adding the exponent first would round
+        // twice against a number as large as 16000 and cost the answer a bit for nothing.
+        return float128(expo) + (table_value + series);
     }
     /**
      * @brief Calculates Log base 10 of x: log10(x)
