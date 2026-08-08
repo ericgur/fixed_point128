@@ -270,6 +270,7 @@ Because `int128_t` and `uint128_t` are aliases rather than distinct classes, nei
 Foundation header providing platform-specific intrinsic wrappers and common helper functions used by the rest of the library.
 
 **Key contents:**
+- **Library version** - `FP128_VERSION_MAJOR/MINOR/PATCH/BUILD`, the packed comparable `FP128_VERSION` with its `FP128_MAKE_VERSION(major, minor, patch, build)` builder, and `FP128_VERSION_STRING`. The same values are available to C++ code as `fp128::version_major` and friends, and as `fp128::version_string`. The current version is **0.9.0.0**; the benchmark prints it and records it in its JSON report so two sets of results can be attributed to the version that produced them.
 - **Build configuration macros** - Compiler detection (`FP128_MSVC`, `FP128_CLANG`), inline control (`FP128_INLINE`, `FP128_FORCE_INLINE`), and feature flags (`FP128_CPP_STYLE_MODULO`, `FP128_USE_RECIPROCAL_FOR_DIVISION`).
 - **Intrinsic wrappers** - Portable wrappers for `lzcnt`, `popcnt`, `mulx`, `addcarryx`, and `udiv128` covering both MSVC and GCC/Clang.
 - **128-bit shift functions** - `shift_right128`, `shift_left128`, and rounding variants.

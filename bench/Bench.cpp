@@ -1178,9 +1178,9 @@ bool SelectType(const char* name, TypeSelection& selection)
 /**
  * @brief Writes every recorded measurement to @p path as JSON.
  *
- * The report holds the build metadata needed to compare two runs meaningfully - compiler, build type
- * and the timing parameters - followed by the results in execution order, each tagged with the type
- * it was measured on and the group it was printed under.
+ * The report holds the build metadata needed to compare two runs meaningfully - the library version,
+ * compiler, build type and the timing parameters - followed by the results in execution order, each
+ * tagged with the type it was measured on and the group it was printed under.
  *
  * @param path Destination file, overwritten if it exists.
  * @return true on success, false if the file could not be written.
@@ -1199,6 +1199,7 @@ bool WriteJsonReport(const std::string& path)
     }
 
     file << "{\n";
+    file << format("  \"libraryVersion\": \"{}\",\n", version_string);
     file << format("  \"compiler\": \"{}\",\n", EscapeJson(CompilerName()));
     file << format("  \"compilerTag\": \"{}\",\n", CompilerTag());
     file << format("  \"build\": \"{}\",\n", BuildType());
@@ -1227,6 +1228,7 @@ bool WriteJsonReport(const std::string& path)
  */
 void bench(const TypeSelection& types)
 {
+    printf("fixed_point128 %s\n", version_string);
     printf("Compiled with %s\n", CompilerName().c_str());
     printf("=========================\n");
     printf("Single threaded benchmark\n");

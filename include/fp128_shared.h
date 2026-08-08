@@ -49,6 +49,50 @@
 #include <type_traits>
 
 /***********************************************************************************
+ *                                  Library Version
+ ************************************************************************************/
+/** @name Library Version
+ *  @brief Version of the fixed_point128 library, as macros usable by the preprocessor.
+ *
+ *  The version is a four component number, `major.minor.patch.build`, starting at 0.9.0.0. Every
+ *  component is kept below 100 so FP128_MAKE_VERSION() can pack the four of them into a single
+ *  comparable integer. Bump the components on the usual terms: @c major for a breaking change to the
+ *  public interface, @c minor for a backwards compatible addition, @c patch for a fix that changes
+ *  neither, and @c build for a rebuild of an otherwise unchanged source tree.
+ *
+ *  These are macros rather than constants so a consumer can branch on the version at preprocessing
+ *  time, before any of this library's declarations exist:
+ *  @code
+ *  #if FP128_VERSION >= FP128_MAKE_VERSION(1, 0, 0, 0)
+ *      // use something introduced in 1.0
+ *  #endif
+ *  @endcode
+ *  fp128::version_string holds the same value as a string for code that only needs to report it.
+ *  @{
+ */
+#define FP128_VERSION_MAJOR 0  ///< Breaking changes to the public interface.
+#define FP128_VERSION_MINOR 9  ///< Backwards compatible additions.
+#define FP128_VERSION_PATCH 0  ///< Fixes that change neither.
+#define FP128_VERSION_BUILD 0  ///< Rebuild of an unchanged source tree.
+
+/// @brief Packs a four component version into one integer, so two versions compare with `<` and `>=`.
+#define FP128_MAKE_VERSION(major, minor, patch, build) ((major) * 1000000 + (minor) * 10000 + (patch) * 100 + (build))
+
+/// @brief This library's version as a single comparable integer, e.g. 90000 for 0.9.0.0.
+#define FP128_VERSION FP128_MAKE_VERSION(FP128_VERSION_MAJOR, FP128_VERSION_MINOR, FP128_VERSION_PATCH, FP128_VERSION_BUILD)
+
+// Two levels of indirection: the outer macro expands its argument before the inner one stringizes it,
+// which is what turns FP128_VERSION_MAJOR into "0" rather than into its own name.
+#define FP128_STRINGIFY_IMPL(x) #x
+#define FP128_STRINGIFY(x) FP128_STRINGIFY_IMPL(x)
+
+/// @brief This library's version as a dotted string literal, e.g. "0.9.0.0".
+#define FP128_VERSION_STRING             \
+    FP128_STRINGIFY(FP128_VERSION_MAJOR) \
+    "." FP128_STRINGIFY(FP128_VERSION_MINOR) "." FP128_STRINGIFY(FP128_VERSION_PATCH) "." FP128_STRINGIFY(FP128_VERSION_BUILD)
+/** @} */  // end Library Version
+
+/***********************************************************************************
  *                                  Build Options
  ************************************************************************************/
 // Note that under VS 2022/2026, both __clang__ and _MSC_VER are pre-defined when using the Clang toolset
@@ -696,6 +740,18 @@ namespace fp128
 /***********************************************************************************
  *                                  Constants
  ************************************************************************************/
+
+/// @name Library Version
+/// @brief The FP128_VERSION_* macros as constants, for code that reports the version rather than
+///        branching on it at preprocessing time.
+/// @{
+static constexpr int32_t version_major = FP128_VERSION_MAJOR;        ///< Breaking changes to the public interface.
+static constexpr int32_t version_minor = FP128_VERSION_MINOR;        ///< Backwards compatible additions.
+static constexpr int32_t version_patch = FP128_VERSION_PATCH;        ///< Fixes that change neither.
+static constexpr int32_t version_build = FP128_VERSION_BUILD;        ///< Rebuild of an unchanged source tree.
+static constexpr int32_t version = FP128_VERSION;                    ///< All four packed into one comparable integer.
+static constexpr const char* version_string = FP128_VERSION_STRING;  ///< Dotted form, e.g. "0.9.0.0".
+/// @}
 
 /// @name IEEE 754 Layout Constants
 /// @{
