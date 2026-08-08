@@ -21,11 +21,11 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 ************************************************************************************/
-#ifndef FP128_FIXED_POINT128_SHARED_H
-#define FP128_FIXED_POINT128_SHARED_H
+#ifndef FP128_SHARED_H
+#define FP128_SHARED_H
 
 /**
- * @file fixed_point128_shared.h
+ * @file fp128_shared.h
  * @brief Shared definitions, intrinsics, and helper functions for 128-bit fixed-point arithmetic.
  *
  * Provides compiler-specific intrinsic wrappers (MSVC and GCC/Clang), bit
@@ -1589,4 +1589,4 @@ inline constexpr int32_t log2_reduction_bits = 6;
 
 }  // namespace fp128
 
-#endif  // FP128_FIXED_POINT128_SHARED_H
+#endif  // FP128_SHARED_H

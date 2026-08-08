@@ -211,7 +211,7 @@ template <typename T> T static ReferenceMultiply(const T& a, const T& b)
 //
 // This is what lets the constexpr tests check a constant evaluated result against the runtime one.
 // The two do not run the same code: the bit counting and extended arithmetic intrinsics are not
-// constant expressions, so fixed_point128_shared.h substitutes a portable implementation of each
+// constant expressions, so fp128_shared.h substitutes a portable implementation of each
 // one while the compiler is evaluating. Only a genuinely runtime computation exercises the
 // intrinsics and shows that the substitutes agree with the hardware.
 //

@@ -163,7 +163,7 @@ default branch. That is deliberately not used here, because it pins an arbitrary
  ## Dependency Graph
 
 ```
-fixed_point128_shared.h
+fp128_shared.h
     |
     +--- int128_shared.h
     |        |
@@ -176,7 +176,7 @@ fixed_point128_shared.h
     +--- fixed_point128.h
 ```
 
-All headers depend on `fixed_point128_shared.h`. The `float128` class additionally depends on `uint128_t.h`. Do not include `fixed_point128_shared.h` or `int128_shared.h` directly; they are pulled in automatically by the other headers.
+All headers depend on `fp128_shared.h`. The `float128` class additionally depends on `uint128_t.h`. Do not include `fp128_shared.h` or `int128_shared.h` directly; they are pulled in automatically by the other headers.
 
 ---
 
@@ -265,7 +265,7 @@ Implementation shared by both 128-bit integer types. `int128_t` and `uint128_t` 
 
 Because `int128_t` and `uint128_t` are aliases rather than distinct classes, neither can be forward declared; include `int128_t.h` or `uint128_t.h` instead.
 
-### fixed_point128_shared.h
+### fp128_shared.h
 
 Foundation header providing platform-specific intrinsic wrappers and common helper functions used by the rest of the library.
 

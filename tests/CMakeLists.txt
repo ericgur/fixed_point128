@@ -3,7 +3,7 @@
 # @brief Build script for the fixed_point128 GoogleTest suite.
 #
 # The tests are deliberately built for the baseline instruction set rather than with the benchmark's
-# AVX2 flags: fixed_point128_shared.h only reaches for x86 intrinsics under MSVC and supplies portable
+# AVX2 flags: fp128_shared.h only reaches for x86 intrinsics under MSVC and supplies portable
 # implementations of all of them elsewhere, so the correctness suite should exercise the code the way
 # the widest range of consumers will compile it.
 #

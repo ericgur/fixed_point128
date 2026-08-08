@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates - or verifies - the constant tables fixed_point128::log2() reduces with.
 
-The tables live in include/fixed_point128_shared.h. They are not hand written and must not be
+The tables live in include/fp128_shared.h. They are not hand written and must not be
 hand edited: every entry depends on the others, and log2_value_table in particular is derived from
 the *rounded* reciprocal stored next to it rather than from the exact value that reciprocal
 approximates. That is what makes the argument reduction exact, and editing either table on its own
@@ -46,7 +46,7 @@ MAX_TERMS = 24                          # enough for F = 127 plus guard bits
 TWO128 = mpf(2) ** 128
 TWO127 = mpf(2) ** 127
 
-HEADER = pathlib.Path(__file__).resolve().parent.parent / "include" / "fixed_point128_shared.h"
+HEADER = pathlib.Path(__file__).resolve().parent.parent / "include" / "fp128_shared.h"
 
 
 def split(scaled):

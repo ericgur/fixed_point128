@@ -1908,7 +1908,7 @@ TEST(fixed_point128, ScalarOnTheLeftHandSideShifts)
  *
  * The runtime half earns its place. A constant evaluated call does not run the same code a runtime
  * call does: the bit counting and extended arithmetic intrinsics (mulx_u64, addcarryx_u64,
- * lzcnt64) are not constant expressions, so fixed_point128_shared.h substitutes a portable
+ * lzcnt64) are not constant expressions, so fp128_shared.h substitutes a portable
  * implementation of each one while the compiler is evaluating. Only comparing the two results
  * shows that the substitutes agree with the hardware. opaque(), declared in gtest_shared.h, is
  * what keeps the runtime half from being constant folded back into the compile time one.

@@ -1073,7 +1073,7 @@ bool SelectType(const char* name, TypeSelection& selection)
 /**
  * @brief Returns the build type this binary was compiled with.
  *
- * Uses the same condition as the library itself (fixed_point128_shared.h), so the reported build
+ * Uses the same condition as the library itself (fp128_shared.h), so the reported build
  * type cannot disagree with the one the measured code was compiled under.
  *
  * @return "debug" or "release".

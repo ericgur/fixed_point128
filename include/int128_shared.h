@@ -38,13 +38,13 @@
  *
  * @see uint128_t.h for the unsigned alias and its user-defined literal.
  * @see int128_t.h for the signed alias, its user-defined literal and abs().
- * @see fixed_point128_shared.h for supporting intrinsics and utilities.
+ * @see fp128_shared.h for supporting intrinsics and utilities.
  */
 
 #ifndef FP128_INT128_SHARED_H
 #define FP128_INT128_SHARED_H
 
-#include "fixed_point128_shared.h"
+#include "fp128_shared.h"
 
 namespace fp128
 {
@@ -93,7 +93,7 @@ class fp128_gtest;  // Google test class
  * </UL>
  *
  * The bit counting and extended arithmetic intrinsics these rest on are not constant expressions,
- * so fixed_point128_shared.h wraps each one in a constexpr function that serves a constant
+ * so fp128_shared.h wraps each one in a constexpr function that serves a constant
  * evaluated call from a portable implementation of the same operation. A runtime call still
  * reaches the bare intrinsic and generates the same code it did before.
  *

@@ -16,7 +16,7 @@ pip install mpmath
 
 ## The constant tables
 
-`log2()` reduces its argument using three tables in `include/fixed_point128_shared.h`:
+`log2()` reduces its argument using three tables in `include/fp128_shared.h`:
 `log2_recip_table`, `log2_value_table` and `log2_inv_n_table`. They are generated, not hand
 written, and **must not be hand edited**. The entries depend on each other: `log2_value_table[j]`
 holds the logarithm of the *rounded* reciprocal stored in `log2_recip_table[j]`, not of the round

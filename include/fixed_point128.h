@@ -51,7 +51,7 @@
  *
  * @tparam I Number of integer bits in [1, 64]. The fraction uses 128-I bits.
  *
- * @see fixed_point128_shared.h for supporting intrinsics and utilities.
+ * @see fp128_shared.h for supporting intrinsics and utilities.
  */
 
 #pragma once
@@ -70,7 +70,7 @@
 #ifndef FP128_FIXED_POINT128_T_H
 #define FP128_FIXED_POINT128_T_H
 
-#include "fixed_point128_shared.h"
+#include "fp128_shared.h"
 
 namespace fp128
 {
@@ -169,7 +169,7 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  * </UL>
  *
  * The bit counting and extended arithmetic intrinsics these rest on are not constant expressions,
- * so fixed_point128_shared.h wraps each one in a constexpr function that serves a constant
+ * so fp128_shared.h wraps each one in a constexpr function that serves a constant
  * evaluated call from a portable implementation of the same operation. A runtime call still
  * reaches the bare intrinsic and generates the same code it did before.
  *

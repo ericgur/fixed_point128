@@ -47,14 +47,14 @@
  * log2, log10, pow, erf, erfc, etc.).
  * All methods are inline for maximum performance.
  *
- * @see fixed_point128_shared.h for supporting intrinsics and utilities.
+ * @see fp128_shared.h for supporting intrinsics and utilities.
  */
 
 #ifndef FP128_FLOAT128_H
 #define FP128_FLOAT128_H
 
 #include <algorithm>
-#include "fixed_point128_shared.h"
+#include "fp128_shared.h"
 #include "uint128_t.h"
 
 namespace fp128
@@ -161,7 +161,7 @@ float128 double_factorial(int x) noexcept;
  * </UL>
  *
  * Two things make that possible. The bit counting and extended arithmetic intrinsics are not
- * constant expressions, so fixed_point128_shared.h wraps each one in a constexpr function that
+ * constant expressions, so fp128_shared.h wraps each one in a constexpr function that
  * serves a constant evaluated call from a portable implementation of the same operation. And the
  * fields of the high QWORD are read through the shift and mask accessors rather than the
  * _float128_bits view, because reading the inactive member of a union is not allowed during
