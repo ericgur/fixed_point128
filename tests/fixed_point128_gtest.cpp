@@ -991,8 +991,13 @@ TEST(fixed_point128, CompareInt64)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        int64_t value1 = get_int64_random();
-        int64_t value2 = get_int64_random();
+        // fixed_point128<40> holds 40 integer bits, so a full width 64 bit random is never
+        // representable: the guard below used to reject all 65536 iterations and the test ran no
+        // assertion at all. Shifting by an independent random amount bounds each operand to 2^39
+        // while keeping a spread of magnitudes, so the comparisons see both similar and wildly
+        // different operands rather than clustering just under the limit.
+        int64_t value1 = get_int64_random() >> (24 + static_cast<int32_t>(get_uint32_random() % 40));
+        int64_t value2 = get_int64_random() >> (24 + static_cast<int32_t>(get_uint32_random() % 40));
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
         if (check_overflow(value1, f1) || check_overflow(value2, f1))
@@ -1022,8 +1027,9 @@ TEST(fixed_point128, CompareUnsignedInt64)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        uint64_t value1 = get_uint64_random();
-        uint64_t value2 = get_uint64_random();
+        // bounded to 2^39 for the reason given in CompareInt64
+        uint64_t value1 = get_uint64_random() >> (24 + static_cast<int32_t>(get_uint32_random() % 40));
+        uint64_t value2 = get_uint64_random() >> (24 + static_cast<int32_t>(get_uint32_random() % 40));
         bool res = value1 > value2;
         fixed_point128<40> f1 = value1;
         if (check_overflow(value1, f1) || check_overflow(value2, f1))

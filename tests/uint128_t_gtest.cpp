@@ -432,17 +432,24 @@ TEST(uint128_t, DivideByUint128)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const uint128_t a(get_uint64_random(), get_uint64_random());
+        // One iteration in four keeps both operands inside 64 bit. That is what makes the native
+        // reference at the bottom of the loop reachable: with a full width random pair the high
+        // QWORD is set essentially always, and the check ran 0 times out of 65536.
+        const bool narrow = (get_uint32_random() & 3) == 0;
+        const uint128_t a = narrow ? uint128_t(get_uint64_random(), 0ull)
+                                   : uint128_t(get_uint64_random(), get_uint64_random());
 
         // The divisor's magnitude is spread over the whole range so that all three paths in
         // operator/= are reached: the power of two shift, the 64 bit divisor shortcut when the
         // high QWORD shifts out entirely, and the full 128 bit long division.
         // the shift counts are int32_t: an unsigned one leaves the shift operators ambiguous
         // against the builtin shifts reachable through operator uint64_t()
-        const int32_t shift = static_cast<int32_t>(get_uint32_random() % 128);
-        uint128_t b = uint128_t(get_uint64_random(), get_uint64_random()) >> shift;
+        const int32_t width = narrow ? 64 : 128;
+        const int32_t shift = static_cast<int32_t>(get_uint32_random() % static_cast<uint32_t>(width));
+        uint128_t b = (narrow ? uint128_t(get_uint64_random(), 0ull)
+                              : uint128_t(get_uint64_random(), get_uint64_random())) >> shift;
         if ((get_uint32_random() & 7) == 0)
-            b = uint128_t(1ull) << static_cast<int32_t>(get_uint32_random() % 128);  // exercise the shift path
+            b = uint128_t(1ull) << static_cast<int32_t>(get_uint32_random() % static_cast<uint32_t>(width));  // exercise the shift path
         if (b.is_zero())
             continue;
 

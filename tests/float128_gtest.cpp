@@ -129,7 +129,9 @@ TEST(float128, ConstructorFromString)
             EXPECT_LE(err, max_allowed_error) << "error: " << err << ", last digits source: " << &str[len - end_char_to_check]
                                               << "last digits result: " << &res[len - end_char_to_check];
         } catch (...) {
-            EXPECT_NO_THROW(i) << "failed at iteration " << i;
+            // EXPECT_NO_THROW(i) used to sit here, which would have passed even on this path:
+            // evaluating an integer cannot throw, so reaching the handler reported nothing.
+            ADD_FAILURE() << "unexpected exception at iteration " << i;
         }
     }
 }
@@ -506,8 +508,12 @@ TEST(float128, MultiplyByInt32)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        auto value1 = get_int32_random();
-        auto value2 = get_int32_random();
+        // A full width random pair overflows 31 bits every time, so the guard below used to reject
+        // all 65536 iterations and the test ran no assertion at all. Shifting by at least 17 bounds
+        // each operand to 2^14, which keeps every product inside the range the result is cast back
+        // to. It also keeps value1 away from INT32_MIN, whose abs() below would be undefined.
+        auto value1 = get_int32_random() >> (17 + static_cast<int32_t>(get_uint32_random() % 15));
+        auto value2 = get_int32_random() >> (17 + static_cast<int32_t>(get_uint32_random() % 15));
         // check result overflow
         if (log2(abs(value1)) + log2(abs(value2)) > 31)
             continue;
@@ -522,8 +528,9 @@ TEST(float128, MultiplyByUnsignedInt32)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        auto value1 = get_uint32_random();
-        auto value2 = get_uint32_random();
+        // bounded to 2^15 for the reason given in MultiplyByInt32
+        auto value1 = get_uint32_random() >> (17 + static_cast<int32_t>(get_uint32_random() % 15));
+        auto value2 = get_uint32_random() >> (17 + static_cast<int32_t>(get_uint32_random() % 15));
         // check result overflow
         if (log2(value1) + log2(value2) > 31)
             continue;
@@ -538,8 +545,9 @@ TEST(float128, MultiplyByInt64)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        auto value1 = get_int64_random();
-        auto value2 = get_int64_random();
+        // bounded to 2^30 for the reason given in MultiplyByInt32
+        auto value1 = get_int64_random() >> (33 + static_cast<int32_t>(get_uint32_random() % 31));
+        auto value2 = get_int64_random() >> (33 + static_cast<int32_t>(get_uint32_random() % 31));
         // check result overflow
         if (log2(abs(value1)) + log2(abs(value2)) > 63)
             continue;
@@ -554,8 +562,9 @@ TEST(float128, MultiplyByUnsignedInt64)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        auto value1 = get_uint64_random();
-        auto value2 = get_uint64_random();
+        // bounded to 2^31 for the reason given in MultiplyByInt32
+        auto value1 = get_uint64_random() >> (33 + static_cast<int32_t>(get_uint32_random() % 31));
+        auto value2 = get_uint64_random() >> (33 + static_cast<int32_t>(get_uint32_random() % 31));
         // check result overflow
         if (log2(value1) + log2(value2) > 63)
             continue;
