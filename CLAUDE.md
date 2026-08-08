@@ -1,6 +1,6 @@
 ﻿# Documentation
 - Document code using doxygen style comments.
-- Clear and precide explanations.
+- Clear and precise explanations.
 
 # Build Configuration
 

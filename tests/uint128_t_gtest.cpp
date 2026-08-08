@@ -1,9 +1,13 @@
 // remove warnings from gtest itself
+#if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 26439)
 #pragma warning(disable : 26495)
+#endif
 #include <gtest/gtest.h>
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#endif
 #include <ostream>
 #include <ctime>
 #include <cfloat>
@@ -185,10 +189,9 @@ TEST(uint128_t, AddDifferentSign)
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint64_t value1 = get_uint64_random();
-#pragma warning(push)
-#pragma warning(disable : 4146)
-        uint64_t value2 = -get_uint64_random();
-#pragma warning(pop)
+        // two's complement negation written as a subtraction from zero: same bit pattern as unary
+        // minus, without MSVC's C4146 complaint about negating an unsigned type
+        uint64_t value2 = 0ull - get_uint64_random();
         uint64_t res = value1 + value2;
         uint128_t f1 = value1;
         uint128_t f2 = value2;
@@ -291,10 +294,9 @@ TEST(uint128_t, SubtractDifferentSign)
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         uint64_t value1 = get_uint64_random();
-#pragma warning(push)
-#pragma warning(disable : 4146)
-        uint64_t value2 = -get_uint64_random();
-#pragma warning(pop)
+        // two's complement negation written as a subtraction from zero: same bit pattern as unary
+        // minus, without MSVC's C4146 complaint about negating an unsigned type
+        uint64_t value2 = 0ull - get_uint64_random();
         uint64_t res = value1 - value2;
         uint128_t f1 = value1;
         uint128_t f2 = value2;
@@ -1037,27 +1039,58 @@ TEST(uint128_t, ScalarOnTheLeftHandSide)
     EXPECT_TRUE((x + 1) == uint128_t(11ull));
     EXPECT_TRUE((x + x) == uint128_t(20ull));
     EXPECT_TRUE((x * x) == uint128_t(100ull));
-}
-// The constructors were constexpr but no operator was, so a uint128_t could be built at compile
-// time and then not used for anything. Everything that does not go through an intrinsic is now
-// usable in a constant expression.
-TEST(uint128_t, ConstexprOperators)
-{
-    constexpr uint128_t a(1ull, 2ull);
-    constexpr uint128_t b(1ull, 2ull);
-    constexpr uint128_t c(3ull, 0ull);
 
-    static_assert(a == b, "equality should be usable at compile time");
-    static_assert(a != c, "inequality should be usable at compile time");
-    static_assert(c < a, "less than should be usable at compile time");
-    static_assert(a > c, "greater than should be usable at compile time");
-    static_assert(a >= b && a <= b, "ordering should be usable at compile time");
-    static_assert(!uint128_t().is_zero() == false, "is_zero should be usable at compile time");
-    static_assert(static_cast<uint64_t>(a) == 1ull, "conversion should be usable at compile time");
-    static_assert(a.get_bit(65) == 1, "get_bit should be usable at compile time");
-    static_assert((~c).get_bit(0) == 0, "operator~ should be usable at compile time");
-    static_assert(uint128_t(-1).get_bit(127) == 1, "the integral constructor sign extends");
-    SUCCEED();
+    // The left operand is widened rather than the object being narrowed, so the result is 128 bit.
+    static_assert(std::is_same_v<decltype(1 + x), uint128_t>);
+    static_assert(std::is_same_v<decltype(1 ^ x), uint128_t>);
+}
+// The comparisons only existed with the uint128_t on the left. A scalar there had nothing but the
+// builtin comparisons to choose from, and the conversion operators of uint128_t make every one of
+// them equally good, so the call was ambiguous.
+TEST(uint128_t, ScalarOnTheLeftHandSideComparisons)
+{
+    const uint128_t x(10ull);
+    EXPECT_TRUE(10 == x);
+    EXPECT_FALSE(9 == x);
+    EXPECT_TRUE(9 != x);
+    EXPECT_FALSE(10 != x);
+    EXPECT_TRUE(9 < x);
+    EXPECT_FALSE(10 < x);
+    EXPECT_TRUE(9 <= x);
+    EXPECT_TRUE(10 <= x);
+    EXPECT_TRUE(11 > x);
+    EXPECT_FALSE(10 > x);
+    EXPECT_TRUE(11 >= x);
+    EXPECT_TRUE(10 >= x);
+
+    // A value no builtin type can hold must not compare through a narrowed conversion.
+    const uint128_t big = uint128_t(1ull) << 100;
+    EXPECT_TRUE(1 < big);
+    EXPECT_FALSE(1 > big);
+    EXPECT_TRUE(1 != big);
+
+    // the uint128_t on the left forms must still resolve
+    EXPECT_TRUE(x == 10);
+    EXPECT_TRUE(x > 9);
+    EXPECT_TRUE(x == uint128_t(10ull));
+}
+// Widening the left operand is what makes (1 << 100) produce the expected power of two. The same
+// expression on a builtin int is undefined behavior, the shift count being wider than the operand.
+TEST(uint128_t, ScalarOnTheLeftHandSideShifts)
+{
+    const uint128_t ten(10ull);
+    EXPECT_TRUE((1 << ten) == uint128_t(1024ull));
+    EXPECT_TRUE((1024 >> ten) == uint128_t(1ull));
+    EXPECT_TRUE((3 << uint128_t(2ull)) == uint128_t(12ull));
+
+    const uint128_t hundred(100ull);
+    EXPECT_TRUE((1 << hundred) == (uint128_t(1ull) << 100));
+    EXPECT_TRUE((1 << hundred) != 0ull);
+    static_assert(std::is_same_v<decltype(1 << hundred), uint128_t>);
+
+    // the uint128_t on the left forms must still resolve
+    EXPECT_TRUE((ten << 1) == uint128_t(20ull));
+    EXPECT_TRUE((ten >> 1) == uint128_t(5ull));
 }
 // The documentation claimed these return zero for a zero input, they throw.
 TEST(uint128_t, LogFunctionsRejectZero)
@@ -1170,4 +1203,156 @@ TEST(uint128_t, DivideByPowersOfTwo)
     EXPECT_TRUE((x / uint128_t(0ull, 1ull)) == (x >> 64));         // 2^64
     EXPECT_TRUE((x / uint128_t(0ull, 1ull << 36)) == (x >> 100));  // 2^100
     EXPECT_TRUE((x / uint128_t(0ull, 1ull << 63)) == uint128_t(1ull));
+}
+
+/**********************************************************************
+ * Compile time (constexpr) evaluation
+ *
+ * Each test below pairs static_asserts, which fail the build the moment one of these operations
+ * stops being usable in a constant expression, with a runtime check of the same expression built
+ * from opaque() values the optimizer cannot fold. See the matching block in
+ * fixed_point128_gtest.cpp for why the runtime half is not a restatement of the compile time one.
+ ***********************************************************************/
+TEST(uint128_t, ConstexprConstructionAndConversion)
+{
+    constexpr uint128_t zero;
+    constexpr uint128_t seven(7);
+    constexpr uint128_t copied(seven);
+    constexpr uint128_t assigned = [] { uint128_t a; a = 5; return a; }();
+    constexpr uint128_t from_bool(true);
+    constexpr uint128_t from_negative(-5);  // wraps around via 2's complement, like the builtin types
+
+    static_assert(zero.is_zero());
+    static_assert(static_cast<uint64_t>(seven) == 7ull);
+    static_assert(static_cast<uint32_t>(assigned) == 5u);
+    static_assert(static_cast<uint64_t>(from_bool) == 1ull);
+    static_assert(static_cast<uint64_t>(uint128_t(1ull, 2ull)) == 1ull);  // the high QWORD is dropped
+    static_assert(copied == seven);
+    static_assert(from_negative == uint128_t(0ull) - uint128_t(5ull));
+    static_assert(seven.is_positive() && !seven.is_negative());  // always so for the unsigned type
+
+    static_assert(seven.get_bit(0) == 1 && seven.get_bit(3) == 0);
+    static_assert(uint128_t(0ull, 1ull).get_bit(64) == 1);
+    static_assert(uint128_t(1ull, 2ull).get_bit(65) == 1);      // a bit of the high QWORD
+    static_assert((~uint128_t(3ull, 0ull)).get_bit(0) == 0);
+    static_assert(uint128_t(-1).get_bit(127) == 1);             // the integral constructor sign extends
+    static_assert(static_cast<uint64_t>(uint128_t::one()) == 1ull);
+    // constructed inside the lambda: a captureless lambda cannot odr-use a local, and passing an
+    // object to get_components() by reference is exactly that
+    constexpr uint64_t high_qword = [] {
+        uint64_t l = 0, h = 0;
+        uint128_t(0x00000000FFFFFFFFull, 0x1234ull).get_components(l, h);
+        return h;
+    }();
+    static_assert(high_qword == 0x1234ull);
+
+    EXPECT_TRUE(uint128_t(opaque(7ull)) == seven);
+    EXPECT_TRUE(uint128_t(opaque(0ull)) - uint128_t(5ull) == from_negative);
+}
+TEST(uint128_t, ConstexprShiftsBitwiseAndUnary)
+{
+    constexpr uint128_t all_ones(~0ull, ~0ull);
+
+    static_assert(static_cast<uint64_t>(uint128_t(1ull) << 3) == 8ull);
+    static_assert(static_cast<uint64_t>(uint128_t(64ull) >> 3) == 8ull);
+    static_assert((uint128_t(1ull) << 64) == uint128_t(0ull, 1ull));  // crosses the QWORD boundary
+    static_assert((uint128_t(0ull, 1ull) >> 1) == uint128_t(1ull << 63, 0ull));
+    static_assert((all_ones >> 64) == uint128_t(~0ull));
+    static_assert((uint128_t(1ull) << 128).is_zero());  // shifting the whole value out
+    static_assert((all_ones >> 128).is_zero());
+    static_assert((uint128_t(1ull) << 0) == uint128_t(1ull));  // a zero count leaves the value alone
+    constexpr uint128_t roundtrip = [] { uint128_t a(1ull); a <<= 100; a >>= 100; return a; }();
+    static_assert(static_cast<uint64_t>(roundtrip) == 1ull);
+
+    static_assert(static_cast<uint64_t>(uint128_t(12ull) & uint128_t(10ull)) == 8ull);
+    static_assert(static_cast<uint64_t>(uint128_t(12ull) | uint128_t(3ull)) == 15ull);
+    static_assert(static_cast<uint64_t>(uint128_t(12ull) ^ uint128_t(10ull)) == 6ull);
+    static_assert(static_cast<uint64_t>(12ull & uint128_t(10ull)) == 8ull);  // scalar on the left
+    static_assert(~uint128_t(0ull) == all_ones);
+    static_assert(!uint128_t(0ull) && static_cast<bool>(uint128_t(1ull)));
+    static_assert(+uint128_t(5ull) == uint128_t(5ull));
+
+    EXPECT_TRUE(((uint128_t(opaque(1ull)) << 100) >> 100) == uint128_t(1ull));
+    EXPECT_TRUE((uint128_t(0ull, opaque(1ull)) >> 1) == uint128_t(1ull << 63, 0ull));
+    EXPECT_TRUE((uint128_t(opaque(~0ull), opaque(~0ull)) >> 64) == uint128_t(~0ull));
+}
+TEST(uint128_t, ConstexprArithmetic)
+{
+    constexpr uint128_t all_ones(~0ull, ~0ull);
+
+    static_assert(static_cast<uint64_t>(uint128_t(3ull) + uint128_t(4ull)) == 7ull);
+    static_assert(uint128_t(~0ull) + uint128_t(1ull) == uint128_t(0ull, 1ull));  // carry into high
+    static_assert(uint128_t(0ull) - uint128_t(1ull) == all_ones);                // underflow wraps
+    static_assert(all_ones + uint128_t(1ull) == uint128_t(0ull));                // overflow wraps
+    static_assert(static_cast<uint64_t>(uint128_t(3ull) + 4) == 7ull);  // generic right hand side
+    static_assert(static_cast<uint64_t>(4 + uint128_t(3ull)) == 7ull);  // scalar on the left
+    constexpr uint128_t summed = [] { uint128_t a; for (int i = 1; i <= 10; ++i) a += i; return a; }();
+    static_assert(static_cast<uint64_t>(summed) == 55ull);
+
+    static_assert(static_cast<uint64_t>(uint128_t(6ull) * uint128_t(7ull)) == 42ull);
+    static_assert(uint128_t(1ull << 32) * uint128_t(1ull << 32) == uint128_t(0ull, 1ull));
+    static_assert(uint128_t(~0ull) * uint128_t(~0ull) == uint128_t(1ull, 0xFFFFFFFFFFFFFFFEull));
+    static_assert(static_cast<uint64_t>(uint128_t(6ull) * 7) == 42ull);  // generic right hand side
+    static_assert(static_cast<uint64_t>(7 * uint128_t(6ull)) == 42ull);  // scalar on the left
+    // sqr is documented to be bit identical to x * x
+    static_assert(sqr(uint128_t(~0ull)) == uint128_t(~0ull) * uint128_t(~0ull));
+    constexpr uint128_t squared = [] { uint128_t a(5ull); a.square(); return a; }();
+    static_assert(static_cast<uint64_t>(squared) == 25ull);
+
+    constexpr uint128_t stepped = [] { uint128_t a(5ull); ++a; a++; --a; return a; }();
+    static_assert(static_cast<uint64_t>(stepped) == 6ull);
+    constexpr uint128_t decremented_zero = [] { uint128_t a(0ull); --a; return a; }();
+    static_assert(decremented_zero == all_ones);
+
+    static_assert(uint128_t(1ull) < uint128_t(2ull) && uint128_t(2ull) > uint128_t(1ull));
+    static_assert(uint128_t(0ull, 1ull) > uint128_t(~0ull));  // compares across the QWORD boundary
+    static_assert(all_ones > uint128_t(0ull));                // the all ones pattern is the largest
+    static_assert(uint128_t(1ull) <= 1 && uint128_t(1ull) >= 1);
+    static_assert(uint128_t(1ull) == 1 && uint128_t(1ull) != 2);
+
+    EXPECT_TRUE(uint128_t(opaque(6ull)) * uint128_t(opaque(7ull)) == uint128_t(42ull));
+    EXPECT_TRUE(uint128_t(opaque(~0ull)) * uint128_t(opaque(~0ull)) == uint128_t(1ull, 0xFFFFFFFFFFFFFFFEull));
+    EXPECT_TRUE(uint128_t(opaque(~0ull)) + uint128_t(1ull) == uint128_t(0ull, 1ull));
+    EXPECT_TRUE(sqr(uint128_t(opaque(~0ull))) == sqr(uint128_t(~0ull)));
+}
+TEST(uint128_t, ConstexprMathFunctions)
+{
+    static_assert(lzcnt128(uint128_t(1ull)) == 127);
+    static_assert(lzcnt128(uint128_t(0ull, 1ull)) == 63);
+    static_assert(lzcnt128(uint128_t(~0ull, ~0ull)) == 0);
+    static_assert(log2(uint128_t(8ull)) == 3);
+    static_assert(log2(uint128_t(0ull, 1ull)) == 64);  // 2^64
+    static_assert(log2(uint128_t(~0ull, ~0ull)) == 127);
+    static_assert(pow(uint128_t(2ull), 0u) == uint128_t(1ull));
+    static_assert(pow(uint128_t(0ull), 0u) == uint128_t(1ull));  // matches pow(double, double)
+    static_assert(pow(uint128_t(2ull), 10u) == uint128_t(1024ull));
+    static_assert(pow(uint128_t(2ull), 100u) == uint128_t(0ull, 1ull << 36));
+    // 10^38, the largest power of ten that fits. Spelled as its two QWORDs because the string
+    // constructor allocates and is therefore not available in a constant expression.
+    static_assert(pow(uint128_t(10ull), 38u) == uint128_t(0x098A224000000000ull, 0x4B3B4CA85A86C47Aull));
+
+    EXPECT_TRUE(lzcnt128(uint128_t(0ull, opaque(1ull))) == 63);
+    EXPECT_TRUE(log2(uint128_t(0ull, opaque(1ull))) == 64);
+    EXPECT_TRUE(pow(uint128_t(opaque(2ull)), 100u) == pow(uint128_t(2ull), 100u));
+}
+
+// The double and float conversions used to be the one thing that could not happen at compile time:
+// they read the inactive member of a union, which constant evaluation rejects. Now that Double and
+// Float convert with std::bit_cast, a floating point literal crosses the boundary either way.
+TEST(uint128_t, ConstexprFloatingPointConversion)
+{
+    constexpr uint128_t from_double = 42.0;
+    constexpr uint128_t big = 1e18;
+
+    static_assert(static_cast<uint64_t>(from_double) == 42ull);
+    static_assert(static_cast<double>(from_double) == 42.0);
+    static_assert(static_cast<float>(from_double) == 42.0f);
+    static_assert(static_cast<double>(big) == 1e18);
+    static_assert(uint128_t(0.0).is_zero());
+    static_assert(uint128_t(3.99) == uint128_t(3ull));  // truncates towards zero
+    // a negative double wraps around via 2's complement, like the integer constructors
+    static_assert(uint128_t(-5.0) == uint128_t(0ull) - uint128_t(5ull));
+
+    EXPECT_TRUE(uint128_t(static_cast<double>(opaque(42ull))) == from_double);
+    EXPECT_DOUBLE_EQ(static_cast<double>(uint128_t(opaque(42ull))), 42.0);
 }

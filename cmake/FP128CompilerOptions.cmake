@@ -60,7 +60,7 @@ endfunction()
 ##
 # @brief Opts a target into the AVX2 instruction set family on x86 hosts.
 #
-# The headers never require these instructions - fixed_point128_shared.h provides a portable fallback
+# The headers never require these instructions - fp128_shared.h provides a portable fallback
 # for every intrinsic it uses - so this is a performance opt-in only, and is applied to the benchmark
 # rather than to the unit tests. Non-x86 targets (notably Apple Silicon) are skipped: the flags do not
 # exist there.

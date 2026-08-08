@@ -37,7 +37,7 @@
  * All methods are inline for maximum performance.
  *
  * @see int128_shared.h for the class template both 128 bit integer types alias.
- * @see fixed_point128_shared.h for supporting intrinsics and utilities.
+ * @see fp128_shared.h for supporting intrinsics and utilities.
  */
 
 #ifndef FP128_UINT128_T_H

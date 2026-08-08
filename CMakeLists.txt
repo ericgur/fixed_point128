@@ -9,9 +9,18 @@
 # Supported toolchains: MSVC, clang-cl, Clang and GCC, on Windows, macOS and Linux. Use the presets in
 # CMakePresets.json rather than invoking cmake by hand:
 #
-#     cmake --preset msvc            # or clang-cl / clang / gcc
-#     cmake --build --preset msvc-debug
-#     ctest --preset msvc-debug
+#     cmake --preset msvc                  # configure; or clang-cl / clang / gcc
+#     cmake --build --preset msvc-release  # build; or msvc-debug
+#     ctest --preset msvc-release          # test;  or msvc-debug
+#
+# Every configure preset uses a multi-config generator (Visual Studio, or Ninja Multi-Config), so the
+# configure step is configuration agnostic - there is no `msvc-debug` *configure* preset, and asking for
+# one is an error. Debug versus Release is chosen at build and test time, which is why `-debug` and
+# `-release` only ever appear on `cmake --build --preset` and `ctest --preset`.
+#
+# For the same reason, building the directory directly instead of through a build preset needs an
+# explicit configuration: bare `cmake --build out/build/msvc` silently builds Debug, the first entry in
+# CMAKE_CONFIGURATION_TYPES. Pass `--config Release` if you go that route.
 #
 # The unit tests need the GoogleTest submodule:
 #
@@ -38,6 +47,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(FP128_BUILD_BENCH "Build the fixed_point128 benchmark" ${PROJECT_IS_TOP_LEVEL})
 option(FP128_BUILD_TESTS "Build the fixed_point128 unit tests" ${PROJECT_IS_TOP_LEVEL})
+option(FP128_BUILD_TOOLS "Build the fixed_point128 maintenance tools (see tools/README.md)" OFF)
 
 ##
 # The library target.
@@ -63,4 +73,14 @@ if(FP128_BUILD_TESTS)
     enable_testing()
     add_subdirectory(external)
     add_subdirectory(tests)
+endif()
+
+##
+# The tools are added unconditionally so the target exists and can be built on demand, but they are
+# excluded from the default build unless FP128_BUILD_TOOLS is on. They are run by hand when log2()
+# changes, and there is no reason to pay for them on an ordinary build.
+##
+add_subdirectory(tools EXCLUDE_FROM_ALL)
+if(FP128_BUILD_TOOLS)
+    set_target_properties(log2_ulp_dump PROPERTIES EXCLUDE_FROM_ALL OFF)
 endif()

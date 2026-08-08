@@ -36,6 +36,7 @@
 include/     the library - header only, this is all a consumer needs
 bench/       benchmark program
 tests/       GoogleTest suite
+tools/       maintenance tools for log2: table generator and accuracy harness
 external/    third party dependencies (GoogleTest, as a git submodule)
 cmake/       CMake helper modules
 msvc/        Visual Studio project files (the solution lives at the repository root)
@@ -75,9 +76,19 @@ Requires CMake 3.21 or newer (3.25 for the presets below), and Ninja for the `cl
 Configure once per toolchain, then build and test:
 
 ```sh
-cmake --preset msvc                 # or: clang-cl, clang, gcc
-cmake --build --preset msvc-debug   # ...-debug or ...-release
-ctest --preset msvc-debug -j
+cmake --preset msvc                   # configure; or: clang-cl, clang, gcc
+cmake --build --preset msvc-release   # build; or: msvc-debug
+ctest --preset msvc-release -j        # test;  or: msvc-debug
+```
+
+Every configure preset uses a multi-config generator, so the configure step is configuration agnostic:
+there is no `msvc-debug` *configure* preset and `cmake --preset msvc-debug` is an error. Debug versus
+Release is selected at build and test time, which is why `-debug` and `-release` appear only on
+`cmake --build --preset` and `ctest --preset`. Building the directory directly rather than through a
+build preset needs an explicit `--config`, otherwise CMake defaults to Debug:
+
+```sh
+cmake --build out/build/msvc --config Release
 ```
 
 | Preset | Toolchain | Platform |
@@ -106,11 +117,11 @@ Open `fixed_point128.slnx` in Visual Studio 2019 or newer. The solution holds th
 
 | Project | Output |
 | --- | --- |
-| `fixed_point128` | the benchmark executable |
+| `bench` | the benchmark executable |
 | `fixed_point128_tests` | the GoogleTest suite |
 | `googletest` | GoogleTest built as a static library from the submodule |
 
-Four configurations are available - `Debug`, `Release`, and `Debug Clang` / `Release Clang` for the
+Four configurations are available - `Debug`, `Release`, and `Debug_clang` / `Release_clang` for the
 Clang toolset - all for `x64`. Binaries are written to `bin/`.
 
 #### Running and debugging the tests
@@ -128,7 +139,7 @@ Set **fixed_point128_tests** as the startup project and press F5. The project re
   for example `--gtest_filter=float128.Add* --gtest_break_on_failure`. The latter drops into the
   debugger at the first failing assertion. These are stored in the untracked `.vcxproj.user` file.
 
-Switching the configuration to *Debug Clang* gives the same experience against the Clang-built binaries.
+Switching the configuration to *Debug_clang* gives the same experience against the Clang-built binaries.
 
 ## Updating GoogleTest
 
@@ -152,7 +163,7 @@ default branch. That is deliberately not used here, because it pins an arbitrary
  ## Dependency Graph
 
 ```
-fixed_point128_shared.h
+fp128_shared.h
     |
     +--- int128_shared.h
     |        |
@@ -165,7 +176,7 @@ fixed_point128_shared.h
     +--- fixed_point128.h
 ```
 
-All headers depend on `fixed_point128_shared.h`. The `float128` class additionally depends on `uint128_t.h`. Do not include `fixed_point128_shared.h` or `int128_shared.h` directly; they are pulled in automatically by the other headers.
+All headers depend on `fp128_shared.h`. The `float128` class additionally depends on `uint128_t.h`. Do not include `fp128_shared.h` or `int128_shared.h` directly; they are pulled in automatically by the other headers.
 
 ---
 
@@ -180,6 +191,7 @@ Template class `fixed_point128<I>` where **I** is the number of integer bits (ra
 **Features:**
 - Construction from integer types, `double`, C strings (accurate to 37 decimal digits), and raw components.
 - Full arithmetic operators including optimized 64-bit multiply path.
+- A builtin scalar may appear on either side of any binary operator. The scalar is widened rather than the object narrowed, so the result is `fixed_point128<I>` and `1 - f` keeps the fraction of `f`.
 - Cross-template assignment and conversion between different `I` values.
 - Comprehensive math library:
   - **Basic:** `fabs`, `floor`, `ceil`, `trunc`, `round`, `copysign`, `fmod`, `modf`, `fdim`, `fmin`, `fmax`.
@@ -201,7 +213,7 @@ IEEE 754-2008 binary128 (quadruple-precision) floating-point type, aligned to 16
 - Full IEEE 754 special-value handling: NaN propagation, infinity arithmetic, subnormals.
 - Classification queries: `is_zero`, `is_finite`, `is_normal`, `is_subnormal`, `is_nan`, `is_signaling`, `is_inf`, `is_special`, `is_int`, `is_negative`, `is_positive`, `is_exponent_of_2`.
 - Construction from `float`, `double`, integer types, and C strings (including scientific notation and special values).
-- Arithmetic operators: `+`, `-`, `*`, `/`, `<<`, `>>`.
+- Arithmetic operators: `+`, `-`, `*`, `/`, `<<`, `>>`. A builtin scalar may appear on either side, and the result is a `float128` either way.
 - Comprehensive math library (50+ functions):
   - **Basic:** `fabs`, `floor`, `ceil`, `trunc`, `round`, `copysign`, `fmod`, `modf`, `fdim`, `fmin`, `fmax`.
   - **Power / Root:** `sqr`, `sqrt`, `cbrt`, `pow`, `hypot`.
@@ -224,6 +236,7 @@ Signed 128-bit integer stored in two's complement representation, aligned to 16 
 - Construction from integer types, `double`, C strings, `std::string`, and raw `low`/`high` components.
 - Full arithmetic operators: `+`, `-`, `*`, `/`, `%`, `<<`, `>>`, `&`, `|`, `^`, and their assignment variants.
 - Comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`.
+- A builtin scalar may appear on either side of any of the above. The scalar is widened, so the result is 128 bit and the comparisons stay exact for values no builtin type can hold. This also makes `1 << n` produce the expected power of two where a builtin shift that wide would be undefined behavior.
 - Math functions: `abs`, `sqrt`, `log`, `log2`, `log10`, `pow`.
 - Conversions to `int64_t`, `uint64_t`, `float`, `double`, `long double`, and strings.
 - User-defined literal: `_int128` (e.g. `12345_int128`).
@@ -246,23 +259,36 @@ Implementation shared by both 128-bit integer types. `int128_t` and `uint128_t` 
 **Key contents:**
 - **`int128_base<IsSigned>`** - 16-byte aligned class template holding `uint64_t low` + `uint64_t high`. `int128_t` is `int128_base<true>`, `uint128_t` is `int128_base<false>`. Values are stored in two's complement, so the bit patterns of the shared operations match exactly between the signed and unsigned types.
 - **Constructors** - default, copy, move, `double`, any builtin integral type, and C strings (decimal or hexadecimal with an optional sign).
-- **Operator suite** - arithmetic, bitwise, shift and comparison operators, each with a template overload accepting any type convertible to `int128_base`.
+- **Operator suite** - arithmetic, bitwise, shift and comparison operators, each with a template overload accepting any type convertible to `int128_base`, plus a mirror overload constrained to `std::is_arithmetic_v` for a builtin scalar on the left. The constraint is what keeps the two sets from being an equally good match for each other.
 - **Free functions** - `abs`, `sqr`, `sqrt`, `log`, `log2`, `log10`, `pow`, `lzcnt128`.
 - **Conversions** - `operator double`, `operator float`, `operator std::string`.
 
 Because `int128_t` and `uint128_t` are aliases rather than distinct classes, neither can be forward declared; include `int128_t.h` or `uint128_t.h` instead.
 
-### fixed_point128_shared.h
+### fp128_shared.h
 
 Foundation header providing platform-specific intrinsic wrappers and common helper functions used by the rest of the library.
 
 **Key contents:**
+- **Library version** - `FP128_VERSION_MAJOR/MINOR/PATCH/BUILD`, the packed comparable `FP128_VERSION` with its `FP128_MAKE_VERSION(major, minor, patch, build)` builder, and `FP128_VERSION_STRING`. The same values are available to C++ code as `fp128::version_major` and friends, and as `fp128::version_string`. The current version is **0.9.0.0**; the benchmark prints it and records it in its JSON report so two sets of results can be attributed to the version that produced them.
 - **Build configuration macros** - Compiler detection (`FP128_MSVC`, `FP128_CLANG`), inline control (`FP128_INLINE`, `FP128_FORCE_INLINE`), and feature flags (`FP128_CPP_STYLE_MODULO`, `FP128_USE_RECIPROCAL_FOR_DIVISION`).
 - **Intrinsic wrappers** - Portable wrappers for `lzcnt`, `popcnt`, `mulx`, `addcarryx`, and `udiv128` covering both MSVC and GCC/Clang.
 - **128-bit shift functions** - `shift_right128`, `shift_left128`, and rounding variants.
 - **Multi-word division** - `div_32bit` and `div_64bit`, derived from *Hacker's Delight* by Henry S. Warren Jr.
 - **Bit manipulation** - `lzcnt128`, `popcnt128`, `log2`, and `twos_complement128`.
 - **IEEE 754 unions** - `Double` and `Float` structs for accessing bit fields of native floating-point values.
+
+**Overridable macros:** two of the build configuration macros are meant to be set from the build, either on the command line or by defining them before the first include of a library header.
+
+| Macro | Default | Effect |
+| --- | --- | --- |
+| `FP128_DISABLE_INLINE` | `0` | Set it to `1` to turn every `FP128_INLINE` and `FP128_FORCE_INLINE` into `noinline`, so that a profile attributes time to the function it was actually spent in. |
+| `FP128_USE_RECIPROCAL_FOR_DIVISION` | `1` | Selects how `fixed_point128` divides by a value that is neither a power of two nor an integer: `a * reciprocal(b)` when non-zero, long division when zero. The reciprocal is 1.4x-1.8x faster and up to 1.7 ulp less accurate. Only `fixed_point128` reads it - for `float128` the reciprocal measures both slower and less accurate, and the integer types have no reciprocal to multiply by. The comment on the macro carries the measurements. |
+
+```sh
+cl  /DFP128_USE_RECIPROCAL_FOR_DIVISION=0 ...   # MSVC, clang-cl
+c++ -DFP128_USE_RECIPROCAL_FOR_DIVISION=0 ...   # Clang, GCC
+```
 
 ## Platform Support
 

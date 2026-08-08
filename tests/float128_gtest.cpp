@@ -1,9 +1,13 @@
 // remove warnings from gtest itself
+#if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 26439)
 #pragma warning(disable : 26495)
+#endif
 #include <gtest/gtest.h>
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#endif
 #include <ostream>
 #include <ctime>
 #include "gtest_shared.h"
@@ -1789,4 +1793,234 @@ TEST(float128, RoundTripAccuracy)
     // measured at 69% when this was written, well above the 58% the old code managed. The bound
     // is deliberately loose: it guards against a regression, it is not a precision promise.
     EXPECT_GT(exact * 100 / total, 60) << exact << " of " << total << " round tripped exactly";
+}
+
+// A float128 shift scales by a power of two. With a scalar on the left the left operand is widened,
+// so the result is a float128 rather than the builtin type of the scalar. The count is the right
+// operand converted to int32_t, which for float128 rounds to nearest.
+TEST(float128, ScalarOnTheLeftHandSideShifts)
+{
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 << float128(10)), 1024.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(1024 >> float128(10)), 1.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(3 << float128(2)), 12.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(1 >> float128(2)), 0.25);
+    EXPECT_DOUBLE_EQ(static_cast<double>(-1 << float128(3)), -8.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(2.5 << float128(2)), 10.0);
+
+    // A fractional shift count goes through operator int32_t, which rounds to nearest here rather
+    // than truncating, so 3.75 shifts by 4. The same overload picked with the float128 on the left
+    // has to agree, both reaching the count the same way.
+    EXPECT_TRUE((1 << float128(3.75)) == (1 << float128(4)));
+    EXPECT_TRUE((1 << float128(3.25)) == (1 << float128(3)));
+    EXPECT_TRUE((1 << float128(3.75)) == (float128(1) << float128(3.75)));
+
+    static_assert(std::is_same_v<decltype(1 << float128(3)), float128>);
+
+    // the float128 on the left forms must still resolve
+    EXPECT_TRUE((float128(4) << 1) == float128(8));
+    EXPECT_TRUE((float128(4) >> 1) == float128(2));
+
+    // the arithmetic scalar on the left forms that already existed must still resolve
+    EXPECT_TRUE((1 + float128(2)) == float128(3));
+    EXPECT_TRUE((1 - float128(2)) == float128(-1));
+    static_assert(std::is_same_v<decltype(1 + float128(2)), float128>);
+}
+
+/**********************************************************************
+ * Compile time (constexpr) evaluation
+ *
+ * Each test below pairs static_asserts, which fail the build the moment one of these operations
+ * stops being usable in a constant expression, with a runtime check of the same expression built
+ * from opaque() values the optimizer cannot fold. See the matching block in
+ * fixed_point128_gtest.cpp for why the runtime half is not a restatement of the compile time one.
+ *
+ * float128 needs one thing beyond the shared intrinsic wrappers: the fields of the high QWORD are
+ * read through shift and mask accessors rather than the _float128_bits view, because reading the
+ * inactive member of a union is not allowed while the compiler is evaluating.
+ ***********************************************************************/
+TEST(float128, ConstexprConstructionAndConversion)
+{
+    constexpr float128 zero;
+    constexpr float128 one = float128::one();
+    constexpr float128 half = float128::half();
+    constexpr float128 from_int(42);
+    constexpr float128 from_neg(-42);
+    constexpr float128 copied(from_int);
+    constexpr float128 assigned = [] { float128 a; a = float128::one(); return a; }();
+
+    static_assert(zero.is_zero());
+    static_assert(static_cast<int32_t>(from_int) == 42);
+    static_assert(static_cast<int64_t>(from_neg) == -42);
+    static_assert(static_cast<uint64_t>(from_int) == 42ull);
+    static_assert(static_cast<uint32_t>(from_int) == 42u);
+    static_assert(copied == from_int && assigned == one);
+    static_assert(from_int.is_positive() && from_neg.is_negative());
+    static_assert(from_int.is_normal() && from_int.is_finite() && !from_int.is_special());
+    static_assert(from_int.is_int() && !half.is_int());
+    static_assert(one.get_exponent() == 0 && half.get_exponent() == -1);
+    static_assert(one.is_exponent_of_2() && !float128(3).is_exponent_of_2());
+    static_assert(one.get_bit(0) == 0);          // 1.0 stores a zero fraction, the unity bit is implicit
+    static_assert(one.get_bit(127) == 0);        // bit 127 is the sign
+    static_assert((-one).get_bit(127) == 1);
+
+    // The most negative integers, whose magnitude has no positive counterpart. The integral
+    // constructor used to reach these by negating the signed value, which is undefined.
+    static_assert(float128(INT64_MIN) == -(float128::one() << 63));
+    static_assert(float128(INT32_MIN) == -(float128::one() << 31));
+    static_assert(static_cast<int64_t>(float128(INT64_MIN)) == INT64_MIN);
+    static_assert(float128(INT64_MIN) < float128(INT64_MIN + 1));
+
+    EXPECT_TRUE(float128(opaque(42)) == from_int);
+    EXPECT_TRUE(float128(static_cast<int64_t>(opaque(-1)) * (INT64_MAX / 2 + 1) * 2) == float128(INT64_MIN));
+}
+TEST(float128, ConstexprSpecialValues)
+{
+    constexpr float128 one = float128::one();
+
+    static_assert(float128::inf().is_inf() && float128::inf().is_special());
+    static_assert(!float128::inf().is_finite() && !float128::inf().is_normal());
+    static_assert(float128::nan().is_nan() && float128::nan().is_special());
+    static_assert(isinf(float128::inf()) && isnan(float128::nan()));
+    static_assert(!isfinite(float128::inf()) && isfinite(one));
+    static_assert((-float128::inf()).is_negative() && (-float128::inf()).is_inf());
+    static_assert(float128::nan() != float128::nan());  // a NaN compares unequal to everything
+    static_assert(float128().is_zero() && (-float128()).is_zero());
+    static_assert(float128() == -float128());  // the two zeros compare equal despite differing bits
+
+    // infinity arithmetic follows IEEE 754
+    static_assert((float128::inf() + one).is_inf());
+    static_assert((float128::inf() - float128::inf()).is_nan());  // the invalid operation
+    static_assert((float128::nan() + one).is_nan());
+
+    // nextUp and nextDown walk one representable value at a time
+    static_assert(float128::nextUp(one) > one);
+    static_assert(float128::nextDown(one) < one);
+    static_assert(float128::nextDown(float128::nextUp(one)) == one);
+
+    EXPECT_TRUE(isnan(float128::nan() + float128(opaque(1))));
+    EXPECT_TRUE(float128::nextUp(float128(opaque(1))) == float128::nextUp(one));
+}
+TEST(float128, ConstexprArithmetic)
+{
+    constexpr float128 one = float128::one();
+    constexpr float128 half = float128::half();
+
+    static_assert(one + one == float128(2));
+    static_assert(float128(10) - float128(3) == float128(7));
+    static_assert(half + half == one);
+    static_assert(one - one == float128());
+    static_assert(float128(6) * float128(7) == float128(42));
+    static_assert(float128(-6) * float128(7) == float128(-42));
+    static_assert(half * float128(8) == float128(4));
+    static_assert(sqr(float128(-9)) == float128(81));
+    static_assert(sqr(half) == half * half);  // sqr is bit identical to x * x
+    constexpr float128 squared = [] { float128 a(5); a.square(); return a; }();
+    static_assert(squared == float128(25));
+    constexpr float128 summed = [] { float128 a; for (int i = 1; i <= 10; ++i) a += float128(i); return a; }();
+    static_assert(summed == float128(55));
+
+    // the scalar may sit on either side
+    static_assert(float128(3) + 4 == float128(7));
+    static_assert(4 + float128(3) == float128(7));
+    static_assert(10 - float128(3) == float128(7));
+    static_assert(7 * float128(6) == float128(42));
+
+    // the shifts scale by a power of two
+    static_assert((one << 3) == float128(8));
+    static_assert((float128(8) >> 3) == one);
+    static_assert((one >> 1) == half);
+    constexpr float128 shifted = [] { float128 a(16); a >>= 2; a <<= 1; return a; }();
+    static_assert(shifted == float128(8));
+
+    static_assert(-one == float128(-1) && +one == one);
+    static_assert(!float128() && static_cast<bool>(one));
+    static_assert(float128(1) < float128(2) && float128(2) > float128(1));
+    static_assert(float128(-2) < float128(-1) && float128(-1) < float128(1));
+    static_assert(float128(1) <= 1 && float128(1) >= 1 && float128(1) == 1 && float128(1) != 2);
+
+    EXPECT_TRUE(float128(opaque(6)) * float128(opaque(7)) == float128(42));
+    EXPECT_TRUE(float128(opaque(10)) - float128(opaque(3)) == float128(7));
+    EXPECT_TRUE(opaque(4) + float128(3) == float128(7));
+    EXPECT_TRUE(sqr(float128(opaque(-9))) == float128(81));
+    // the loop below runs the full add path, exponent alignment included
+    EXPECT_TRUE(summed == [] { float128 a; for (int i = 1; i <= 10; ++i) a += float128(opaque(i)); return a; }());
+}
+TEST(float128, ConstexprMathFunctions)
+{
+    constexpr float128 half = float128::half();
+    constexpr float128 two_and_a_half = float128(5) >> 1;
+
+    static_assert(fabs(float128(-5)) == float128(5));
+    static_assert(floor(two_and_a_half) == float128(2));
+    static_assert(floor(-two_and_a_half) == float128(-3));
+    static_assert(ceil(two_and_a_half) == float128(3));
+    static_assert(trunc(-two_and_a_half) == float128(-2));
+    static_assert(round(two_and_a_half) == float128(3));  // ties round away from zero
+    static_assert(round(-two_and_a_half) == float128(-3));
+    static_assert(llround(two_and_a_half) == 3);
+    static_assert(lround(-two_and_a_half) == -3);
+    static_assert(copysign(float128(5), float128(-1)).is_negative());
+    static_assert(fmin(float128(1), float128(2)) == float128(1));
+    static_assert(fmax(float128(1), float128(2)) == float128(2));
+    static_assert(fdim(float128(5), float128(3)) == float128(2));
+    static_assert(fdim(float128(3), float128(5)).is_zero());
+    static_assert(ilogb(float128(8)) == 3);
+    static_assert(fma(float128(6), float128(7), float128(1)) == float128(43));
+    static_assert(ldexp(float128(3), 4) == float128(48));
+    static_assert(ldexp(float128(48), -4) == float128(3));
+
+    // modf and frexp report through a pointer, so they run inside a lambda
+    constexpr float128 modf_frac = [] { float128 ip; return modf(float128(5) >> 1, &ip); }();
+    constexpr float128 modf_int = [] { float128 ip; (void)modf(float128(5) >> 1, &ip); return ip; }();
+    static_assert(modf_frac == half && modf_int == float128(2));
+    constexpr int frexp_expo = [] { int e = 0; (void)frexp(float128(8), &e); return e; }();
+    constexpr float128 frexp_mant = [] { int e = 0; return frexp(float128(8), &e); }();
+    static_assert(frexp_expo == 4 && frexp_mant == half);
+
+    static_assert(float128::exp10(0) == float128::one());
+    static_assert(float128::exp10(3) == float128(1000));
+    static_assert(float128::exp10(-1) == float128::tenth());
+
+    EXPECT_TRUE(round(-(float128(opaque(5)) >> 1)) == float128(-3));
+    EXPECT_TRUE(floor(-(float128(opaque(5)) >> 1)) == float128(-3));
+    EXPECT_TRUE(ilogb(float128(opaque(8))) == 3);
+    EXPECT_TRUE(float128::exp10(opaque(3)) == float128::exp10(3));
+}
+
+// The double and float conversions used to be the one thing that could not happen at compile time:
+// they read the inactive member of a union, which constant evaluation rejects. Now that Double and
+// Float convert with std::bit_cast, a floating point literal crosses the boundary either way. The
+// float branch of the template constructor also had to stop using placement new, which is not
+// allowed in a constant expression until C++26.
+TEST(float128, ConstexprFloatingPointConversion)
+{
+    constexpr float128 from_double = 3.25;
+    constexpr float128 from_float = 2.5f;
+    constexpr float128 negative = -2.5;
+
+    static_assert(static_cast<double>(from_double) == 3.25);
+    static_assert(static_cast<float>(from_double) == 3.25f);
+    static_assert(static_cast<long double>(from_double) == 3.25L);
+    static_assert(from_float == float128(2.5));
+    static_assert(static_cast<double>(negative) == -2.5);
+    static_assert(float128(0.5) == float128::half());
+    static_assert(float128(1.0) == float128::one());
+    static_assert(float128(0.0).is_zero() && float128(-0.0).is_zero());
+    static_assert(from_double + negative == float128(0.75));
+
+    // the whole double range round trips, including the extremes
+    static_assert(static_cast<double>(float128(1e300)) == 1e300);
+    static_assert(static_cast<double>(float128(-1e-300)) == -1e-300);
+    constexpr double tenth = static_cast<double>(float128(0.1));
+    static_assert(tenth == 0.1);
+
+    // the special values reach a double as HUGE_VAL and NAN
+    static_assert(static_cast<double>(float128::inf()) > 1e308);
+    static_assert(static_cast<double>(-float128::inf()) < -1e308);
+    constexpr double quiet = static_cast<double>(float128::nan());
+    static_assert(quiet != quiet);  // only a NaN compares unequal to itself
+
+    EXPECT_TRUE(float128(static_cast<double>(opaque(13)) / 4.0) == from_double);
+    EXPECT_DOUBLE_EQ(static_cast<double>(float128(opaque(1)) / 4), 0.25);
+    EXPECT_TRUE(float128(0.1) == float128(tenth));
 }
