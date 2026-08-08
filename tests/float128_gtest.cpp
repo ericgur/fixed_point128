@@ -10,6 +10,8 @@
 #endif
 #include <ostream>
 #include <ctime>
+#include <cfloat>
+#include <format>
 #include "gtest_shared.h"
 
 /**********************************************************************
@@ -83,8 +85,6 @@ TEST(float128, ConstructorFromString)
     char str2[128];
     srand(RANDOM_SEED);
     int j = 0;
-    constexpr auto end_char_to_check = 9;
-    constexpr auto max_allowed_error = 1;
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         try {
             // construct random number string
@@ -116,18 +116,23 @@ TEST(float128, ConstructorFromString)
             }
             str[j] = '\0';
             strcpy(str2, str);
-            float128 f = str;
-            char* res = static_cast<char*>(f);
-            size_t len = std::min(strlen(res), strlen(str));
-            // clip both string based on the shortest one.
-            str[len] = '\0';
-            res[len] = '\0';
-            int64_t orig_last_digits = strtoll(&str[len - end_char_to_check], nullptr, 10);
-            int64_t res_last_digits = strtoll(&res[len - end_char_to_check], nullptr, 10);
-            int64_t err = abs(orig_last_digits - res_last_digits);
+            const float128 f = str;
 
-            EXPECT_LE(err, max_allowed_error) << "error: " << err << ", last digits source: " << &str[len - end_char_to_check]
-                                              << "last digits result: " << &res[len - end_char_to_check];
+            // The parse is exact, so the value has to agree with what the C library makes of the
+            // same text to every bit a double holds.
+            const double reference = strtod(str, nullptr);
+            EXPECT_NEAR(static_cast<double>(f), reference, fabs(reference) * DBL_EPSILON * 2)
+                << "parsed " << str << " as " << static_cast<double>(f);
+
+            // And the shortest text the value produces has to read back as the same value. This is
+            // what the previous check was reaching for by comparing the last digits of the two
+            // strings, which only worked while both were laid out the same way: the shortest form
+            // switches to scientific notation once that is shorter, and the comparison then read
+            // an exponent as if it were digits.
+            const std::string text = to_string(f);
+            float128 round_tripped;
+            fp128::from_chars(text.data(), text.data() + text.size(), round_tripped);
+            EXPECT_TRUE(round_tripped == f) << "round trip of " << str << " through " << text;
         } catch (...) {
             // EXPECT_NO_THROW(i) used to sit here, which would have passed even on this path:
             // evaluating an integer cannot throw, so reaching the handler reported nothing.
@@ -1705,17 +1710,20 @@ TEST(float128, IntegerToStringIsExact)
 {
     const uint64_t values[] = {0ull, 1ull, 9ull, 10ull, 99ull, 100ull, 12345ull, 1000000ull,
                                123456789ull, 999999999999999999ull, 12345678901234567890ull};
+    // The fixed layout is asked for explicitly. The default conversion produces the shortest text
+    // that reads back as the same value, and for a round number that is the scientific form:
+    // 1000000 comes out as 1e+06, which is what std::format gives a double as well.
     char buf[64];
     for (auto v : values) {
         snprintf(buf, sizeof(buf), "%llu", v);
-        EXPECT_STREQ(static_cast<char*>(float128(v)), buf);
+        EXPECT_EQ(std::format("{:.0f}", float128(v)), buf);
     }
 
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         const uint64_t v = get_uint64_random() >> (get_uint32_random() % 64);
         snprintf(buf, sizeof(buf), "%llu", v);
-        EXPECT_STREQ(static_cast<char*>(float128(v)), buf) << "value=" << v;
+        EXPECT_EQ(std::format("{:.0f}", float128(v)), buf) << "value=" << v;
     }
 }
 // to_e_format fed a negative value straight to log10, producing a NaN exponent of INT32_MIN and a
@@ -2032,4 +2040,292 @@ TEST(float128, ConstexprFloatingPointConversion)
     EXPECT_TRUE(float128(static_cast<double>(opaque(13)) / 4.0) == from_double);
     EXPECT_DOUBLE_EQ(static_cast<double>(float128(opaque(1)) / 4), 0.25);
     EXPECT_TRUE(float128(0.1) == float128(tenth));
+}
+
+/**********************************************************************
+ * Standard library surface
+ *
+ * numeric_limits and the <cmath> functions that had no float128 counterpart. How accurately the
+ * ones that compute something do so is checked against correctly rounded references in
+ * float128_accuracy_gtest.cpp. What is checked here is that they exist, that the lookup a caller
+ * would use finds them, and that they behave as specified at the arguments where a formula on its
+ * own gives the wrong answer.
+ ***********************************************************************/
+TEST(float128, NumericLimits)
+{
+    using limits = std::numeric_limits<float128>;
+
+    static_assert(limits::is_specialized && limits::is_signed && limits::is_iec559);
+    static_assert(!limits::is_integer && !limits::is_exact && !limits::is_modulo);
+    static_assert(limits::digits == 113 && limits::digits10 == 33 && limits::max_digits10 == 36);
+    static_assert(limits::radix == 2);
+    static_assert(limits::min_exponent == -16381 && limits::max_exponent == 16384);
+    static_assert(limits::min_exponent10 == -4931 && limits::max_exponent10 == 4932);
+    static_assert(limits::has_infinity && limits::has_quiet_NaN && limits::has_signaling_NaN);
+    static_assert(limits::round_style == std::round_to_nearest);
+    // a cv qualified type has to answer the same way
+    static_assert(std::numeric_limits<const float128>::digits == limits::digits);
+
+    // epsilon is the gap above one, so adding it is visible and adding half of it is not
+    const float128 one = float128::one();
+    EXPECT_TRUE(one + limits::epsilon() > one);
+    EXPECT_TRUE(one + (limits::epsilon() >> 1) == one);
+
+    // the extremes are finite, and stepping past either one leaves the finite range
+    EXPECT_TRUE(isfinite(limits::max()) && isfinite(limits::lowest()));
+    EXPECT_TRUE(limits::lowest() == -limits::max());
+    EXPECT_TRUE(isinf(nextafter(limits::max(), limits::infinity())));
+
+    // min is the smallest normal, denorm_min the smallest value of any kind
+    EXPECT_TRUE(isnormal(limits::min()));
+    EXPECT_FALSE(isnormal(nextafter(limits::min(), float128())));
+    EXPECT_TRUE(limits::denorm_min().is_subnormal());
+    EXPECT_TRUE(nextafter(float128(), limits::infinity()) == limits::denorm_min());
+
+    EXPECT_TRUE(isnan(limits::quiet_NaN()) && !limits::quiet_NaN().is_signaling());
+    EXPECT_TRUE(isnan(limits::signaling_NaN()) && limits::signaling_NaN().is_signaling());
+    EXPECT_TRUE(isinf(limits::infinity()) && limits::infinity().is_positive());
+    EXPECT_TRUE(limits::round_error() == float128::half());
+}
+TEST(float128, Classification)
+{
+    const float128 one = float128::one();
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+
+    EXPECT_EQ(fpclassify(float128()), FP_ZERO);
+    EXPECT_EQ(fpclassify(-float128()), FP_ZERO);
+    EXPECT_EQ(fpclassify(one), FP_NORMAL);
+    EXPECT_EQ(fpclassify(denorm), FP_SUBNORMAL);
+    EXPECT_EQ(fpclassify(float128::inf()), FP_INFINITE);
+    EXPECT_EQ(fpclassify(float128::nan()), FP_NAN);
+
+    // signbit reads the bit rather than comparing, so it sees a negative zero and a negative NaN
+    EXPECT_FALSE(signbit(one));
+    EXPECT_TRUE(signbit(-one));
+    EXPECT_FALSE(signbit(float128()));
+    EXPECT_TRUE(signbit(-float128()));
+    EXPECT_TRUE(signbit(-float128::nan()));
+
+    EXPECT_TRUE(isnormal(one));
+    EXPECT_FALSE(isnormal(float128()));
+    EXPECT_FALSE(isnormal(denorm));
+    EXPECT_FALSE(isnormal(float128::inf()));
+}
+TEST(float128, ComparisonPredicates)
+{
+    const float128 one = float128::one();
+    const float128 two(2);
+    const float128 quiet = float128::nan();
+
+    EXPECT_TRUE(isgreater(two, one) && !isgreater(one, two) && !isgreater(one, one));
+    EXPECT_TRUE(isgreaterequal(one, one) && isgreaterequal(two, one));
+    EXPECT_TRUE(isless(one, two) && !isless(two, one));
+    EXPECT_TRUE(islessequal(one, one) && islessequal(one, two));
+    EXPECT_TRUE(islessgreater(one, two) && !islessgreater(one, one));
+
+    // every one of them is false against a NaN, and only isunordered says so
+    EXPECT_TRUE(isunordered(quiet, one) && isunordered(one, quiet) && isunordered(quiet, quiet));
+    EXPECT_FALSE(isunordered(one, two));
+    EXPECT_FALSE(isgreater(quiet, one));
+    EXPECT_FALSE(isgreaterequal(quiet, quiet));
+    EXPECT_FALSE(isless(quiet, one));
+    EXPECT_FALSE(islessequal(quiet, quiet));
+    EXPECT_FALSE(islessgreater(quiet, one));
+}
+TEST(float128, MinMaxDim)
+{
+    const float128 one = float128::one();
+    const float128 two(2);
+    const float128 quiet = float128::nan();
+
+    EXPECT_TRUE(fmin(one, two) == one && fmax(one, two) == two);
+    // a NaN operand is missing data rather than a value, so the other operand is the answer
+    EXPECT_TRUE(fmin(quiet, two) == two && fmin(two, quiet) == two);
+    EXPECT_TRUE(fmax(quiet, two) == two && fmax(two, quiet) == two);
+    EXPECT_TRUE(isnan(fmin(quiet, quiet)) && isnan(fmax(quiet, quiet)));
+    // the zeros compare equal, so which one comes back has to be decided on the sign
+    EXPECT_TRUE(signbit(fmin(float128(), -float128())));
+    EXPECT_FALSE(signbit(fmax(float128(), -float128())));
+
+    EXPECT_TRUE(fdim(two, one) == one);
+    EXPECT_TRUE(fdim(one, two).is_zero());
+    EXPECT_TRUE(isnan(fdim(quiet, one)) && isnan(fdim(one, quiet)));
+}
+TEST(float128, NanPayload)
+{
+    // Qualified, unlike every other function here: argument dependent lookup cannot reach this
+    // one from a character pointer, so with <cmath> also in scope the unqualified name is
+    // ambiguous against the ::nan that returns a double.
+    EXPECT_TRUE(isnan(fp128::nan("")));
+    EXPECT_FALSE(fp128::nan("").is_signaling());
+    EXPECT_TRUE(isnan(fp128::nan("7")));
+    EXPECT_TRUE(isnan(fp128::nan("0x1234")));
+
+    // the payload lands in the fraction, so two different ones are different encodings
+    uint64_t low_a = 0, high_a = 0, low_b = 0, high_b = 0;
+    fp128::nan("7").get_bits(low_a, high_a);
+    fp128::nan("9").get_bits(low_b, high_b);
+    EXPECT_NE(low_a, low_b);
+    EXPECT_EQ(high_a, high_b);
+}
+TEST(float128, NextAfter)
+{
+    const float128 one = float128::one();
+    const float128 up = nextafter(one, float128::inf());
+    const float128 down = nextafter(one, float128());
+
+    EXPECT_TRUE(up > one && down < one);
+    EXPECT_TRUE(up - one == std::numeric_limits<float128>::epsilon());
+    // the gap below one is half the gap above it, one binade down
+    EXPECT_TRUE(one - down == (std::numeric_limits<float128>::epsilon() >> 1));
+    EXPECT_TRUE(nextafter(one, one) == one);
+    EXPECT_TRUE(nextafter(down, float128::inf()) == one);
+    EXPECT_TRUE(isnan(nextafter(float128::nan(), one)));
+    EXPECT_TRUE(nexttoward(one, float128::inf()) == up);
+
+    // zero steps to the smallest subnormal in either direction
+    EXPECT_TRUE(nextafter(float128(), one) == std::numeric_limits<float128>::denorm_min());
+    EXPECT_TRUE(nextafter(float128(), -one) == -std::numeric_limits<float128>::denorm_min());
+}
+TEST(float128, RintTiesToEven)
+{
+    const float128 half = float128::half();
+
+    // round() takes a tie away from zero, rint() takes it to the even neighbour
+    EXPECT_TRUE(rint(float128(2) + half) == float128(2));
+    EXPECT_TRUE(rint(float128(3) + half) == float128(4));
+    EXPECT_TRUE(rint(-(float128(2) + half)) == float128(-2));
+    EXPECT_TRUE(rint(-(float128(3) + half)) == float128(-4));
+    EXPECT_TRUE(round(float128(2) + half) == float128(3));
+
+    EXPECT_TRUE(rint(float128(2)) == float128(2));
+    EXPECT_TRUE(rint(float128("2.4")) == float128(2));
+    EXPECT_TRUE(rint(float128("2.6")) == float128(3));
+    EXPECT_TRUE(nearbyint(float128(3) + half) == float128(4));
+    EXPECT_TRUE(isnan(rint(float128::nan())) && isinf(rint(float128::inf())));
+
+    EXPECT_EQ(llrint(float128(2) + half), 2);
+    EXPECT_EQ(llrint(float128(3) + half), 4);
+    EXPECT_EQ(lrint(float128(3) + half), 4);
+    EXPECT_EQ(llround(float128(2) + half), 3);
+}
+TEST(float128, ScalbnAndIlogb)
+{
+    const float128 one = float128::one();
+
+    EXPECT_TRUE(scalbn(one, 3) == float128(8));
+    EXPECT_TRUE(scalbn(float128(8), -3) == one);
+    EXPECT_TRUE(scalbln(one, 3L) == float128(8));
+    // an exponent far outside the range saturates rather than wrapping
+    EXPECT_TRUE(isinf(scalbln(one, 1000000L)));
+    EXPECT_TRUE(scalbln(one, -1000000L).is_zero());
+
+    EXPECT_EQ(ilogb(one), 0);
+    EXPECT_EQ(ilogb(float128(8)), 3);
+    EXPECT_EQ(ilogb(float128::half()), -1);
+    // a subnormal has an exponent, just not the one its exponent field holds
+    EXPECT_EQ(ilogb(std::numeric_limits<float128>::denorm_min()), -16494);
+    EXPECT_EQ(ilogb(float128()), FP_ILOGB0);
+    EXPECT_EQ(ilogb(float128::nan()), FP_ILOGBNAN);
+    EXPECT_EQ(ilogb(float128::inf()), INT_MAX);
+
+    EXPECT_TRUE(logb(float128(8)) == float128(3));
+    EXPECT_TRUE(logb(std::numeric_limits<float128>::denorm_min()) == float128(-16494));
+    EXPECT_TRUE(isinf(logb(float128())) && logb(float128()).is_negative());
+}
+TEST(float128, RemainderAndRemquo)
+{
+    const float128 five(5), three(3), two(2), one = float128::one();
+
+    // fmod keeps the sign of the dividend, remainder lands in [-|y|/2, |y|/2]
+    EXPECT_TRUE(fmod(five, three) == two);
+    EXPECT_TRUE(remainder(five, three) == -one);
+    EXPECT_TRUE(fmod(-five, three) == -two);
+    EXPECT_TRUE(remainder(-five, three) == one);
+
+    int quotient = 0;
+    EXPECT_TRUE(remquo(five, three, &quotient) == -one);
+    EXPECT_EQ(quotient, 2);
+    EXPECT_TRUE(remquo(-five, three, &quotient) == one);
+    EXPECT_EQ(quotient, -2);
+
+    // a tie in the quotient goes to the even one: 3/2 rounds to 2, 1/2 rounds to 0
+    EXPECT_TRUE(remainder(three, two) == -one);
+    EXPECT_TRUE(remainder(one, two) == one);
+
+    EXPECT_TRUE(isnan(remainder(five, float128())));
+    EXPECT_TRUE(isnan(remainder(float128::inf(), three)));
+    EXPECT_TRUE(remainder(five, float128::inf()) == five);
+}
+TEST(float128, Hypot3)
+{
+    EXPECT_TRUE(hypot(float128(3), float128(4)) == float128(5));
+    EXPECT_TRUE(hypot(float128(2), float128(3), float128(6)) == float128(7));
+    // squaring these would overflow, the scaling inside keeps them in range
+    EXPECT_TRUE(hypot(ldexp(float128(3), 16000), ldexp(float128(4), 16000), float128()) == ldexp(float128(5), 16000));
+    EXPECT_TRUE(isinf(hypot(float128::inf(), float128::nan(), float128())));
+    EXPECT_TRUE(isnan(hypot(float128::nan(), float128(1), float128(1))));
+}
+TEST(float128, Gamma)
+{
+    // the factorials are exact up to 34!
+    EXPECT_TRUE(tgamma(float128(1)) == float128::one());
+    EXPECT_TRUE(tgamma(float128(5)) == float128(24));
+    EXPECT_TRUE(tgamma(float128(11)) == float128(3628800));
+    // lgamma(1) and lgamma(2) are exactly zero rather than merely small
+    EXPECT_TRUE(lgamma(float128::one()).is_zero());
+    EXPECT_TRUE(lgamma(float128(2)).is_zero());
+
+    // gamma(1/2) is sqrt(pi)
+    const float128 root_pi = tgamma(float128::half());
+    EXPECT_TRUE(fabs(sqr(root_pi) - float128::pi()) < ldexp(float128::one(), -100));
+
+    // the poles, and the alternating sign between them
+    EXPECT_TRUE(isinf(tgamma(float128())) && tgamma(float128()).is_positive());
+    EXPECT_TRUE(isnan(tgamma(float128(-3))));
+    EXPECT_TRUE(tgamma(float128("-0.5")).is_negative());
+    EXPECT_TRUE(tgamma(float128("-1.5")).is_positive());
+    EXPECT_TRUE(tgamma(float128("-2.5")).is_negative());
+    EXPECT_TRUE(isinf(lgamma(float128())) && isinf(lgamma(float128(-2))));
+    EXPECT_TRUE(isinf(tgamma(float128(2000))));
+}
+TEST(float128, SubnormalArithmetic)
+{
+    using limits = std::numeric_limits<float128>;
+    const float128 denorm_min = limits::denorm_min();
+    const float128 one = float128::one();
+
+    // Scaling a subnormal all the way back up has to land on exactly one. get_components() used to
+    // read a subnormal's exponent as if the stored field meant something, which put the smallest
+    // one 223 binades off and made every operation that touched it return an unrelated value.
+    EXPECT_TRUE(ldexp(denorm_min, 16494) == one);
+    EXPECT_TRUE(ldexp(limits::min(), 16382) == one);
+    EXPECT_TRUE((denorm_min << 16494) == one);
+
+    // arithmetic inside the subnormal range stays exact, it is a fixed point grid
+    EXPECT_TRUE(denorm_min + denorm_min == float128(2, 0));
+    EXPECT_TRUE(float128(3, 0) - denorm_min == float128(2, 0));
+    EXPECT_TRUE((denorm_min << 1) == float128(2, 0));
+
+    // and the boundary between the two ranges is continuous in both directions
+    EXPECT_TRUE(nextafter(limits::min(), float128()) == float128(UINT64_MAX, 0x0000FFFFFFFFFFFFull));
+    EXPECT_TRUE(nextafter(nextafter(limits::min(), float128()), one) == limits::min());
+    EXPECT_TRUE(limits::min() - denorm_min < limits::min());
+    EXPECT_TRUE((limits::min() >> 1) == float128(0, 0x0000800000000000ull));
+
+    // a subnormal converts to double as zero, and to itself through the components
+    uint64_t low = 0, high = 0;
+    int32_t expo = 0;
+    uint32_t sign = 0;
+    denorm_min.get_components(low, high, expo, sign);
+    EXPECT_EQ(expo, -16494);
+    float128 rebuilt;
+    rebuilt.set_components(low, high, expo, sign);
+    EXPECT_TRUE(rebuilt == denorm_min);
+}
+TEST(float128, AbsAlias)
+{
+    EXPECT_TRUE(abs(float128(-3)) == float128(3));
+    EXPECT_TRUE(abs(float128(3)) == float128(3));
+    EXPECT_FALSE(signbit(abs(-float128())));
 }

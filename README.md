@@ -16,7 +16,12 @@
 
 ## float128 class Highlights
  - Based on the IEEE 754 binary128 format.
- - Implements most of the standard library.
+ - The whole of `<cmath>` as it exists for `double`, and the accuracy of every function is measured
+   against correctly rounded references and stated as a ulp bound.
+ - `std::numeric_limits`, `std::formatter`, `std::hash`, the stream operators and `to_chars`/`from_chars`,
+   so it behaves like a builtin floating point type in generic code.
+ - Conversion to and from decimal is exact: a value round trips through its text form, and any
+   requested precision is correctly rounded.
  
  ## Dependencies and Prerequisites
  - C++20
@@ -172,11 +177,15 @@ fp128_shared.h
     |        +--- uint128_t.h
     |                 |
     |                 +--- float128.h
+    |                        |
+    |                        +--- fp128_decimal.h
     |
     +--- fixed_point128.h
 ```
 
-All headers depend on `fp128_shared.h`. The `float128` class additionally depends on `uint128_t.h`. Do not include `fp128_shared.h` or `int128_shared.h` directly; they are pulled in automatically by the other headers.
+All headers depend on `fp128_shared.h`. The `float128` class additionally depends on `uint128_t.h`
+and on `fp128_decimal.h`. Do not include `fp128_shared.h`, `int128_shared.h` or `fp128_decimal.h`
+directly; they are pulled in automatically by the other headers.
 
 ---
 
@@ -200,6 +209,7 @@ Template class `fixed_point128<I>` where **I** is the number of integer bits (ra
   - **Trigonometric:** `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`.
   - **Hyperbolic:** `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`.
 - Built-in constants: `pi()`, `pi2()`, `half_pi()`, `e()`, `sqrt_2()`, `golden_ratio()`, `one()`, `half()`, `epsilon()`.
+- Standard library integration: `std::numeric_limits`, `std::formatter`, `std::hash`, `operator<<`, `operator>>`.
 
 ### float128.h
 
@@ -214,17 +224,41 @@ IEEE 754-2008 binary128 (quadruple-precision) floating-point type, aligned to 16
 - Classification queries: `is_zero`, `is_finite`, `is_normal`, `is_subnormal`, `is_nan`, `is_signaling`, `is_inf`, `is_special`, `is_int`, `is_negative`, `is_positive`, `is_exponent_of_2`.
 - Construction from `float`, `double`, integer types, and C strings (including scientific notation and special values).
 - Arithmetic operators: `+`, `-`, `*`, `/`, `<<`, `>>`. A builtin scalar may appear on either side, and the result is a `float128` either way.
-- Comprehensive math library (50+ functions):
-  - **Basic:** `fabs`, `floor`, `ceil`, `trunc`, `round`, `copysign`, `fmod`, `modf`, `fdim`, `fmin`, `fmax`.
-  - **Power / Root:** `sqr`, `sqrt`, `cbrt`, `pow`, `hypot`.
-  - **Exponential / Logarithmic:** `exp`, `exp2`, `expm1`, `log`, `log2`, `log10`, `log1p`, `logb`.
+- The complete `<cmath>` surface, the same set of functions that exists for `double`:
+  - **Basic:** `fabs`, `abs`, `floor`, `ceil`, `trunc`, `round`, `copysign`, `fmod`, `remainder`,
+    `remquo`, `modf`, `fdim`, `fmin`, `fmax`, `fma`.
+  - **Power / Root:** `sqr`, `sqrt`, `cbrt`, `pow`, `hypot` (two and three argument).
+  - **Exponential / Logarithmic:** `exp`, `exp2`, `expm1`, `log`, `log2`, `log10`, `log1p`, `logb`, `ilogb`.
   - **Trigonometric:** `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`.
   - **Hyperbolic:** `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`.
-  - **Error functions:** `erf`, `erfc`.
-  - **Rounding:** `llrint`, `llround`, `lrint`, `lround`.
-  - **Other:** `frexp`, `ldexp`, `ilogb`, `reciprocal`, `double_factorial`.
-- Built-in constants: `pi()`, `half_pi()`, `e()`, `sqrt_2()`, `tenth()`.
+  - **Error and gamma:** `erf`, `erfc`, `tgamma`, `lgamma`.
+  - **Rounding:** `rint`, `nearbyint`, `llrint`, `llround`, `lrint`, `lround`.
+  - **Manipulation:** `frexp`, `ldexp`, `scalbn`, `scalbln`, `nextafter`, `nexttoward`.
+  - **Classification:** `fpclassify`, `isfinite`, `isinf`, `isnan`, `isnormal`, `signbit`, `nan`.
+  - **Comparison:** `isgreater`, `isgreaterequal`, `isless`, `islessequal`, `islessgreater`, `isunordered`.
+  - **Non-standard extras:** `reciprocal`, `double_factorial`.
+- Built-in constants mirroring `<numbers>`: `pi()`, `two_pi()`, `half_pi()`, `quarter_pi()`, `inv_pi()`,
+  `inv_sqrt_pi()`, `e()`, `log2_e()`, `log10_e()`, `ln2()`, `ln10()`, `log10_2()`, `sqrt_2()`,
+  `sqrt_3()`, `inv_sqrt_3()`, `egamma()`, `phi()`, `one()`, `half()`, `tenth()`.
+- Standard library integration: `std::numeric_limits`, `std::formatter`, `std::hash`,
+  `std::common_type`, `operator<<`, `operator>>`, and `fp128::to_chars` / `fp128::from_chars`.
 - User-defined literal: `_f128` (e.g. `3.14_f128`).
+
+#### Accuracy
+
+Every math function is checked against binary128 references computed by mpmath at 240 bits and
+rounded to the format, so all 113 mantissa bits are verified rather than the 53 a comparison
+against a `double` can reach. `tests/float128_accuracy_gtest.cpp` states the bound each function
+meets; run the suite with `FP128_PRINT_ULP` set in the environment to see the error measured.
+
+`fma` and `fmod` are exact. `sqrt`, `hypot`, `exp`, `exp2`, `expm1`, `log1p`, `asinh` and `cosh`
+are within 1 ulp, and most of the rest within 2 to 8. Three are looser and say something about the
+implementation rather than about rounding: `erf` and `erfc` accumulate the roundings of a long
+series, and `pow` is `exp(y*log(x))`, where an exponent large enough to reach the top of the range
+turns the relative error of `log` into an absolute one.
+
+`tools/gen_ref_vectors.py` regenerates the reference tables; the seed is fixed, so an unchanged
+configuration reproduces an identical file.
 
 ### int128_t.h
 
@@ -239,6 +273,7 @@ Signed 128-bit integer stored in two's complement representation, aligned to 16 
 - A builtin scalar may appear on either side of any of the above. The scalar is widened, so the result is 128 bit and the comparisons stay exact for values no builtin type can hold. This also makes `1 << n` produce the expected power of two where a builtin shift that wide would be undefined behavior.
 - Math functions: `abs`, `sqrt`, `log`, `log2`, `log10`, `pow`.
 - Conversions to `int64_t`, `uint64_t`, `float`, `double`, `long double`, and strings.
+- Standard library integration: `std::numeric_limits`, `std::formatter`, `std::hash`, `operator<<`, `operator>>`.
 - User-defined literal: `_int128` (e.g. `12345_int128`).
 
 ### uint128_t.h
@@ -251,6 +286,25 @@ Unsigned 128-bit integer, aligned to 16 bytes. Mirrors the API surface of `int12
 - Same constructor set and operator suite as `int128_t`, adapted for unsigned arithmetic.
 - Math functions: `sqrt`, `log`, `log2`, `log10`, `pow`.
 - User-defined literal: `_uint128` (e.g. `99999_uint128`).
+
+### fp128_decimal.h
+
+Exact conversion between binary128 and decimal, used by `float128`'s string constructor, its
+`std::formatter`, the stream operators and `fp128::to_chars` / `fp128::from_chars`.
+
+A binary128 value is a 113 bit integer times a power of two, so its decimal expansion is finite: at
+most 4933 digits before the point and 16494 after it. Both directions work with that expansion in
+full, through a fixed capacity big integer of 32 bit limbs, which is what makes the digits
+correctly rounded at any precision and lets a decimal string read back to the nearest representable
+value. Scaling by a power of ten held in the type itself cannot do either, because a negative power
+of ten is not representable in binary.
+
+**Key contents:**
+- **`big_uint`** - fixed capacity unsigned big integer with only the operations the conversions
+  need: multiply and divide by a value that fits in a limb, shift, and compare.
+- **`to_decimal_digits`** - correctly rounded significant digits of a value, and the decimal
+  exponent that places the point.
+- **`from_decimal_digits`** - the nearest binary128 to a decimal mantissa and exponent.
 
 ### int128_shared.h
 

@@ -123,11 +123,15 @@
   <ItemGroup>
     <ClCompile Include="$(FP128Root)tests\fixed_point128_gtest.cpp" />
     <ClCompile Include="$(FP128Root)tests\float128_gtest.cpp" />
+    <ClCompile Include="$(FP128Root)tests\float128_accuracy_gtest.cpp" />
+    <ClCompile Include="$(FP128Root)tests\float128_format_gtest.cpp" />
     <ClCompile Include="$(FP128Root)tests\int128_t_gtest.cpp" />
     <ClCompile Include="$(FP128Root)tests\uint128_t_gtest.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(FP128Root)tests\gtest_shared.h" />
+    <ClInclude Include="$(FP128Root)tests\float128_ref_check.h" />
+    <ClInclude Include="$(FP128Root)tests\float128_ref_data.h" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="$(FP128Root)fixed_point128.natvis" />
