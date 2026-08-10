@@ -70,10 +70,10 @@
  *  fp128::version_string holds the same value as a string for code that only needs to report it.
  *  @{
  */
-#define FP128_VERSION_MAJOR 0  ///< Breaking changes to the public interface.
-#define FP128_VERSION_MINOR 9  ///< Backwards compatible additions.
-#define FP128_VERSION_PATCH 0  ///< Fixes that change neither.
-#define FP128_VERSION_BUILD 0  ///< Rebuild of an unchanged source tree.
+#define FP128_VERSION_MAJOR 0   ///< Breaking changes to the public interface.
+#define FP128_VERSION_MINOR 10  ///< Backwards compatible additions.
+#define FP128_VERSION_PATCH 0   ///< Fixes that change neither.
+#define FP128_VERSION_BUILD 0   ///< Rebuild of an unchanged source tree.
 
 /// @brief Packs a four component version into one integer, so two versions compare with `<` and `>=`.
 #define FP128_MAKE_VERSION(major, minor, patch, build) ((major) * 1000000 + (minor) * 10000 + (patch) * 100 + (build))
