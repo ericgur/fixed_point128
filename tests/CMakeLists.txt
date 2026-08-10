@@ -13,9 +13,13 @@
 add_executable(fixed_point128_tests
     fixed_point128_gtest.cpp
     float128_gtest.cpp
+    float128_accuracy_gtest.cpp
+    float128_format_gtest.cpp
     int128_t_gtest.cpp
     uint128_t_gtest.cpp
-    gtest_shared.h)
+    gtest_shared.h
+    float128_ref_check.h
+    float128_ref_data.h)
 
 target_link_libraries(fixed_point128_tests
     PRIVATE

@@ -44,6 +44,11 @@
 #ifndef FP128_INT128_SHARED_H
 #define FP128_INT128_SHARED_H
 
+#include <format>      // std::formatter
+#include <functional>  // std::hash
+#include <limits>
+#include <istream>
+#include <ostream>
 #include "fp128_shared.h"
 
 namespace fp128
@@ -712,12 +717,12 @@ public:
     /**
      * @brief Squares this object in place.
      *
-     * Cheaper than operator*=(*this): a square is symmetric, so the low*high and high*low
+     * Cheaper than `operator*=(*this)`: a square is symmetric, so the `low*high` and `high*low`
      * cross products are the same value. Computing it once and doubling it replaces one of
-     * the three multiplies with an addition. The temporary copy that operator*= needs to
+     * the three multiplies with an addition. The temporary copy that `operator*=` needs to
      * guard against aliasing is not needed either.
      *
-     * The result is truncated to 128 bit and is bit identical to (*this) * (*this), which for
+     * The result is truncated to 128 bit and is bit identical to `(*this) * (*this)`, which for
      * the signed type means it is negative in the same overflow cases.
      *
      * @return This object.
@@ -1919,6 +1924,216 @@ public:
     }
 };  // class int128_base
 
+
+/**
+ * @brief Writes a 128 bit integer to a stream, honouring its width, fill and adjustment.
+ *
+ * The value is always written in decimal: that is the conversion the type provides, and a stream's
+ * hex and oct flags have no counterpart in it.
+ */
+template <bool IsSigned> inline std::ostream& operator<<(std::ostream& os, const int128_base<IsSigned>& value)
+{
+    std::string text = static_cast<std::string>(value);
+    if ((os.flags() & std::ios_base::showpos) && !text.empty() && text[0] != '-')
+        text.insert(text.begin(), '+');
+
+    const std::streamsize width = os.width();
+    os.width(0);
+    if (static_cast<std::streamsize>(text.size()) < width) {
+        const size_t padding = static_cast<size_t>(width) - text.size();
+        const std::ios_base::fmtflags adjust = os.flags() & std::ios_base::adjustfield;
+        if (adjust == std::ios_base::left)
+            text.append(padding, os.fill());
+        else if (adjust == std::ios_base::internal && !text.empty() && (text[0] == '-' || text[0] == '+'))
+            text.insert(1, padding, os.fill());
+        else
+            text.insert(0, padding, os.fill());
+    }
+    return os << text;
+}
+
+/**
+ * @brief Reads a 128 bit integer from a stream.
+ *
+ * Accepts what the constructor from a string does: an optional sign followed by decimal digits, or
+ * a hexadecimal literal after an 0x prefix.
+ */
+template <bool IsSigned> inline std::istream& operator>>(std::istream& is, int128_base<IsSigned>& value)
+{
+    std::string token;
+    if (!(is >> token))
+        return is;
+
+    value = int128_base<IsSigned>(token.c_str());
+    return is;
+}
+
 }  // namespace fp128
 
+
+
+namespace std
+{
+/**
+ * @brief Numeric properties of the 128 bit integer types.
+ *
+ * Specialized so that generic code written against a builtin integer - anything reaching for
+ * numeric_limits<T>::max() to seed a minimum, or for digits10 to size a buffer - compiles and
+ * behaves correctly when instantiated with int128_t or uint128_t.
+ */
+template <bool IsSigned> class numeric_limits<fp128::int128_base<IsSigned>>
+{
+    using value_type = fp128::int128_base<IsSigned>;
+
+public:
+    static constexpr bool is_specialized = true;
+    static constexpr bool is_signed = IsSigned;
+    static constexpr bool is_integer = true;
+    static constexpr bool is_exact = true;
+    static constexpr bool has_infinity = false;
+    static constexpr bool has_quiet_NaN = false;
+    static constexpr bool has_signaling_NaN = false;
+    static constexpr bool has_denorm_loss = false;
+    static constexpr float_denorm_style has_denorm = denorm_absent;
+    static constexpr float_round_style round_style = round_toward_zero;
+    static constexpr bool is_iec559 = false;
+    static constexpr bool is_bounded = true;
+    /// @brief Arithmetic wraps around, which is what the truncated 128 bit operators do.
+    static constexpr bool is_modulo = !IsSigned;
+    static constexpr bool traps = true;
+    static constexpr bool tinyness_before = false;
+
+    /// @brief Value bits, which excludes the sign bit for the signed type.
+    static constexpr int digits = IsSigned ? 127 : 128;
+    /// @brief Decimal digits that can be represented without change: floor(digits * log10(2)).
+    static constexpr int digits10 = IsSigned ? 38 : 38;
+    static constexpr int max_digits10 = 0;
+    static constexpr int radix = 2;
+    static constexpr int min_exponent = 0;
+    static constexpr int max_exponent = 0;
+    static constexpr int min_exponent10 = 0;
+    static constexpr int max_exponent10 = 0;
+
+    [[nodiscard]] static constexpr value_type min() noexcept
+    {
+        // The signed minimum is the sign bit on its own; the unsigned one is zero.
+        return IsSigned ? value_type(0ull, 1ull << 63) : value_type(0ull, 0ull);
+    }
+    [[nodiscard]] static constexpr value_type max() noexcept
+    {
+        return IsSigned ? value_type(UINT64_MAX, UINT64_MAX >> 1) : value_type(UINT64_MAX, UINT64_MAX);
+    }
+    [[nodiscard]] static constexpr value_type lowest() noexcept { return min(); }
+    [[nodiscard]] static constexpr value_type epsilon() noexcept { return value_type(); }
+    [[nodiscard]] static constexpr value_type round_error() noexcept { return value_type(); }
+    [[nodiscard]] static constexpr value_type infinity() noexcept { return value_type(); }
+    [[nodiscard]] static constexpr value_type quiet_NaN() noexcept { return value_type(); }
+    [[nodiscard]] static constexpr value_type signaling_NaN() noexcept { return value_type(); }
+    [[nodiscard]] static constexpr value_type denorm_min() noexcept { return value_type(); }
+};
+
+/// @brief const, volatile and cv qualified 128 bit integers have the same numeric properties.
+template <bool IsSigned> class numeric_limits<const fp128::int128_base<IsSigned>> : public numeric_limits<fp128::int128_base<IsSigned>>
+{
+};
+template <bool IsSigned> class numeric_limits<volatile fp128::int128_base<IsSigned>> : public numeric_limits<fp128::int128_base<IsSigned>>
+{
+};
+template <bool IsSigned>
+class numeric_limits<const volatile fp128::int128_base<IsSigned>> : public numeric_limits<fp128::int128_base<IsSigned>>
+{
+};
+
+/// @brief Hash support, so a 128 bit integer can be a key in an unordered container.
+template <bool IsSigned> struct hash<fp128::int128_base<IsSigned>>
+{
+    [[nodiscard]] size_t operator()(const fp128::int128_base<IsSigned>& value) const noexcept
+    {
+        uint64_t low = 0, high = 0;
+        value.get_components(low, high);
+
+        // splitmix64's finalizer over the two halves
+        uint64_t state = low + 0x9E3779B97F4A7C15ull;
+        state = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9ull;
+        state = (state ^ (state >> 27)) * 0x94D049BB133111EBull;
+        state ^= high + 0x9E3779B97F4A7C15ull + (state << 6) + (state >> 2);
+        state = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9ull;
+        return static_cast<size_t>(state ^ (state >> 31));
+    }
+};
+
+/**
+ * @brief std::format support for the 128 bit integer types.
+ *
+ * Accepts fill and alignment, a sign, a width and the d type. The other integer presentations that
+ * `<format>` defines for a builtin - b, o, x and c - are not offered, because the conversion the
+ * type provides is decimal.
+ */
+template <bool IsSigned> struct formatter<fp128::int128_base<IsSigned>, char>
+{
+    constexpr auto parse(basic_format_parse_context<char>& context)
+    {
+        auto it = context.begin();
+        const auto end = context.end();
+        if (it == end || *it == '}')
+            return it;
+
+        const auto is_align = [](char c) { return c == '<' || c == '>' || c == '^'; };
+        if (it + 1 != end && is_align(*(it + 1))) {
+            fill = *it;
+            align = *(it + 1);
+            it += 2;
+        } else if (is_align(*it)) {
+            align = *it++;
+        }
+
+        if (it != end && (*it == '+' || *it == '-' || *it == ' '))
+            sign = *it++;
+
+        if (it != end && *it == '0') {
+            zero_pad = true;
+            ++it;
+        }
+
+        while (it != end && *it >= '0' && *it <= '9')
+            width = width * 10 + (*it++ - '0');
+
+        if (it != end && *it == 'd')
+            ++it;
+
+        if (it != end && *it != '}')
+            throw format_error("invalid format specification for a 128 bit integer");
+        return it;
+    }
+
+    template <typename FormatContext> auto format(const fp128::int128_base<IsSigned>& value, FormatContext& context) const
+    {
+        string text = static_cast<string>(value);
+        if (sign != '-' && !text.empty() && text[0] != '-')
+            text.insert(text.begin(), sign);
+
+        if (static_cast<int>(text.size()) < width) {
+            const size_t padding = static_cast<size_t>(width) - text.size();
+            if (zero_pad && align == 0) {
+                const size_t offset = (!text.empty() && (text[0] == '-' || text[0] == '+' || text[0] == ' ')) ? 1u : 0u;
+                text.insert(offset, padding, '0');
+            } else if (align == '<') {
+                text.append(padding, fill);
+            } else if (align == '^') {
+                text.insert(0, padding / 2, fill);
+                text.append(padding - padding / 2, fill);
+            } else {
+                text.insert(0, padding, fill);
+            }
+        }
+        return std::copy(text.begin(), text.end(), context.out());
+    }
+
+    char fill = ' ';        ///< Character the padding is made of.
+    char align = 0;         ///< One of < > ^, or zero when none was given.
+    char sign = '-';        ///< One of + - space.
+    bool zero_pad = false;  ///< The 0 flag: pad with zeros after the sign.
+    int width = 0;          ///< Minimum field width.
+};
+}  // namespace std
 #endif  // FP128_INT128_SHARED_H

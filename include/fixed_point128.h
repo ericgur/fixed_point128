@@ -70,6 +70,11 @@
 #ifndef FP128_FIXED_POINT128_T_H
 #define FP128_FIXED_POINT128_T_H
 
+#include <format>      // std::formatter
+#include <functional>  // std::hash
+#include <limits>
+#include <istream>
+#include <ostream>
 #include "fp128_shared.h"
 
 namespace fp128
@@ -264,6 +269,19 @@ private:
     }
 
 public:
+    /**
+     * @brief Reads the raw representation: the 128 bit magnitude and the separate sign.
+     * @param l Receives the low QWORD of the magnitude
+     * @param h Receives the high QWORD
+     * @param s Receives the sign, 1 when the value is negative
+     */
+    FP128_FORCE_INLINE constexpr void get_components(uint64_t& l, uint64_t& h, uint32_t& s) const noexcept
+    {
+        l = low;
+        h = high;
+        s = sign;
+    }
+
     static constexpr uint64_t max_int_value = int_mask >> upper_frac_bits;  ///< Maximum representable integer value.
     typedef fixed_point128<I> type;                                         ///< Self type alias.
     typedef fixed_point128<I>* ptr_type;                                    ///< Pointer type alias.
@@ -284,7 +302,6 @@ public:
     /**
      * @brief cross-template Copy constructor, can be used between two different fixed_point128 templates
      * @param rhs fixed_point128 instance with from a different template instance.
-     * @return This object.
      */
     template <int32_t I2> FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128<I2>& rhs) noexcept
     {
@@ -3081,7 +3098,6 @@ private:
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
-     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log(x)
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 log(fixed_point128 x)
@@ -3141,6 +3157,209 @@ private:
     /// @}
 };  // class fixed_point128
 
+
+/**
+ * @brief Writes a fixed_point128 to a stream, honouring its width, fill and adjustment.
+ * @tparam I Integer bit count of the type
+ */
+template <int32_t I> inline std::ostream& operator<<(std::ostream& os, const fixed_point128<I>& value)
+{
+    std::string text = static_cast<std::string>(value);
+    if ((os.flags() & std::ios_base::showpos) && !text.empty() && text[0] != '-')
+        text.insert(text.begin(), '+');
+
+    const std::streamsize width = os.width();
+    os.width(0);
+    if (static_cast<std::streamsize>(text.size()) < width) {
+        const size_t padding = static_cast<size_t>(width) - text.size();
+        const std::ios_base::fmtflags adjust = os.flags() & std::ios_base::adjustfield;
+        if (adjust == std::ios_base::left)
+            text.append(padding, os.fill());
+        else if (adjust == std::ios_base::internal && !text.empty() && (text[0] == '-' || text[0] == '+'))
+            text.insert(1, padding, os.fill());
+        else
+            text.insert(0, padding, os.fill());
+    }
+    return os << text;
+}
+
+/**
+ * @brief Reads a fixed_point128 from a stream, accepting what the constructor from a string does.
+ * @tparam I Integer bit count of the type
+ */
+template <int32_t I> inline std::istream& operator>>(std::istream& is, fixed_point128<I>& value)
+{
+    std::string token;
+    if (!(is >> token))
+        return is;
+
+    value = fixed_point128<I>(token.c_str());
+    return is;
+}
+
 }  // namespace fp128
+
+
+namespace std
+{
+/**
+ * @brief Numeric properties of `fixed_point128<I>`.
+ *
+ * A fixed point type is exact on its own grid rather than approximate like a floating point one,
+ * so is_exact is true and epsilon is the spacing of that grid - the same everywhere, unlike a
+ * float's, which is the spacing near one.
+ */
+template <int32_t I> class numeric_limits<fp128::fixed_point128<I>>
+{
+    using value_type = fp128::fixed_point128<I>;
+
+public:
+    static constexpr bool is_specialized = true;
+    static constexpr bool is_signed = true;
+    static constexpr bool is_integer = false;
+    /// @brief Every representable value is exactly the number it stands for.
+    static constexpr bool is_exact = true;
+    static constexpr bool has_infinity = false;
+    static constexpr bool has_quiet_NaN = false;
+    static constexpr bool has_signaling_NaN = false;
+    static constexpr bool has_denorm_loss = false;
+    static constexpr float_denorm_style has_denorm = denorm_absent;
+    static constexpr float_round_style round_style = round_toward_zero;
+    static constexpr bool is_iec559 = false;
+    static constexpr bool is_bounded = true;
+    static constexpr bool is_modulo = false;
+    static constexpr bool traps = false;
+    static constexpr bool tinyness_before = false;
+
+    /// @brief Magnitude bits. The sign is held separately, so all 128 of them carry value.
+    static constexpr int digits = 128;
+    /// @brief Decimal digits that survive a round trip: floor(128 * log10(2)).
+    static constexpr int digits10 = 38;
+    static constexpr int max_digits10 = 39;
+    static constexpr int radix = 2;
+    /// @brief The last place is 2^(I-128), and the leading one is at 2^(I-1).
+    static constexpr int min_exponent = I - 128;
+    static constexpr int max_exponent = I;
+    static constexpr int min_exponent10 = static_cast<int>((I - 128) * 0.30102999566398119521);
+    static constexpr int max_exponent10 = static_cast<int>(I * 0.30102999566398119521);
+
+    /// @brief Smallest positive value, which is one unit in the last place.
+    [[nodiscard]] static value_type min() noexcept { return value_type::epsilon(); }
+    /// @brief Largest value, every magnitude bit set.
+    [[nodiscard]] static value_type max() noexcept { return value_type(UINT64_MAX, UINT64_MAX, 0); }
+    /// @brief Most negative value. The sign is a separate field, so the range is symmetric.
+    [[nodiscard]] static value_type lowest() noexcept { return value_type(UINT64_MAX, UINT64_MAX, 1); }
+    /// @brief Spacing of the grid, the same at every magnitude.
+    [[nodiscard]] static value_type epsilon() noexcept { return value_type::epsilon(); }
+    [[nodiscard]] static value_type round_error() noexcept { return value_type::half(); }
+    [[nodiscard]] static value_type infinity() noexcept { return value_type(); }
+    [[nodiscard]] static value_type quiet_NaN() noexcept { return value_type(); }
+    [[nodiscard]] static value_type signaling_NaN() noexcept { return value_type(); }
+    [[nodiscard]] static value_type denorm_min() noexcept { return value_type(); }
+};
+
+/// @brief const, volatile and cv qualified fixed_point128 have the same numeric properties.
+template <int32_t I> class numeric_limits<const fp128::fixed_point128<I>> : public numeric_limits<fp128::fixed_point128<I>>
+{
+};
+template <int32_t I> class numeric_limits<volatile fp128::fixed_point128<I>> : public numeric_limits<fp128::fixed_point128<I>>
+{
+};
+template <int32_t I> class numeric_limits<const volatile fp128::fixed_point128<I>> : public numeric_limits<fp128::fixed_point128<I>>
+{
+};
+
+/// @brief Hash support, so a fixed_point128 can be a key in an unordered container.
+template <int32_t I> struct hash<fp128::fixed_point128<I>>
+{
+    [[nodiscard]] size_t operator()(const fp128::fixed_point128<I>& value) const noexcept
+    {
+        uint64_t low = 0, high = 0;
+        uint32_t sign = 0;
+        value.get_components(low, high, sign);
+        // The two zeros compare equal, so they have to hash equal.
+        if (low == 0 && high == 0)
+            sign = 0;
+
+        uint64_t state = low + 0x9E3779B97F4A7C15ull;
+        state = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9ull;
+        state = (state ^ (state >> 27)) * 0x94D049BB133111EBull;
+        state ^= high + sign + 0x9E3779B97F4A7C15ull + (state << 6) + (state >> 2);
+        state = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9ull;
+        return static_cast<size_t>(state ^ (state >> 31));
+    }
+};
+
+/**
+ * @brief std::format support for fixed_point128.
+ *
+ * Accepts fill and alignment, a sign, zero padding and a width. The type produces its own decimal
+ * text, which carries every digit the grid distinguishes, so no precision or presentation type is
+ * offered.
+ */
+template <int32_t I> struct formatter<fp128::fixed_point128<I>, char>
+{
+    constexpr auto parse(basic_format_parse_context<char>& context)
+    {
+        auto it = context.begin();
+        const auto end = context.end();
+        if (it == end || *it == '}')
+            return it;
+
+        const auto is_align = [](char c) { return c == '<' || c == '>' || c == '^'; };
+        if (it + 1 != end && is_align(*(it + 1))) {
+            fill = *it;
+            align = *(it + 1);
+            it += 2;
+        } else if (is_align(*it)) {
+            align = *it++;
+        }
+
+        if (it != end && (*it == '+' || *it == '-' || *it == ' '))
+            sign = *it++;
+
+        if (it != end && *it == '0') {
+            zero_pad = true;
+            ++it;
+        }
+
+        while (it != end && *it >= '0' && *it <= '9')
+            width = width * 10 + (*it++ - '0');
+
+        if (it != end && *it != '}')
+            throw format_error("invalid format specification for fixed_point128");
+        return it;
+    }
+
+    template <typename FormatContext> auto format(const fp128::fixed_point128<I>& value, FormatContext& context) const
+    {
+        string text = static_cast<string>(value);
+        if (sign != '-' && !text.empty() && text[0] != '-')
+            text.insert(text.begin(), sign);
+
+        if (static_cast<int>(text.size()) < width) {
+            const size_t padding = static_cast<size_t>(width) - text.size();
+            if (zero_pad && align == 0) {
+                const size_t offset = (!text.empty() && (text[0] == '-' || text[0] == '+' || text[0] == ' ')) ? 1u : 0u;
+                text.insert(offset, padding, '0');
+            } else if (align == '<') {
+                text.append(padding, fill);
+            } else if (align == '^') {
+                text.insert(0, padding / 2, fill);
+                text.append(padding - padding / 2, fill);
+            } else {
+                text.insert(0, padding, fill);
+            }
+        }
+        return std::copy(text.begin(), text.end(), context.out());
+    }
+
+    char fill = ' ';        ///< Character the padding is made of.
+    char align = 0;         ///< One of < > ^, or zero when none was given.
+    char sign = '-';        ///< One of + - space.
+    bool zero_pad = false;  ///< The 0 flag: pad with zeros after the sign.
+    int width = 0;          ///< Minimum field width.
+};
+}  // namespace std
 
 #endif  // FP128_FIXED_POINT128_T_H

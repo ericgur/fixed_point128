@@ -96,6 +96,8 @@
   <ItemGroup>
     <ClInclude Include="$(FP128Root)include\fixed_point128.h" />
     <ClInclude Include="$(FP128Root)include\fp128_shared.h" />
+    <ClInclude Include="$(FP128Root)include\fp128_decimal.h" />
+    <ClInclude Include="$(FP128Root)include\p128_decimal.h" />
     <ClInclude Include="$(FP128Root)include\float128.h" />
     <ClInclude Include="$(FP128Root)include\int128_shared.h" />
     <ClInclude Include="$(FP128Root)include\int128_t.h" />

@@ -54,7 +54,17 @@
 #define FP128_FLOAT128_H
 
 #include <algorithm>
+#include <array>
+#include <cmath>    // FP_NAN and friends, and the double seeds of sqrt/cbrt
+#include <climits>  // INT_MAX, the ilogb answer for an infinity
+#include <cstdlib>  // strtoull, for the nan() payload
+#include <charconv>   // to_chars_result, from_chars_result, chars_format
+#include <format>     // std::formatter
+#include <functional> // std::hash
+#include <istream>
+#include <ostream>
 #include "fp128_shared.h"
+#include "fp128_decimal.h"
 #include "uint128_t.h"
 
 namespace fp128
@@ -65,6 +75,17 @@ namespace fp128
 
 class fp128_gtest;  // Google test class
 class float128;
+
+/// @brief Reads a decimal string into a float128. Defined below, declared here because the
+///        constructor from a string delegates to it.
+std::from_chars_result from_chars(const char* first, const char* last, float128& value);
+
+namespace detail
+{
+/// @brief Renders a float128 as text. Defined below, declared here because the conversions to a
+///        string delegate to it.
+[[nodiscard]] std::string render(const float128& value, char style, int32_t precision, bool uppercase, bool alternate, char sign_char);
+}  // namespace detail
 
 /// @brief User-defined literal for constructing float128 from a string.
 float128 operator""_f128(const char*);
@@ -90,7 +111,7 @@ constexpr float128 fmin(const float128& x, const float128& y) noexcept;
 constexpr float128 fmax(const float128& x, const float128& y) noexcept;
 constexpr float128 fma(float128 x, float128 y, float128 z) noexcept;
 float128 hypot(const float128& x, const float128& y) noexcept;
-float128 cbrt(const float128 x, uint32_t iterations = 1) noexcept;
+float128 cbrt(const float128 x, uint32_t iterations = 2) noexcept;
 float128 sqrt(const float128& x, uint32_t iterations = 3) noexcept;
 float128 erf(float128 x) noexcept;
 float128 erfc(float128 x) noexcept;
@@ -119,7 +140,32 @@ float128 logb(float128 x) noexcept;
 float128 log1p(float128 x) noexcept;
 constexpr float128 frexp(float128 x, int* expptr) noexcept;
 constexpr float128 ldexp(float128 x, int exp) noexcept;
-constexpr int isfinite(const float128& x) noexcept;
+constexpr bool isfinite(const float128& x) noexcept;
+constexpr bool signbit(const float128& x) noexcept;
+constexpr bool isnormal(const float128& x) noexcept;
+constexpr int fpclassify(const float128& x) noexcept;
+constexpr bool isunordered(const float128& x, const float128& y) noexcept;
+constexpr bool isgreater(const float128& x, const float128& y) noexcept;
+constexpr bool isgreaterequal(const float128& x, const float128& y) noexcept;
+constexpr bool isless(const float128& x, const float128& y) noexcept;
+constexpr bool islessequal(const float128& x, const float128& y) noexcept;
+constexpr bool islessgreater(const float128& x, const float128& y) noexcept;
+constexpr float128 rint(const float128& x) noexcept;
+constexpr float128 nearbyint(const float128& x) noexcept;
+constexpr float128 scalbn(const float128& x, int n) noexcept;
+constexpr float128 scalbln(const float128& x, long n) noexcept;
+constexpr float128 nextafter(const float128& x, const float128& y) noexcept;
+constexpr float128 nexttoward(const float128& x, const float128& y) noexcept;
+float128 remainder(const float128& x, const float128& y) noexcept;
+float128 remquo(const float128& x, const float128& y, int* quo) noexcept;
+float128 hypot(const float128& x, const float128& y, const float128& z) noexcept;
+float128 lgamma(float128 x) noexcept;
+float128 tgamma(float128 x) noexcept;
+constexpr float128 abs(const float128& x) noexcept;
+/// The only one of these that a call cannot reach through argument dependent lookup: its argument
+/// is a plain character pointer, so the name has to be visible at namespace scope - and a call has
+/// to be qualified as fp128::nan(...) wherever `<cmath>` puts its own nan(const char*) in scope too.
+float128 nan(const char* payload) noexcept;
 /// @}
 
 /// @name Non-CRT Utility Functions (Forward Declarations)
@@ -140,7 +186,8 @@ float128 double_factorial(int x) noexcept;
  * All of float128's methods are inline for maximum performance.
  *
  * <B>Implementation notes:</B>
- * <UL> Same bit layout as binary128: 112 bit fraction, 15 bit exponent and 1 bit for the sign.
+ * <UL>
+ * <LI>Same bit layout as binary128: 112 bit fraction, 15 bit exponent and 1 bit for the sign.</LI>
  * <LI>A float128 object is not thread safe. Accessing a const object from multiple threads is safe.</LI>
  * <LI>Only 64 bit builds are supported.</LI>
  * </UL>
@@ -196,6 +243,7 @@ class FP128_ALIGN16 float128
     static constexpr uint64_t UPPER_FRAC_MASK = FP128_MAX_VALUE_64(FRAC_BITS - 64); ///< Bitmask for upper fraction bits within the high QWORD.
     static constexpr uint64_t FRAC_UNITY = FP128_ONE_SHIFT(FRAC_BITS - 64);         ///< The implicit unity bit position in the high QWORD.
     static constexpr uint64_t SIGN_MASK = 1ull << 63;            ///< Bitmask for the sign bit.
+    static constexpr uint64_t QUIET_NAN_BIT = 1ull << (EXP_SHIFT - 1);  ///< Leading fraction bit, set on a quiet NaN.
 
     /// @brief Bit-field view of the upper 64 bits of a float128.
     ///
@@ -360,6 +408,26 @@ public:
         low = high = 0;
         if (x == nullptr)
             return;
+
+        // The decimal form is read by from_chars(), which builds the exact value and rounds it
+        // once to the nearest representable one. The code below reads a hexadecimal literal, where
+        // every digit lands on a bit and no rounding arises.
+        //
+        // The decimal path used to live here too: it accumulated the digits as a float128 and
+        // divided by a power of ten held in the type. Negative powers of ten are not
+        // representable in binary, so that division rounded, and the value came back about an ulp
+        // away from the one the string named - close enough to look right and far enough that
+        // writing it back out took 35 digits instead of one.
+        const char* probe = x;
+        while (*probe != 0 && isspace(static_cast<unsigned char>(*probe)))
+            ++probe;
+        const char* body = probe;
+        if (*body == '-' || *body == '+')
+            ++body;
+        if (!(body[0] == '0' && (body[1] == 'x' || body[1] == 'X'))) {
+            from_chars(probe, probe + strlen(probe), *this);
+            return;
+        }
 
         constexpr uint64_t base16_max_digits = (112 + 4) / 4;  // 29 hex digits. 28 for the fraction (112 bit) and another for the unity
         constexpr uint64_t base10_max_digits = 35;             // maximum for 112 bit of mantissa/fraction is 34, read one extra to get maximum precision
@@ -831,144 +899,37 @@ public:
      */
     [[nodiscard]] explicit FP128_INLINE operator char*() const noexcept
     {
-        constexpr int32_t buff_size = 128;
-        static thread_local char str[buff_size];  // need roughly a (meaningful) decimals digit per 3.2 bits
-        char tmp_buf[buff_size];                  // used to write the integer part
-        char* s = str;                            // needed for debugging
-
-        if (is_special()) {
-            if (is_nan()) {
-                snprintf(str, buff_size, "nan");
-            } else if (is_inf()) {
-                snprintf(str, buff_size, "%sinf", (is_negative()) ? "-" : "");
-            }
-            return str;
-        }
-        if (is_zero()) {
-            snprintf(str, buff_size, "0");
-            return str;
-        }
-
-        // TODO: find base 10 exponent via log10
-        auto expo = get_exponent();
-        constexpr int32_t max_exponent = 127;
-        constexpr int32_t min_exponent = -FRAC_BITS;
-        if (expo >= max_exponent || expo <= min_exponent) {
-            to_e_format(str, buff_size);
-            return str;
-        }
-
-        char* p = str;
-        if (get_sign()) {
-            *p++ = '-';
-        }
-        // convert the integer part. The fraction is handled separately below, straight from the
-        // encoding, so only the integer half of the split is needed here.
-        float128 int_part;
-        (void)modf(fabs(*this), &int_part);
-        // remembered for the fraction loop below, which counts significant digits
-        const bool int_is_zero = int_part.is_zero();
-        int32_t int_digits = 0;
-        char* pp = tmp_buf;
-        do {
-            // Peel off the least significant decimal digit. The quotient has to be truncated:
-            // a plain divide leaves the discarded digit behind as a fraction, which then makes
-            // every digit extracted after it wrong. 123456789 came out as 123467899.
-            const float128 next = trunc(int_part / 10);
-            const auto digit = static_cast<uint32_t>(int_part - next * 10);
-            *pp++ = static_cast<char>(digit + '0');
-            int_part = next;
-            ++int_digits;
-            // leave room for the terminator written below
-        } while (int_digits < buff_size - 1 && !int_part.is_zero());
-        *pp = '\0';
-        for (auto i = int_digits; i != 0; --i) {
-            *p++ = *--pp;
-        }
-
-        // not enough digits.
-        if (buff_size == int_digits) {
-            str[buff_size - 4] = str[buff_size - 3] = str[buff_size - 2] = '.';
-            str[buff_size - 1] = '\0';
-            return str;
-        }
-
-        // convert the fraction part
-        uint64_t frac_fixed[FIXED_WORDS];
-        if (fraction_to_fixed(frac_fixed)) {
-            *p++ = '.';
-            constexpr int32_t digit_group = 5, max_sig_digits = 36;
-            constexpr uint64_t group_base = 100000;  // 10^digit_group
-            static_assert(digit_group <= 19);        // the group must fit in a single word
-            char fmt[20];
-            snprintf(fmt, sizeof(fmt), "%%0%illu", digit_group);
-
-            // A binary128 needs 36 significant decimal digits to be read back exactly. The budget
-            // is counted in significant digits, starting at the first non zero one: the leading
-            // zeros of a fraction below 0.1 carry no information. Charging them against a fixed
-            // count of digits after the decimal point, as this used to, left small values with too
-            // few significant digits to survive a round trip.
-            int32_t sig_digits = int_is_zero ? 0 : int_digits;
-            while (!fixed_is_zero(frac_fixed) && sig_digits < max_sig_digits && (p - str) + digit_group + 1 < buff_size) {
-                const uint64_t val = fixed_mul_extract(frac_fixed, group_base);
-                const int written = snprintf(p, static_cast<size_t>(buff_size - (p - str)), fmt, val);
-                if (written <= 0)
-                    break;
-                for (int32_t k = 0; k < written; ++k) {
-                    if (sig_digits > 0 || p[k] != '0')
-                        ++sig_digits;
-                }
-                p += written;
-            }
-
-            // back track and remove trailing zeros, and the decimal point if nothing survived
-            while (p[-1] == '0')
-                --p;
-            if (p[-1] == '.')
-                --p;
-        }
-
-        *p = '\0';
-        return s;
+        // The buffer is thread local so that the pointer stays valid after the call returns, which
+        // is what an implicit conversion to char* has to provide. It is large enough for the
+        // longest shortest-form string: a sign, 36 digits, a point and a five digit exponent.
+        static thread_local char str[64];
+        const std::string text = detail::render(*this, '\0', -1, false, false, '-');
+        const size_t length = (text.size() < sizeof(str) - 1) ? text.size() : sizeof(str) - 1;
+        for (size_t i = 0; i < length; ++i)
+            str[i] = text[i];
+        str[length] = '\0';
+        return str;
     }
     /**
-     * @brief converts the stored value to a string with scientific notation
+     * @brief Writes the value in scientific notation into a caller supplied buffer.
+     *
+     * Kept for the callers that predate std::format support. Everything it does is also reachable
+     * as fp128::to_chars(..., std::chars_format::scientific) or as std::format("{:e}", value),
+     * both of which say what they produce more clearly.
+     *
      * @param str Output buffer
      * @param buff_size Output buffer size in bytes
      */
     void to_e_format(char* str, int32_t buff_size) const
     {
-        if (is_zero()) {
-            snprintf(str, buff_size, "%s0e0", is_negative() ? "-" : "");
+        if (str == nullptr || buff_size < 1)
             return;
-        }
-        if (is_special()) {
-            snprintf(str, buff_size, "%s", is_nan() ? "nan" : (is_negative() ? "-inf" : "inf"));
-            return;
-        }
 
-        // log10 needs a positive argument: passing a negative value straight in produced a NaN,
-        // which turned into an exponent of INT32_MIN and a mantissa of "inf".
-        int32_t l10 = static_cast<int32_t>(trunc(log10(fabs(*this))));
-        float128 f = *this / exp10(l10);
-
-        // log10 is not exact, so the mantissa can land just outside [1, 10). Nudge it back so the
-        // printed form always has exactly one digit before the decimal point.
-        const float128 mag = fabs(f);
-        if (mag >= 10) {
-            f /= 10;
-            ++l10;
-        } else if (mag < 1) {
-            f *= 10;
-            --l10;
-        }
-
-        // The mantissa is printed by the normal path, which is reached because its exponent is
-        // small. Note there is no padding here: the previous version resized the mantissa string
-        // out to the full buffer with '0' characters, which is what produced the long runs of
-        // zeros in the output.
-        const std::string mantissa = f;
-        snprintf(str, buff_size, "%se%d", mantissa.c_str(), l10);
+        const std::string text = detail::render(*this, 'e', -1, false, false, '-');
+        const size_t length = (text.size() < static_cast<size_t>(buff_size) - 1) ? text.size() : static_cast<size_t>(buff_size) - 1;
+        for (size_t i = 0; i < length; ++i)
+            str[i] = text[i];
+        str[length] = '\0';
     }
 
     //
@@ -1482,8 +1443,9 @@ public:
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_signaling() const
     {
-        // TODO: support sNaN
-        return false;
+        // A NaN is quiet when the leading fraction bit is set and signaling when it is clear,
+        // which is what every binary interchange format in IEEE 754-2008 uses.
+        return is_nan() && (high & QUIET_NAN_BIT) == 0;
     }
     /**
      * @brief Tests if this value is an Infinite (negative or positive)
@@ -1611,6 +1573,22 @@ public:
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr uint32_t get_sign() const noexcept { return static_cast<uint32_t>(high >> 63); }
     /**
+     * @brief Reads the raw binary128 encoding.
+     *
+     * The counterpart of the float128(low, high) constructor: the two together are what a
+     * std::bit_cast to and from the storage would be, without needing the layout to be spelled
+     * out at the call site. Nothing is interpreted, so a NaN keeps its payload and a subnormal is
+     * not normalized - use get_components() for the value the encoding stands for.
+     *
+     * @param l Receives the low QWORD (fraction bits 63:0)
+     * @param h Receives the high QWORD (sign, exponent, fraction bits 111:64)
+     */
+    FP128_FORCE_INLINE constexpr void get_bits(uint64_t& l, uint64_t& h) const noexcept
+    {
+        l = low;
+        h = high;
+    }
+    /**
      * @brief Classifies the float128 value according to IEEE 754.
      * @return The classification category (normal, subnormal, zero, inf, or NaN).
      */
@@ -1665,12 +1643,19 @@ public:
         s = get_sign();
 
         if (is_subnormal()) {
-            // shift the bits to the lft so the msb is on bit 112
+            // shift the bits to the left so the msb is on bit 112
             auto shift = FRAC_BITS - static_cast<int32_t>(log2(l, h));
             shift_left128_inplace_safe(l, h, shift);
 
-            // update the exponent
-            e += shift;
+            // A subnormal has no implicit leading one, so its stored exponent field says nothing
+            // about its magnitude - every subnormal holds the same one. What the value is worth is
+            // decided entirely by where its leading bit sits: the fraction is scaled by 2^-16494,
+            // and normalizing it left by `shift` puts the exponent that many places below the
+            // smallest normal one. Adding the shift to the stored exponent instead, as this used
+            // to, put the smallest subnormal 223 binades above where it belongs and made every
+            // operation on a subnormal operand return an unrelated value. set_components() has
+            // always used this convention, which is why the two did not round trip.
+            e = SUBNORM_EXP_UNBIASED + 1 - shift;
         }
         // normal numbers
         else if (is_normal()) {
@@ -1742,12 +1727,12 @@ public:
         if (e <= SUBNORM_EXP_UNBIASED) {
             // fix the fraction, remove the bits 112+ and shift to the right
             int32_t shift = SUBNORM_EXP_UNBIASED + 1 - e;
-            if (shift >= FRAC_BITS) {
-                l = h = 0;
-            }
-            // some bits stay in the low or high QWORD
-            else
-                shift_right128_inplace_safe(l, h, shift);
+            // The shift is applied unconditionally. Zeroing the fraction once it reached the
+            // mantissa's width, as this used to, threw away the smallest subnormal itself: its
+            // leading bit sits at bit 112 and a shift of exactly 112 lands it on bit 0 rather than
+            // off the end. The shift helper handles every width, and rounds, which is what decides
+            // whether a value just under half of the smallest subnormal survives as one.
+            shift_right128_inplace_safe(l, h, shift);
             // override the exponent to mark the value as subnormal
             e = SUBNORM_EXP_UNBIASED;
         }
@@ -1859,23 +1844,168 @@ public:
             acc |= frac[i];
         return acc == 0;
     }
+
     /**
-     * @brief Normalize the fraction to bit 112, rounding half to even.
+     * @name Wide accumulator
      *
-     * The multiply and the divide both produce more bits than the fraction can hold and then throw
-     * the surplus away. Rounding correctly needs two pieces of information about what was
-     * discarded: the highest dropped bit, which chooses the direction, and whether anything below
-     * it was set, which separates an exact tie from a remainder above half. The caller passes the
-     * latter for the words it dropped before calling; this function collects the rest.
+     * A fixed 384 bit unsigned integer, used by fma() to hold the exact sum of a 226 bit product
+     * and a 113 bit addend before a single rounding is applied to it. The width is what the two
+     * together need in the worst case: whichever of them is larger is placed with its leading bit
+     * at the top of the accumulator, which leaves 383-225 = 158 bits below the product and
+     * 383-112 = 271 bits below the addend. An operand that does not fit under the other one is
+     * more than 158 bits smaller than it, so it cannot influence anything but the sticky bit, and
+     * is folded into that instead of being placed.
      *
-     * norm_fraction() below rounds from a three bit window instead, which cannot see the discarded
-     * low words at all, so its ties resolve arbitrarily.
-     *
-     * @param l Low part of the fraction
-     * @param h High part of the fraction
-     * @param e Unbiased exponent, adjusted to match the normalized fraction
-     * @param sticky True when the caller already dropped one or more set bits below l
+     * These are implementation details of fma() rather than part of the interface.
+     * @{
      */
+    static constexpr int32_t WIDE_WORDS = 6;               ///< Words in the accumulator.
+    static constexpr int32_t WIDE_BITS = WIDE_WORDS * 64;  ///< Bits in the accumulator.
+    /// @brief Bit the leading one of the larger operand is placed on.
+    ///
+    /// One below the top, so that adding two operands of the same magnitude cannot carry out of
+    /// the accumulator.
+    static constexpr int32_t WIDE_TOP = WIDE_BITS - 2;
+
+    /**
+     * @brief Full 256 bit product of two 128 bit values.
+     * @param al Low QWORD of the first operand
+     * @param ah High QWORD of the first operand
+     * @param bl Low QWORD of the second operand
+     * @param bh High QWORD of the second operand
+     * @param res Output, four words with res[0] the least significant
+     */
+    FP128_INLINE static constexpr void mul128to256(uint64_t al, uint64_t ah, uint64_t bl, uint64_t bh, uint64_t res[4]) noexcept
+    {
+        uint64_t hi = 0;
+        res[0] = mulx_u64(al, bl, &hi);
+        res[1] = hi;
+        res[2] = 0;
+        res[3] = 0;
+
+        uint64_t lo = mulx_u64(al, bh, &hi);
+        unsigned char c = addcarryx_u64(0, res[1], lo, &res[1]);
+        c = addcarryx_u64(c, res[2], hi, &res[2]);
+        res[3] += c;
+
+        lo = mulx_u64(ah, bl, &hi);
+        c = addcarryx_u64(0, res[1], lo, &res[1]);
+        c = addcarryx_u64(c, res[2], hi, &res[2]);
+        res[3] += c;
+
+        lo = mulx_u64(ah, bh, &hi);
+        c = addcarryx_u64(0, res[2], lo, &res[2]);
+        res[3] += hi + c;
+    }
+
+    /**
+     * @brief Index of the highest set bit of a multi word value, or -1 when it is zero.
+     * @param a Words, a[0] the least significant
+     * @param words Word count
+     */
+    [[nodiscard]] FP128_INLINE static constexpr int32_t wide_msb(const uint64_t* a, int32_t words) noexcept
+    {
+        for (int32_t i = words - 1; i >= 0; --i) {
+            if (a[i] != 0)
+                return i * 64 + 63 - static_cast<int32_t>(lzcnt64(a[i]));
+        }
+        return -1;
+    }
+
+    /**
+     * @brief Writes a value into a zeroed accumulator, shifted to a given bit position.
+     *
+     * A negative offset puts part or all of the value below the accumulator's least significant
+     * bit. Those bits are not representable there but still decide the rounding, so whether any of
+     * them was set is reported back rather than dropped.
+     *
+     * @param acc Accumulator, must be zero on entry
+     * @param src Value to place, src[0] the least significant word
+     * @param words Word count of src
+     * @param offset Bit position the least significant bit of src lands on, may be negative
+     * @return True when a set bit fell below the accumulator.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr bool wide_place(uint64_t* acc, const uint64_t* src, int32_t words, int32_t offset) noexcept
+    {
+        if (offset >= 0) {
+            const int32_t word = offset >> 6;
+            const int32_t bit = offset & 63;
+            for (int32_t i = 0; i < words; ++i) {
+                const int32_t dst = i + word;
+                if (dst >= WIDE_WORDS)
+                    break;
+                acc[dst] |= src[i] << bit;
+                if (bit != 0 && dst + 1 < WIDE_WORDS)
+                    acc[dst + 1] |= src[i] >> (64 - bit);
+            }
+            return false;
+        }
+
+        const int32_t drop = -offset;
+        if (drop >= words * 64) {
+            uint64_t any = 0;
+            for (int32_t i = 0; i < words; ++i)
+                any |= src[i];
+            return any != 0;
+        }
+
+        const int32_t word = drop >> 6;
+        const int32_t bit = drop & 63;
+        uint64_t lost = 0;
+        for (int32_t i = 0; i < word; ++i)
+            lost |= src[i];
+        if (bit != 0)
+            lost |= src[word] & FP128_MAX_VALUE_64(bit);
+
+        for (int32_t i = 0; word + i < words; ++i) {
+            uint64_t value = src[word + i] >> bit;
+            if (bit != 0 && word + i + 1 < words)
+                value |= src[word + i + 1] << (64 - bit);
+            if (i < WIDE_WORDS)
+                acc[i] |= value;
+        }
+        return lost != 0;
+    }
+
+    /// @brief Adds b into a. The accumulator is wide enough that the sum cannot carry out.
+    FP128_INLINE static constexpr void wide_add(uint64_t* a, const uint64_t* b) noexcept
+    {
+        unsigned char c = 0;
+        for (int32_t i = 0; i < WIDE_WORDS; ++i)
+            c = addcarryx_u64(c, a[i], b[i], &a[i]);
+    }
+
+    /// @brief Subtracts b from a, which must not be smaller.
+    FP128_INLINE static constexpr void wide_sub(uint64_t* a, const uint64_t* b) noexcept
+    {
+        unsigned char borrow = 0;
+        for (int32_t i = 0; i < WIDE_WORDS; ++i) {
+            const uint64_t rhs = b[i];
+            const uint64_t diff = a[i] - rhs - borrow;
+            borrow = (a[i] < rhs || (borrow && a[i] == rhs)) ? 1 : 0;
+            a[i] = diff;
+        }
+    }
+
+    /// @brief Subtracts one from the accumulator, which must not be zero.
+    FP128_INLINE static constexpr void wide_dec(uint64_t* a) noexcept
+    {
+        for (int32_t i = 0; i < WIDE_WORDS; ++i) {
+            if (a[i]-- != 0)
+                break;
+        }
+    }
+
+    /// @brief Three way comparison of two accumulators.
+    [[nodiscard]] FP128_INLINE static constexpr int32_t wide_cmp(const uint64_t* a, const uint64_t* b) noexcept
+    {
+        for (int32_t i = WIDE_WORDS - 1; i >= 0; --i) {
+            if (a[i] != b[i])
+                return (a[i] > b[i]) ? 1 : -1;
+        }
+        return 0;
+    }
+    /// @}
     /**
      * @brief Normalizes the product of two mantissas to bit 112, rounding half to even.
      *
@@ -1916,6 +2046,23 @@ public:
                 ++e;
         }
     }
+    /**
+     * @brief Normalize the fraction to bit 112, rounding half to even.
+     *
+     * The multiply and the divide both produce more bits than the fraction can hold and then throw
+     * the surplus away. Rounding correctly needs two pieces of information about what was
+     * discarded: the highest dropped bit, which chooses the direction, and whether anything below
+     * it was set, which separates an exact tie from a remainder above half. The caller passes the
+     * latter for the words it dropped before calling; this function collects the rest.
+     *
+     * norm_fraction() below rounds from a three bit window instead, which cannot see the discarded
+     * low words at all, so its ties resolve arbitrarily.
+     *
+     * @param l Low part of the fraction
+     * @param h High part of the fraction
+     * @param e Unbiased exponent, adjusted to match the normalized fraction
+     * @param sticky True when the caller already dropped one or more set bits below l
+     */
     FP128_INLINE constexpr void norm_fraction_sticky(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) const noexcept
     {
         if (l == 0 && h == 0) {
@@ -2063,7 +2210,16 @@ public:
      * @brief Return the quiet (non-signaling) NaN constant
      * @return NaN
      */
-    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 nan() { return float128(1, 0, INF_EXP_BIASED, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 nan() { return float128(0, QUIET_NAN_BIT, INF_EXP_BIASED, 0); }
+    /**
+     * @brief Return a signaling NaN
+     *
+     * Nothing in the library raises an exception on encountering one - there is no floating point
+     * status to raise it in - but the encoding is distinguishable, which is what
+     * numeric_limits::signaling_NaN() and is_signaling() need.
+     * @return A signaling NaN
+     */
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 signaling_nan() { return float128(1, 0, INF_EXP_BIASED, 0); }
     /**
      * @brief Return the value of pi
      * @return pi
@@ -2118,6 +2274,41 @@ public:
         // 0.1 using maximum precision
         return float128(0x999999999999999A, 0x999999999999, EXP_BIAS - 4, 0u);
     }
+
+    /**
+     * @name Mathematical constants
+     *
+     * The binary128 nearest each constant, given as the encoding rather than parsed from a decimal
+     * string: the string constructor is accurate to about an ulp, which is one bit too few to
+     * define a constant the rest of the library computes from. The set mirrors `<numbers>`, so a
+     * generic function template written against std::numbers has the same names available here.
+     * @{
+     */
+    /// @brief 2*pi
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 two_pi() noexcept { return float128(0x8469898CC51701B8, 0x921FB54442D1, 0x4001, 0); }
+    /// @brief 1/pi
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 inv_pi() noexcept { return float128(0x2A53F84EAFA3EA6A, 0x45F306DC9C88, 0x3FFD, 0); }
+    /// @brief 1/sqrt(pi)
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 inv_sqrt_pi() noexcept { return float128(0xD11AE3A914FED7FE, 0x20DD750429B6, 0x3FFE, 0); }
+    /// @brief Natural logarithm of 2
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 ln2() noexcept { return float128(0xF35793C7673007E6, 0x62E42FEFA39E, 0x3FFE, 0); }
+    /// @brief Natural logarithm of 10
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 ln10() noexcept { return float128(0x582DD4ADAC5705A6, 0x26BB1BBB5551, 0x4000, 0); }
+    /// @brief Base 2 logarithm of e
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log2_e() noexcept { return float128(0xE1777D0FFDA0D23A, 0x71547652B82F, 0x3FFF, 0); }
+    /// @brief Base 10 logarithm of e
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log10_e() noexcept { return float128(0xE32A6AB7555F5A68, 0xBCB7B1526E50, 0x3FFD, 0); }
+    /// @brief Base 10 logarithm of 2
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log10_2() noexcept { return float128(0xEF311F12B35816F9, 0x34413509F79F, 0x3FFD, 0); }
+    /// @brief Square root of 3
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 sqrt_3() noexcept { return float128(0xA73B25742D7078B8, 0xBB67AE8584CA, 0x3FFF, 0); }
+    /// @brief 1/sqrt(3)
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 inv_sqrt_3() noexcept { return float128(0xC4D218F81E4AFB25, 0x279A74590331, 0x3FFE, 0); }
+    /// @brief The Euler-Mascheroni constant
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 egamma() noexcept { return float128(0x8F49A37C7F0202A6, 0x2788CFC6FB61, 0x3FFE, 0); }
+    /// @brief The golden ratio
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 phi() noexcept { return float128(0x7C15F39CC0605CEE, 0x9E3779B97F4A, 0x3FFF, 0); }
+    /// @}
     /**
      * @brief calculates 10^e
      * @param e integer exponent, in the range
@@ -2306,10 +2497,21 @@ public:
         return lhs.high == rhs.high && lhs.low == rhs.low;
     }
     /// @overload
+    // Constrained to a builtin type. Unconstrained, T deduces to float128 for a comparison of two
+    // of them, which makes this template an exact match alongside the non-template above - and
+    // under the C++20 rewriting of == and != the reversed forms join in, which MSVC reports as an
+    // ambiguity from inside any standard container that compares keys.
     template <typename T>
+        requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const float128& lhs, const T& rhs) noexcept { return lhs == float128(rhs); }
     /// @overload
-    template <typename T> friend FP128_FORCE_INLINE constexpr bool operator==(const T& lhs, const float128& rhs) noexcept { return rhs == float128(lhs); }
+    // Constrained to a builtin type, see operator== above.
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const T& lhs, const float128& rhs) noexcept
+    {
+        return rhs == float128(lhs);
+    }
     /**
      * @brief Return true when objects are not equal. Can be used as logical XOR.
      * @param lhs left hand side operand
@@ -2318,10 +2520,14 @@ public:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const float128& lhs, const float128& rhs) noexcept { return !(lhs == rhs); }
     /// @overload
+    // Constrained to a builtin type, see operator== above.
     template <typename T>
+        requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const float128& lhs, const T& rhs) noexcept { return lhs != float128(rhs); }
     /// @overload
+    /// @copydoc operator!=
     template <typename T>
+        requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const T& lhs, const float128& rhs) noexcept { return rhs != float128(lhs); }
     /**
      * @brief Return true if this object is small than the other
@@ -2434,8 +2640,8 @@ public:
 
     /**
      * @brief Return the NaN constant
-     * @param
-     * @return
+     * @return A quiet NaN. The argument only exists so that the call can be found by argument
+     *         dependent lookup, its value is ignored.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 nan(const float128&) { return float128::nan(); }
     /**
@@ -2527,7 +2733,9 @@ public:
      * @param x Input value
      * @return Nearest integer as int64_t. Returns 0 on overflow.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int64_t llrint(const float128& x) noexcept { return llround(x); }
+    // rint rounds ties to even, round() rounds them away from zero, so these cannot forward to
+    // llround/lround the way they used to: llrint(2.5) is 2 and llround(2.5) is 3.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int64_t llrint(const float128& x) noexcept { return static_cast<int64_t>(rint(x)); }
     /**
      * @brief Rounds towards the nearest integer.
      * The halfway value (0.5) is rounded away from zero.
@@ -2546,7 +2754,7 @@ public:
      * @param x Input value
      * @return Nearest integer as int32_t. Returns 0 on overflow.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t lrint(const float128& x) noexcept { return lround(x); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t lrint(const float128& x) noexcept { return static_cast<int32_t>(rint(x)); }
     /**
      * @brief Rounds towards the nearest integer.
      * The halfway value (0.5) is rounded away from zero.
@@ -2566,7 +2774,24 @@ public:
      * @param x The specified value.
      * @return Integer value, rounded towards the nearest integer.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t ilogb(const float128& x) noexcept { return x.get_exponent(); }
+    [[nodiscard]] friend FP128_INLINE constexpr int32_t ilogb(const float128& x) noexcept
+    {
+        // The three answers <cmath> reserves for the arguments that have no exponent. A subnormal
+        // does have one, but not the one its exponent field holds, so it goes through
+        // get_components() with the rest.
+        if (x.is_zero())
+            return FP_ILOGB0;
+        if (x.is_nan())
+            return FP_ILOGBNAN;
+        if (x.is_inf())
+            return INT_MAX;
+
+        uint64_t l = 0, h = 0;
+        int32_t expo = 0;
+        uint32_t sign = 0;
+        x.get_components(l, h, expo, sign);
+        return expo;
+    }
     /**
      * @brief returns the value of x with the sign of y.
      * @param x The value that's returned as the magnitude of the result.
@@ -2604,16 +2829,53 @@ public:
         if (y.is_inf())
             return x;
 
-        // do the division in with positive numbers
-        float128 x_div_y = x / y;
+        // fmod is exact: the result is x - n*y for an integer n, and it is representable. Reaching
+        // it through trunc(x/y), as this used to, is only exact while the quotient is: once x/y
+        // needs more than 113 bits the truncated quotient is a rounded value and the subtraction
+        // returns something unrelated to the remainder. The mantissas are integers, so the whole
+        // operation is a long division on them, done here one 64 bit block of the exponent
+        // difference at a time.
+        uint64_t lx = 0, hx = 0, ly = 0, hy = 0;
+        int32_t ex = 0, ey = 0;
+        uint32_t sx = 0, sy = 0;
+        x.get_components(lx, hx, ex, sx);
+        y.get_components(ly, hy, ey, sy);
 
-        // Integer result - remainder is zero.
-        // Avoid the extra computation and precision loss with the standard equation.
-        if (x_div_y.is_int()) {
-            return 0;
+        // |x| < |y| leaves the dividend as the remainder
+        if (ex < ey || (ex == ey && uint128_t(lx, hx) < uint128_t(ly, hy)))
+            return x;
+
+        // Both mantissas hold 113 bits with the leading one at bit 112, so the values compared
+        // here are x = rem * 2^(ex-112) and y = mod * 2^(ey-112).
+        uint128_t rem(lx, hx);
+        const uint128_t mod(ly, hy);
+        rem %= mod;
+        int32_t shift = ex - ey;
+
+        // A remainder is below the divisor and so holds at most 113 bits; shifting 15 more in
+        // keeps the dividend inside the 128 the modulo can take.
+        constexpr int32_t block = 15;
+        while (shift > 0 && !rem.is_zero()) {
+            const int32_t step = (shift < block) ? shift : block;
+            rem <<= step;
+            shift -= step;
+            rem %= mod;
         }
-        // Fraction result - remainder is non zero.
-        float128 res = x - y * trunc(x_div_y);
+
+        if (rem.is_zero()) {
+            float128 zero;
+            zero.set_sign(sx);
+            return zero;
+        }
+
+        // Rebuild the value: the remainder is an integer scaled by the divisor's last place.
+        uint64_t rl = 0, rh = 0;
+        rem.get_components(rl, rh);
+        const int32_t msb = static_cast<int32_t>(log2(rl, rh));
+        shift_left128_inplace_safe(rl, rh, FRAC_BITS - msb);
+
+        float128 res;
+        res.set_components(rl, rh, ey - FRAC_BITS + msb, sx);
         return res;
     }
     /**
@@ -2640,21 +2902,49 @@ public:
      * @param y Second value
      * @return If x > y returns x - y. Otherwise zero.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fdim(const float128& x, const float128& y) noexcept { return (x > y) ? x - y : float128(); }
+    [[nodiscard]] friend FP128_INLINE constexpr float128 fdim(const float128& x, const float128& y) noexcept
+    {
+        if (x.is_nan() || y.is_nan())
+            return nan();
+        return (x > y) ? x - y : float128();
+    }
     /**
      * @brief Returns the minimum between x and y.
      * @param x First value
      * @param y Second value
      * @return If x < y returns x. Otherwise y.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fmin(const float128& x, const float128& y) noexcept { return (x < y) ? x : y; }
+    [[nodiscard]] friend FP128_INLINE constexpr float128 fmin(const float128& x, const float128& y) noexcept
+    {
+        // A NaN operand is treated as missing rather than as a value, so the other one wins. Every
+        // comparison against a NaN is false, which made the plain conditional return whichever
+        // operand happened to sit on the false branch.
+        if (x.is_nan())
+            return y;
+        if (y.is_nan())
+            return x;
+        // The comparison operators treat the two zeros as equal, and the standard asks for the
+        // negative one here.
+        if (x.is_zero() && y.is_zero())
+            return x.is_negative() ? x : y;
+        return (x < y) ? x : y;
+    }
     /**
      * @brief Returns the maximum between x and y.
      * @param x First value
      * @param y Second value
      * @return If x > y returns x. Otherwise y.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fmax(const float128& x, const float128& y) noexcept { return (x > y) ? x : y; }
+    [[nodiscard]] friend FP128_INLINE constexpr float128 fmax(const float128& x, const float128& y) noexcept
+    {
+        if (x.is_nan())
+            return y;
+        if (y.is_nan())
+            return x;
+        if (x.is_zero() && y.is_zero())
+            return x.is_positive() ? x : y;
+        return (x > y) ? x : y;
+    }
     /**
      * @brief Calculates the hypotenuse. i.e. sqrt(x^2 + y^2)
      * @param x First value
@@ -2680,23 +2970,35 @@ public:
      */
     [[nodiscard]] friend float128 sqrt(const float128& x, uint32_t iterations) noexcept
     {
-        static const float128 factor = "0.70710678118654752440084436210484903928483593768847403658833981";  // sqrt(2) / 2
+        if (x.is_nan())
+            return x;
+        if (x.is_zero())
+            return x;  // sqrt(-0) is -0
         if (x.is_negative())
             return float128::nan();
-        if (x.is_zero())
-            return 0;
-        if (x.is_special())
+        if (x.is_inf())
             return x;
 
-        // normalize the input to the range [0.5, 1)
-        int32_t expo = x.get_exponent() + 1;
-        float128 norm_x = x;
-        norm_x.set_exponent(-1);
+        // Split off an even power of two, leaving a mantissa in [1, 4).
+        //
+        // Halving an even exponent is exact, so the result needs no correction factor afterwards.
+        // Normalizing to [0.5, 1) instead, as this used to, leaves an odd exponent half the time
+        // and has to multiply the root by sqrt(2)/2 to make up for it - an irrational factor, and
+        // therefore a rounding, applied to a value that was otherwise correct to the last bit.
+        //
+        // Reading the mantissa through get_components() also normalizes a subnormal argument,
+        // which the previous exponent arithmetic did not account for at all.
+        uint64_t l = 0, h = 0;
+        int32_t expo = 0;
+        uint32_t sign = 0;
+        x.get_components(l, h, expo, sign);
+        const bool odd = (expo & 1) != 0;
+        const float128 norm_x(l, h, static_cast<uint32_t>(EXP_BIAS + (odd ? 1 : 0)), 0);
+        const int32_t half_expo = (expo - (odd ? 1 : 0)) >> 1;
 
-        // use existing HW to provide an excellent first estimate.
-        // regardless of what x was, norm_x is within double's precision range
-        double temp = static_cast<double>(norm_x);
-        float128 root = ::sqrt(temp);
+        // The hardware double gives 53 correct bits to start from, and every Newton step doubles
+        // them, so three passes cover the 113 the mantissa holds several times over.
+        float128 root = ::sqrt(static_cast<double>(norm_x));
 
         // iterate several times via Newton's method
         //                  X
@@ -2706,16 +3008,7 @@ public:
             root = (norm_x / root + root) >> 1;
         }
 
-        if (expo & 1) {
-            root *= factor;
-            ++expo;
-        }
-
-        // Denormalize the result
-        int32_t root_expo = root.get_exponent();
-        root_expo += (expo > 0) ? (expo + 1) / 2 : expo / 2;
-        root.set_exponent(root_expo);
-        return root;
+        return ldexp(root, half_expo);
     }
     /**
      * @brief Calculates the cube root.
@@ -2726,27 +3019,34 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 cbrt(const float128 x, uint32_t iterations) noexcept
     {
-        static const float128 factor1 = "0.62996052494743659533327218014164827764034271240234";  // cbrt(2) / 2
-        static const float128 factor2 = "0.79370052598409979172089379062526859343051910400391";  // cbrt(4) / 2
-
-        if (x.is_negative())
-            return float128::nan();
-        if (x.is_zero())
-            return 0;
-        if (x.is_special())
+        if (x.is_nan())
+            return x;
+        // The real cube root is defined for a negative argument and is an odd function, which is
+        // what the C library's cbrt computes. Returning a NaN, as this used to, made cbrt(-8)
+        // undefined where the standard has it equal to -2.
+        if (x.is_zero() || x.is_inf())
             return x;
 
-        // normalize the input to the range [0.5, 1)
-        int32_t expo = x.get_exponent() + 1;
-        float128 norm_x = x;
-        norm_x.set_exponent(-1);
+        // Split off a power of two whose exponent is a multiple of three, leaving a mantissa in
+        // [1, 8). Dividing that exponent by three is exact, so no correction factor is needed.
+        //
+        // The factors this used to multiply by, cbrt(2)/2 and cbrt(4)/2, were written out to the
+        // 17 digits a double round trips through and no further, so two thirds of all arguments
+        // came back with 53 correct bits instead of 113.
+        uint64_t l = 0, h = 0;
+        int32_t expo = 0;
+        uint32_t sign = 0;
+        x.get_components(l, h, expo, sign);
+        int32_t rem = expo % 3;
+        if (rem < 0)
+            rem += 3;
+        const float128 norm_x(l, h, static_cast<uint32_t>(EXP_BIAS + rem), 0);
+        const int32_t third_expo = (expo - rem) / 3;
 
-        // use existing HW to provide an excellent first estimate.
-        // regardless of what x was, norm_x is within double's precision range
-        double temp = static_cast<double>(norm_x);
-        float128 root = ::cbrt(temp);
+        // Halley's method triples the correct digits per pass, so two passes take the 53 bits the
+        // hardware seed provides past the 113 the mantissa holds.
+        float128 root = ::cbrt(static_cast<double>(norm_x));
 
-        // iterate several times via Halley's method
         //                3
         //              Xn  + 2X
         //   Xn+1 = Xn ----------
@@ -2758,23 +3058,8 @@ public:
             root = root * (r_cube + x2) / ((r_cube << 1) + norm_x);
         }
 
-        // correct the result if the exponent was not a multiple of 3.
-        // the offset is to have the expo always positive.
-        switch ((expo + 300000) % 3) {
-        case 1:
-            root *= factor1;
-            break;
-        case 2:
-            root *= factor2;
-            break;
-        default:
-            break;
-        }
-
-        // Denormalize the result
-        int32_t root_expo = root.get_exponent();
-        root_expo += (expo > 0) ? (expo + 2) / 3 : expo / 3;
-        root.set_exponent(root_expo);
+        root = ldexp(root, third_expo);
+        root.set_sign(sign);
         return root;
     }
     /**
@@ -2788,16 +3073,25 @@ public:
         static const float128 two = 2;
         constexpr int max_iterations = 3;
         constexpr int debug = false;
-        auto x_sign = x.get_sign();
-        if (x.is_special())
+        const auto x_sign = x.get_sign();
+        if (x.is_nan())
             return x;
-        if (x.is_subnormal() || x.is_zero())
+        if (x.is_inf()) {
+            float128 zero;
+            zero.set_sign(x_sign);
+            return zero;
+        }
+        if (x.is_zero())
             return (x_sign) ? -inf() : inf();
 
-        float128 norm_x = x;
-        const int32_t expo = 1 + x.get_exponent();
-        norm_x.set_exponent(0);
-        norm_x.set_sign(0);
+        // get_components() normalizes a subnormal, so the mantissa below is always in [1, 2) and
+        // the Newton iteration sees the same problem whatever the magnitude of x was. Rebuilding
+        // the value from the mantissa alone is also what keeps the scaling exact.
+        uint64_t l = 0, h = 0;
+        int32_t expo = 0;
+        uint32_t sign = 0;
+        x.get_components(l, h, expo, sign);
+        const float128 norm_x(l, h, EXP_BIAS, 0);
 
         float128 y = 1.0 / static_cast<double>(norm_x);
 
@@ -2822,7 +3116,11 @@ public:
             }
         }
 
-        y.set_exponent(-expo);
+        // The mantissa was divided out above, so undoing the exponent is a scaling rather than a
+        // replacement. Overwriting it, as this used to, was right only while y kept an exponent of
+        // -1, which is every value except the one case y comes out exactly 1: reciprocal() of any
+        // power of two was off by a factor of two, and exp() of a small negative argument with it.
+        y = ldexp(y, -expo);
         y.set_sign(x_sign);
         return y;
     }
@@ -2832,74 +3130,76 @@ public:
      * @param x Input value
      * @param res Result of the function
      */
-    friend void fact_reciprocal(int x, float128& res) noexcept
+    friend FP128_INLINE void fact_reciprocal(int x, float128& res) noexcept
     {
-        static const float128 c[] = {
-            "1.0",                                       // 1 / 0!
-            "1.0",                                       // 1 / 1!
-            "0.5",                                       // 1 / 2!
-            "1.6666666666666666666666666666666667e-1",   // 1 / 3!
-            "4.1666666666666666666666666666666667e-2",   // 1 / 4!
-            "8.3333333333333333333333333333333333e-3",   // 1 / 5!
-            "1.3888888888888889418943284326246612e-3",   // 1 / 6!
-            "1.9841269841269841269841269841269841e-4",   // 1 / 7!
-            "2.4801587301587301587301587301587302e-5",   // 1 / 8!
-            "2.7557319223985890652557319223985891e-6",   // 1 / 9!
-            "2.7557319223985890652557319223985891e-7",   // 1 / 10!
-            "2.5052108385441718775052108385441719e-8",   // 1 / 11!
-            "2.0876756987868098979210090321201432e-9",   // 1 / 12!
-            "1.6059043836821614599392377170154948e-10",  // 1 / 13!
-            "1.1470745597729724713851697978682106e-11",  // 1 / 14!
-            "7.6471637318198164759011319857880704e-13",  // 1 / 15!
-            "4.7794773323873852974382074911175440e-14",  // 1 / 16!
-            "2.8114572543455207631989455830103200e-15",  // 1 / 17!
-            "1.5619206968586226462216364350057333e-16",  // 1 / 18!
-            "8.2206352466243297169559812368722807e-18",  // 1 / 19!
-            "4.1103176233121648584779906184361404e-19",  // 1 / 20!
-            "1.9572941063391261230847574373505430e-20",  // 1 / 21!
-            "8.8967913924505732867488974425024683e-22",  // 1 / 22!
-            "3.8681701706306840377169119315228123e-23",  // 1 / 23!
-            "1.6117375710961183490487133048011718e-24",  // 1 / 24!
-            "6.4469502843844733961948532192046872e-26",  // 1 / 25!
-            "2.4795962632247974600749435458479566e-27",  // 1 / 26!
-            "9.1836898637955461484257168364739134e-29",  // 1 / 27!
-            "3.2798892370698379101520417273121119e-30",  // 1 / 28!
-            "1.1309962886447716931558764576938317e-31",  // 1 / 29!
-            "3.7699876288159056438529215256461057e-33",  // 1 / 30!
-            "1.2161250415535179496299746856922921e-34",  // 1 / 31!
-            "3.8003907548547435925936708927884130e-36",  // 1 / 32!
-            "1.1516335620771950280586881493298221e-37",  // 1 / 33!
-            "3.3871575355211618472314357333230062e-39",  // 1 / 34!
-            "9.6775929586318909920898163809228749e-41",  // 1 / 35!
-            "2.6882202662866363866916156613674652e-42",  // 1 / 36!
-            "7.2654601791530713153827450307228790e-44",  // 1 / 37!
-            "1.9119632050402819251007223765060208e-45",  // 1 / 38!
-            "4.9024697565135433976941599397590277e-47",  // 1 / 39!
-            "1.2256174391283858494235399849397569e-48",  // 1 / 40!
-            "2.9893108271424045107891219144872120e-50",  // 1 / 41!
-            "7.1174067312914393114026712249695524e-52",  // 1 / 42!
-            "1.6552108677421951886982956337138494e-53",  // 1 / 43!
-            "3.7618428812322617924961264402587486e-55",  // 1 / 44!
-            "8.3596508471828039833247254227972192e-57",  // 1 / 45!
-            "1.8173154015614791268097229179993955e-58",  // 1 / 46!
-            "3.8666285139605938868291976978710542e-60",  // 1 / 47!
-            "8.0554760707512372642274952038980296e-62",  // 1 / 48!
-            "1.6439747083165790335158153477342917e-63",  // 1 / 49!
-            "3.2879494166331580670316306954685835e-65",  // 1 / 50!
+        // Given as encodings rather than decimal strings. Several of the strings this replaced
+        // were the 17 digit expansion of a double - 1/6! among them - which capped the accuracy of
+        // every series built on the table at 53 bits. The exponential's own reduction is good to
+        // better than 2^-110, and a single term formed from a double sized constant was throwing
+        // 40 of those bits away.
+        static constexpr float128 c[] = {
+            float128(0x0000000000000000, 0x000000000000, 0x3FFF, 0),  // 1 / 0!
+            float128(0x0000000000000000, 0x000000000000, 0x3FFF, 0),  // 1 / 1!
+            float128(0x0000000000000000, 0x000000000000, 0x3FFE, 0),  // 1 / 2!
+            float128(0x5555555555555555, 0x555555555555, 0x3FFC, 0),  // 1 / 3!
+            float128(0x5555555555555555, 0x555555555555, 0x3FFA, 0),  // 1 / 4!
+            float128(0x1111111111111111, 0x111111111111, 0x3FF8, 0),  // 1 / 5!
+            float128(0x6C16C16C16C16C17, 0x6C16C16C16C1, 0x3FF5, 0),  // 1 / 6!
+            float128(0xA01A01A01A01A01A, 0xA01A01A01A01, 0x3FF2, 0),  // 1 / 7!
+            float128(0xA01A01A01A01A01A, 0xA01A01A01A01, 0x3FEF, 0),  // 1 / 8!
+            float128(0x38FAAC1C88E50017, 0x71DE3A556C73, 0x3FEC, 0),  // 1 / 9!
+            float128(0xC72EF016D3EA6679, 0x27E4FB7789F5, 0x3FE9, 0),  // 1 / 10!
+            float128(0x38FE747E4B837DC7, 0xAE64567F544E, 0x3FE5, 0),  // 1 / 11!
+            float128(0x7B544DA987ACFE85, 0x1EED8EFF8D89, 0x3FE2, 0),  // 1 / 12!
+            float128(0x97CA38331D23AF68, 0x6124613A86D0, 0x3FDE, 0),  // 1 / 13!
+            float128(0xD20BADF145DFA3E5, 0x93974A8C07C9, 0x3FDA, 0),  // 1 / 14!
+            float128(0xF11D8656B0EE8CB0, 0xAE7F3E733B81, 0x3FD6, 0),  // 1 / 15!
+            float128(0xF11D8656B0EE8CB0, 0xAE7F3E733B81, 0x3FD2, 0),  // 1 / 16!
+            float128(0xA6B2605197771B00, 0x952C77030AD4, 0x3FCE, 0),  // 1 / 17!
+            float128(0x77BB004886A2C2AB, 0x6827863B97D9, 0x3FCA, 0),  // 1 / 18!
+            float128(0x724CA1EC3B7B9675, 0x2F49B4681415, 0x3FC6, 0),  // 1 / 19!
+            float128(0x507A9CAD2BF8F0BB, 0xE542BA402022, 0x3FC1, 0),  // 1 / 20!
+            float128(0x18BEF146FCEE6E45, 0x71B8EF6DCF57, 0x3FBD, 0),  // 1 / 21!
+            float128(0x29450C90B7F338EC, 0x0CE396DB7F85, 0x3FB9, 0),  // 1 / 22!
+            float128(0x9D97B8704DD7F628, 0x761B41316381, 0x3FB4, 0),  // 1 / 23!
+            float128(0x7CCA4B4067CA9D8A, 0xF2CF01972F57, 0x3FAF, 0),  // 1 / 24!
+            float128(0x8D4E44A419776F11, 0x3F3CCDD165FA, 0x3FAB, 0),  // 1 / 25!
+            float128(0x9A38F2050BA6B015, 0x88E85FC6A4E5, 0x3FA6, 0),  // 1 / 26!
+            float128(0x320A9A18F15D4277, 0xD1AB1C2DCCEA, 0x3FA1, 0),  // 1 / 27!
+            float128(0xD373C5C51C354A8D, 0x0A18A2635085, 0x3F9D, 0),  // 1 / 28!
+            float128(0xD7ABE30E7766F129, 0x259F98B4358A, 0x3F98, 0),  // 1 / 29!
+            float128(0xE60CADED4C2989C5, 0x3932C5047D60, 0x3F93, 0),  // 1 / 30!
+            float128(0xC42E1EE46FA6BFC4, 0x434D2E783F5B, 0x3F8E, 0),  // 1 / 31!
+            float128(0xC42E1EE46FA6BFC4, 0x434D2E783F5B, 0x3F89, 0),  // 1 / 32!
+            float128(0x1B5382CDFFA97422, 0x3981254DD0D5, 0x3F84, 0),  // 1 / 33!
+            float128(0xA13F8A2B4AF9D6B7, 0x2710231C0FD7, 0x3F7F, 0),  // 1 / 34!
+            float128(0xF2833C7F5A7E0624, 0x0DC59C716D91, 0x3F7A, 0),  // 1 / 35!
+            float128(0x92B06B8D12A7275C, 0xDF983290C2CA, 0x3F74, 0),  // 1 / 36!
+            float128(0xAF4C78B15C3D89D3, 0x9EC8D1C94E85, 0x3F6F, 0),  // 1 / 37!
+            float128(0xAE913D370A4EC4E8, 0x5D4ACB9C0C3A, 0x3F6A, 0),  // 1 / 38!
+            float128(0xDE0104476AEB4C3B, 0x1E99449A4BAC, 0x3F65, 0),  // 1 / 39!
+            float128(0x3001A07244ABAD2B, 0xCA8ED42A12AE, 0x3F5F, 0),  // 1 / 40!
+            float128(0x0C7E25CFD1B1B2DD, 0x65E61C39D024, 0x3F5A, 0),  // 1 / 41!
+            float128(0x836C4D9225DCB90A, 0x10AF527530DE, 0x3F55, 0),  // 1 / 42!
+            float128(0x22DCBAE56DEF3720, 0x95DB45257E51, 0x3F4F, 0),  // 1 / 43!
+            float128(0xA4FD9F327E7F6DE9, 0x272B1B03FEC6, 0x3F4A, 0),  // 1 / 44!
+            float128(0x78E02C5E91C64CAC, 0xA3CB87222064, 0x3F44, 0),  // 1 / 45!
+            float128(0x062CA46E4F25C608, 0x240804F65951, 0x3F3F, 0),  // 1 / 46!
+            float128(0x9B78B454D8B628E5, 0x8DA8E0A127EB, 0x3F39, 0),  // 1 / 47!
+            float128(0x67A5CD8DE5CEC5EE, 0x091B406B6FF2, 0x3F34, 0),  // 1 / 48!
+            float128(0x5D94A3FD410E1232, 0x5A42F0DFEB08, 0x3F2E, 0),  // 1 / 49!
+            float128(0x8205F0A053453602, 0xBB36F6E12CD7, 0x3F28, 0),  // 1 / 50!
         };
         constexpr int series_len = array_length(c);
         static_assert(series_len == 51);
 
-        if (x >= 0 && x < series_len) {
-            res = c[x];
-        } else {
-            res = 0;
-        }
+        res = (x >= 0 && x < series_len) ? c[x] : float128();
     }
     /**
      * @brief returns the double factorial of a number
-     * @param x
-     * @param res
+     * @param x The number to compute the double factorial of. Values below 100 come from a
+     *          precomputed table.
+     * @return x!!, or infinity for the values above the table.
      */
     [[nodiscard]] friend FP128_INLINE float128 double_factorial(int x) noexcept
     {
@@ -2939,62 +3239,78 @@ public:
      * @param x A number specifying a power.
      * @return Exponent of x
      */
+    /// @brief Terms of the Maclaurin series exp_reduced() runs. |r| <= ln2/2, so r^28/28! is past the last bit.
+    static constexpr int32_t EXP_TERMS = 28;
+
+    /**
+     * @brief e to the power of a reduced argument, |r| <= ln2/2.
+     * @param r Reduced argument
+     * @return exp(r)
+     */
+    [[nodiscard]] FP128_INLINE static float128 exp_reduced(const float128& r) noexcept
+    {
+        float128 acc, factorial;
+        fact_reciprocal(EXP_TERMS, acc);
+        for (int32_t n = EXP_TERMS - 1; n >= 0; --n) {
+            fact_reciprocal(n, factorial);
+            acc = factorial + r * acc;
+        }
+        return acc;
+    }
+
+    /**
+     * @brief Computes e to the power of x.
+     *
+     * x is written as k*ln2 + r with k an integer and |r| <= ln2/2, which turns the answer into
+     * 2^k * exp(r): the power of two is an exact scaling and only the reduced argument goes
+     * through a series.
+     *
+     * The reduction is where the accuracy of the whole function is decided. ln2 is irrational, so
+     * k*ln2 cannot be represented and subtracting a rounded one leaves an error of k ulp - at the
+     * top of the range k reaches 16000 and fourteen bits of the answer are gone before the series
+     * even starts. Splitting ln2 into a high part whose low 14 bits are zero, so that k times it
+     * is exact, and a low part carrying the rest, keeps r accurate to far below its last bit.
+     *
+     * The previous implementation raised e to the integer part by repeated squaring, which doubles
+     * its own error at every step, and reached the negative half of the range through reciprocal().
+     *
+     * @param x A number specifying a power.
+     * @return e^x
+     */
     [[nodiscard]] friend FP128_INLINE float128 exp(const float128& x) noexcept
     {
-        static const float128 e = float128::e();
-        static const float128 max_exponent = 11355;  // log(16382) / log2
+        if (x.is_nan())
+            return x;
+        if (x.is_inf())
+            return x.is_negative() ? float128() : x;
+        if (x.is_zero())
+            return float128::one();
 
-        // check if the value isn't too large
-        if (x > max_exponent)
+        // log of the largest finite value is 11356.52, log of the smallest subnormal is -11433.46
+        if (x > float128(11357))
             return inf();
-        // check if the value isn't too small
-        if (x < -max_exponent)
-            return 0;
+        if (x < float128(-11434))
+            return float128();
 
-        float128 _ix, exp_ix;  // integer part of x
-        float128 fx = modf(fabs(x), &_ix);
-        uint64_t ix = static_cast<uint64_t>(_ix);  // 64 bit is an overkill to hold the exponent
-        float128 res;
+        // ln2 to 321 bits, in three pieces. The first two have their low 16 mantissa bits zeroed,
+        // so multiplying either by a k of up to 2^16 is exact and the products can be removed from
+        // the argument without a rounding of their own.
+        //
+        // Two pieces would only carry ln2 to the 113 bits a float128 holds, which is not enough:
+        // the reduction multiplies whatever error the constant has by k, and at the top of the
+        // range k reaches 16000, so a constant good to 2^-114 leaves the reduced argument good to
+        // only 2^-100 and the answer 8000 ulp wide.
+        constexpr float128 ln2_hi(0xF35793C767300000, 0x62E42FEFA39E, 0x3FFE, 0);
+        constexpr float128 ln2_mid(0x93394C5B16C50000, 0xF97B57A079A1, 0x3F98, 0);
+        constexpr float128 ln2_lo(0x7CF70EC40DBD7593, 0xA2EB71755F45, 0x3F32, 0);
 
-        // compute e^ix (integer part of x)
-        if (ix > 0) {
-            exp_ix = 1;      // result
-            float128 b = e;  // value of e^1
-            while (ix > 0) {
-                if (ix & 1)
-                    exp_ix *= b;
-                ix >>= 1;
-                b.square();
-            }
-        } else {
-            exp_ix = 1;
-        }
+        const int32_t k = static_cast<int32_t>(llround(x * float128::log2_e()));
+        const float128 kf(k);
+        // The first subtraction is exact, cancelling two values within a factor of two of each
+        // other; the others remove quantities far below the last place of the result.
+        const float128 r = ((x - kf * ln2_hi) - kf * ln2_mid) - kf * ln2_lo;
 
-        float128 exp_fx;
-        if (!fx.is_zero()) {
-            // compute e^fx (fraction part of x)
-            // first and second elements of the series
-            if (!fx.is_zero()) {
-                exp_fx = float128::one() + fx;
-                float128 elem, elem_denom, elem_nom = fx;
-
-                for (int i = 2;; ++i) {
-                    elem_nom *= fx;
-                    fact_reciprocal(i, elem_denom);
-                    elem = elem_nom * elem_denom;
-                    // value is too small to add any bits as the result's exponent is either 0 or 1. exp_fx = [1, e)
-                    if (elem.get_exponent() <= -FRAC_BITS)
-                        break;
-                    exp_fx += elem;  // next element in the series
-                }
-            }
-
-            res = exp_ix * exp_fx;
-        } else {
-            res = exp_ix;
-        }
-
-        return (x.is_positive()) ? res : reciprocal(res);
+        return ldexp(exp_reduced(r), k);
     }
     /**
      * @brief Computes 2 to the power of x
@@ -3009,15 +3325,55 @@ public:
         // y = log(2)
         // 2^x = e^(y*x) = exp(y*x)
         //
-        static const float128 lan2 = "0.693147180559945309417232121458176575";
-        return exp(x * lan2);
+        if (x.is_nan() || x.is_inf())
+            return (x.is_inf() && x.is_negative()) ? float128() : x;
+        if (x.is_zero())
+            return float128::one();
+        if (x > float128(16384))
+            return inf();
+        if (x < float128(-16495))
+            return float128();
+
+        // The integer part scales exactly, so only the fraction reaches exp() and the argument it
+        // is handed stays small enough that the rounding of the multiply below is the only error.
+        // That rounding is then recovered with an exact fma and folded back in: exp(p + e) is
+        // exp(p) * (1 + e) to well past the last bit for an e this small.
+        const int32_t k = static_cast<int32_t>(llround(x));
+        const float128 f = x - float128(k);
+        const float128 p = f * float128::ln2();
+        const float128 correction = fma(f, float128::ln2(), -p);
+
+        return ldexp(exp(p) * (float128::one() + correction), k);
     }
     /**
      * @brief Calculates the exponent of x and reduces 1 from the result: (e^x) - 1
      * @param x A number specifying a power.
      * @return Exponent of x
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE float128 expm1(const float128& x) noexcept { return exp(x) - float128::one(); }
+    [[nodiscard]] friend FP128_INLINE float128 expm1(const float128& x) noexcept
+    {
+        if (x.is_nan() || x.is_zero())
+            return x;
+        if (x.is_inf())
+            return x.is_negative() ? -float128::one() : x;
+
+        // Half is the point where exp(x) - 1 stops throwing away significant bits: below it the
+        // subtraction cancels most of what exp() produced, and at 2^-60 there is nothing left of
+        // the answer at all. The Maclaurin series has no cancellation - every term is formed from
+        // the argument itself - and needs 30 terms to reach the last bit at this magnitude.
+        if (fabs(x) <= float128::half()) {
+            constexpr int32_t terms = 30;
+            float128 acc, factorial;
+            fact_reciprocal(terms + 1, acc);
+            for (int32_t n = terms - 1; n >= 0; --n) {
+                fact_reciprocal(n + 1, factorial);
+                acc = factorial + x * acc;
+            }
+            return x * acc;
+        }
+
+        return exp(x) - float128::one();
+    }
     /**
      * @brief Computes x to the power of y
      * @param x Base value
@@ -3036,7 +3392,10 @@ public:
         } else if (x == 1) {
             return x;
         }
-        auto expo = abs(y);
+        // The magnitude is taken in the unsigned domain: negating the most negative int32_t is
+        // undefined, and the name abs now resolves to this namespace's float128 overload rather
+        // than to the one from <cstdlib>.
+        uint32_t expo = (y < 0) ? (0u - static_cast<uint32_t>(y)) : static_cast<uint32_t>(y);
         // check if the value isn't too large
         if (y > max_exponent) {
             res = inf();
@@ -3083,6 +3442,51 @@ public:
 
         return exp(y * lan_x);
     }
+    /// @brief Largest |t| the log1p_small() series is used for. Chosen so twelve terms suffice.
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log1p_small_limit() noexcept { return float128(0, 0, EXP_BIAS - 4, 0); }
+    /// @brief Terms of the log1p_small() series. |s| stays below 2^-4.9, so s^24 is past the last bit.
+    static constexpr int32_t LOG1P_TERMS = 12;
+
+    /**
+     * @brief Natural logarithm of 1+t for |t| <= 2^-4, accurate relative to the result.
+     *
+     * log(1+t) = 2 * atanh(t / (2+t)). The substitution replaces the Mercator series in t, which
+     * would need a hundred terms at this precision, with one in s^2 where |s| < 2^-4.9, so twelve
+     * terms reach the last bit of the mantissa.
+     *
+     * What matters more than the term count is that the result stays accurate relative to its own
+     * size. Near one the logarithm is proportional to t, and t reaches this function exactly - the
+     * subtraction that produced it cancelled two values within a factor of two of each other, which
+     * is exact. Computing the same thing as a difference of two numbers near one, which is what
+     * log2()'s argument reduction does, loses a bit for every power of two the argument sits closer
+     * to one: at t = 2^-60 barely half the mantissa survives.
+     *
+     * @param t Offset from one, must satisfy |t| <= 2^-4
+     * @return log(1+t)
+     */
+    [[nodiscard]] FP128_INLINE static float128 log1p_small(const float128& t) noexcept
+    {
+        if (t.is_zero())
+            return t;
+
+        const float128 s = t / (float128(2) + t);
+        const float128 w = sqr(s);
+
+        // 1/(2k+1) for the Horner pass below. Built once: the divisions are far more expensive
+        // than the series itself, and the values do not depend on the argument.
+        static const auto odd_reciprocal = [] {
+            std::array<float128, LOG1P_TERMS + 1> table {};
+            for (int32_t k = 0; k <= LOG1P_TERMS; ++k)
+                table[static_cast<size_t>(k)] = float128::one() / float128(2 * k + 1);
+            return table;
+        }();
+
+        float128 acc = odd_reciprocal[LOG1P_TERMS];
+        for (int32_t k = LOG1P_TERMS - 1; k >= 0; --k)
+            acc = odd_reciprocal[static_cast<size_t>(k)] + w * acc;
+
+        return (s * acc) << 1;
+    }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
@@ -3090,9 +3494,13 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 log(float128 x) noexcept
     {
-        static const float128 lan2 = "0.693147180559945309417232121458176575";
-        float128 y = log2(x);
-        return y * lan2;
+        // Sterbenz guarantees the subtraction is exact over the range the branch covers, so the
+        // series below sees the offset from one with every bit it has.
+        const float128 t = x - float128::one();
+        if (fabs(t) <= log1p_small_limit())
+            return log1p_small(t);
+
+        return log2(x) * float128::ln2();
     }
     /**
      * @brief Calculates the Log base 2 of x: y = log2(x)
@@ -3111,6 +3519,13 @@ public:
         if (x.is_negative() || x.is_zero()) {
             return -inf();
         }
+
+        // Near one the reduction below forms the answer as a difference of two values close to
+        // one, which costs it a bit for every power of two the argument sits closer to one. The
+        // series has no such cancellation, see log1p_small().
+        const float128 offset = x - float128::one();
+        if (fabs(offset) <= log1p_small_limit())
+            return log1p_small(offset) * float128::log2_e();
 
         // Calculate the log in 2 steps:
         // - The integer part is simple and fast via the get_exponent() function.
@@ -3212,9 +3627,11 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 log10(float128 x) noexcept
     {
-        static const float128 log10_2 = "0.301029995663981195213738894724493068";  // log10(2)
-        float128 y = log2(x);
-        return y * log10_2;
+        const float128 t = x - float128::one();
+        if (fabs(t) <= log1p_small_limit())
+            return log1p_small(t) * float128::log10_e();
+
+        return log2(x) * float128::log10_2();
     }
     /**
      * @brief Calculates Log base 2 of x as an integer ignoring the sign of x.
@@ -3222,13 +3639,52 @@ public:
      * @param x The number to perform log on.
      * @return logb(x)
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE float128 logb(float128 x) noexcept { return x.get_exponent(); }
+    [[nodiscard]] friend FP128_INLINE float128 logb(float128 x) noexcept
+    {
+        if (x.is_nan() || x.is_inf())
+            return fabs(x);
+        if (x.is_zero())
+            return -inf();
+
+        // get_components() normalizes a subnormal, whose stored exponent field is the same for
+        // every one of them and therefore says nothing about the value.
+        uint64_t l = 0, h = 0;
+        int32_t expo = 0;
+        uint32_t sign = 0;
+        x.get_components(l, h, expo, sign);
+        return float128(expo);
+    }
     /**
      * @brief Calculates the natural Log (base e) of 1 + x: log(1 + x)
      * @param x The number to perform log on.
      * @return log1p(x)
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE float128 log1p(float128 x) noexcept { return log(float128::one() + x); }
+    [[nodiscard]] friend FP128_INLINE float128 log1p(float128 x) noexcept
+    {
+        if (x.is_nan() || x.is_zero() || x.is_inf())
+            return (x.is_inf() && x.is_negative()) ? nan() : x;
+
+        const float128 one_value = float128::one();
+        if (x < -one_value)
+            return nan();
+        if (x == -one_value)
+            return -inf();
+
+        if (fabs(x) <= log1p_small_limit())
+            return log1p_small(x);
+
+        // Above the series' range but still below one, 1+x rounds and the logarithm of a value
+        // that close to one magnifies the error. Both subtractions below are exact - the first by
+        // Sterbenz, the second because the operands agree to within a rounding - so the correction
+        // puts back exactly what the rounding of 1+x took away.
+        if (fabs(x) < one_value) {
+            const float128 sum = one_value + x;
+            const float128 rounding = (sum - one_value) - x;
+            return log(sum) - rounding / sum;
+        }
+
+        return log(one_value + x);
+    }
 
     //
     // Trigonometric functions
@@ -3282,24 +3738,135 @@ public:
      * @param x value in Radians
      * @return Sine of x
      */
+    /**
+     * @name Unevaluated sums
+     *
+     * A value held as a pair of float128 whose sum is the quantity meant, with the second one
+     * below the last place of the first. That is 226 bits of significand out of two 113 bit
+     * values, which is what the trigonometric argument reduction needs: the residual it produces
+     * has to be known to the absolute precision of the *result*, and near a zero of the sine the
+     * result is many orders of magnitude below the argument it came from.
+     * @{
+     */
+
+    /**
+     * @brief Exact sum of two values, as a rounded sum and the error it made.
+     *
+     * Dekker's algorithm. Nothing here is an approximation: a + b is exactly sum + err for any two
+     * finite operands.
+     *
+     * @param a First operand
+     * @param b Second operand
+     * @param sum Receives the rounded sum
+     * @param err Receives a + b - sum, exactly
+     */
+    FP128_INLINE static void two_sum(const float128& a, const float128& b, float128& sum, float128& err) noexcept
+    {
+        sum = a + b;
+        const float128 b_part = sum - a;
+        err = (a - (sum - b_part)) + (b - b_part);
+    }
+
+    /**
+     * @brief Exact sum of two values whose magnitudes are ordered.
+     * @param a First operand, must not be smaller in magnitude than b
+     * @param b Second operand
+     * @param sum Receives the rounded sum
+     * @param err Receives a + b - sum, exactly
+     */
+    FP128_INLINE static void quick_two_sum(const float128& a, const float128& b, float128& sum, float128& err) noexcept
+    {
+        sum = a + b;
+        err = b - (sum - a);
+    }
+    /// @}
+
+    /**
+     * @brief Nearest integer to x / (pi/2), the quadrant the argument falls in.
+     *
+     * Beyond 2^62 the quadrant no longer fits in the integer the reduction counts with, and an
+     * argument that large has fewer bits below the binary point than a quadrant is wide - its
+     * sine is not determined by the value in any useful sense. Everything up to there reduces
+     * exactly, see reduce_half_pi().
+     *
+     * @param x Argument
+     * @return Quadrant index, zero for an argument too large to reduce.
+     */
+    [[nodiscard]] FP128_INLINE static int64_t quadrant_of(const float128& x) noexcept
+    {
+        constexpr float128 two_over_pi(0x2A53F84EAFA3EA6A, 0x45F306DC9C88, 0x3FFE, 0);
+        const float128 scaled = x * two_over_pi;
+        if (fabs(scaled) >= ldexp(float128::one(), 62))
+            return 0;
+        return llround(scaled);
+    }
+
+    /**
+     * @brief Subtracts n*(pi/2) from x, leaving the residual as an unevaluated sum.
+     *
+     * pi/2 is irrational, so no single float128 multiple of it can be subtracted without leaving
+     * an error of n ulp behind - and the sine of the residual is only as accurate as the residual
+     * itself. Where the answer is small, which is exactly where an argument lands near a multiple
+     * of pi/2, that error is the whole answer: sin() used to return a value with 55 correct bits
+     * for an argument a few ulp away from pi.
+     *
+     * Two things fix it. pi/2 is carried in three pieces covering 342 bits rather than 113, and
+     * each product n*piece is split into its rounded value and its exact error with fma(), so no
+     * multiplication is lost either. The residual accumulates as a pair, giving it 226 bits.
+     *
+     * @param x Argument
+     * @param n Multiple of pi/2 to remove
+     * @param hi Receives the residual
+     * @param lo Receives what did not fit in hi
+     */
+    FP128_INLINE static void reduce_half_pi(const float128& x, int64_t n, float128& hi, float128& lo) noexcept
+    {
+        constexpr float128 half_pi_parts[3] = {
+            float128(0x8469898CC51701B8, 0x921FB54442D1, 0x3FFF, 0),
+            float128(0xA67CC74020BBEA64, 0xCD129024E088, 0x3F8C, 0),
+            float128(0xE19C72FEC8841ABA, 0x3B19376BAD7D, 0x3F1A, 1),
+        };
+
+        hi = x;
+        lo = float128();
+        if (n == 0)
+            return;
+
+        const float128 nf(n);
+        for (const float128& part : half_pi_parts) {
+            // n * part is exactly product + product_err
+            const float128 product = nf * part;
+            const float128 product_err = fma(nf, part, -product);
+
+            float128 sum, err;
+            two_sum(hi, -product, sum, err);
+            // Everything that did not fit is collected and folded back in, which keeps the pair
+            // normalized for the next piece.
+            quick_two_sum(sum, (err + lo) - product_err, hi, lo);
+        }
+    }
+
     [[nodiscard]] friend float128 sin(float128 x) noexcept
     {
-        constexpr float128 half_pi = float128::half_pi();
-        double round = (x.is_positive()) ? 0.5 : -0.5;
+        if (x.is_nan() || x.is_zero())
+            return x;
+        if (x.is_inf())
+            return nan();
 
-        int64_t n = static_cast<int64_t>((x / half_pi) + round);
-        x -= half_pi * n;
-        n = n & 3ull;  // n mod 4
-        switch (n) {
+        const int64_t n = quadrant_of(x);
+        float128 hi, lo;
+        reduce_half_pi(x, n, hi, lo);
+
+        switch (n & 3) {
         case 0:  // [-45-45) degrees
-            return sin1(x);
+            return sin1(hi) + cos1(hi) * lo;
         case 1:  // [45-135) degrees
-            return cos1(x);
+            return cos1(hi) - sin1(hi) * lo;
         case 2:  // [135-225) degrees
-            return -sin1(x);
+            return -(sin1(hi) + cos1(hi) * lo);
         case 3:  // [225-315) degrees
         default:
-            return -cos1(x);
+            return -(cos1(hi) - sin1(hi) * lo);
         }
     }
     /**
@@ -3344,22 +3911,25 @@ public:
      */
     [[nodiscard]] friend float128 cos(float128 x) noexcept
     {
-        constexpr float128 half_pi = float128::half_pi();  // pi / 2
-        double round = (x.is_positive()) ? 0.5 : -0.5;
+        if (x.is_nan())
+            return x;
+        if (x.is_inf())
+            return nan();
 
-        int64_t n = static_cast<int64_t>((x / half_pi) + round);
-        x -= half_pi * n;
-        n = n & 3ull;  // n mod 4
-        switch (n) {
+        const int64_t n = quadrant_of(x);
+        float128 hi, lo;
+        reduce_half_pi(x, n, hi, lo);
+
+        switch (n & 3) {
         case 0:  // [-45-45) degrees
-            return cos1(x);
+            return cos1(hi) - sin1(hi) * lo;
         case 1:  // [45-135) degrees
-            return -sin1(x);
+            return -(sin1(hi) + cos1(hi) * lo);
         case 2:  // [135-225) degrees
-            return -cos1(x);
+            return -(cos1(hi) - sin1(hi) * lo);
         case 3:  // [225-315) degrees
         default:
-            return sin1(x);
+            return sin1(hi) + cos1(hi) * lo;
         }
     }
     /**
@@ -3496,7 +4066,25 @@ public:
      * @param x value
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE float128 sinh(const float128 x) noexcept { return (exp(x) - exp(-x)) >> 1; }
+    [[nodiscard]] friend FP128_INLINE float128 sinh(const float128 x) noexcept
+    {
+        if (x.is_nan() || x.is_inf() || x.is_zero())
+            return x;
+
+        const float128 a = fabs(x);
+        float128 res;
+        // Below one, exp(a) and exp(-a) agree to within a factor of e and their difference cancels
+        // away most of the mantissa - at a = 2^-60 all of it. expm1() holds the same quantity with
+        // no cancellation at all, and t/(t+1) is exp(-a)-1 expressed through it.
+        if (a < float128::one()) {
+            const float128 t = expm1(a);
+            res = (t + t / (t + float128::one())) >> 1;
+        } else {
+            res = (exp(a) - exp(-a)) >> 1;
+        }
+
+        return (x.is_negative()) ? -res : res;
+    }
     /**
      * @brief Calculates the inverse hyperbolic sine
      * For positive x:
@@ -3507,8 +4095,33 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 asinh(const float128 x) noexcept
     {
-        float128 absx = fabs(x);
-        float128 res = log(absx + sqrt(absx * absx + float128::one()));
+        if (x.is_nan() || x.is_inf() || x.is_zero())
+            return x;
+
+        const float128 one_value = float128::one();
+        const float128 a = fabs(x);
+        float128 res;
+
+        // Three regimes, because the closed form is only usable in the middle one.
+        //
+        // Below 2^-57 the answer is the argument to within half an ulp, and the closed form would
+        // square it to zero and hand back log(1) = 0 instead.
+        //
+        // Above 2^57 the square overflows long before the argument does, and asinh(a) is log(2a)
+        // to well past the last bit.
+        //
+        // In between, adding a to sqrt(a*a+1) cancels for a negative argument, which is why the
+        // sign is taken out first, and the a*a/(1+sqrt(1+a*a)) form is used rather than
+        // sqrt(a*a+1)-a: near zero the latter subtracts two values that agree to every bit the
+        // result needs.
+        if (a < ldexp(one_value, -57)) {
+            res = a;
+        } else if (a > ldexp(one_value, 57)) {
+            res = log(a) + float128::ln2();
+        } else {
+            const float128 a2 = sqr(a);
+            res = log1p(a + a2 / (one_value + sqrt(one_value + a2)));
+        }
 
         return (x.is_positive()) ? res : -res;
     }
@@ -3531,11 +4144,28 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 acosh(const float128 x) noexcept
     {
-        if (x < 1)
-            return 0;
+        if (x.is_nan())
+            return x;
+        // Outside the domain the result is undefined rather than zero, which is what the previous
+        // version returned for every argument below one.
+        const float128 one_value = float128::one();
+        if (x < one_value)
+            return nan();
+        if (x.is_inf())
+            return x;
 
-        float128 res = log(x + sqrt(x * x - 1));
-        return res;
+        // Near one, x*x-1 cancels: at x = 1+2^-100 the square rounds back to one and the root
+        // comes out zero. The argument of log1p below is built from t = x-1, which is exact over
+        // that range, so the answer keeps its significant bits.
+        if (x < float128(2)) {
+            const float128 t = x - one_value;
+            return log1p(t + sqrt((t << 1) + sqr(t)));
+        }
+        // Beyond 2^57 the square overflows before the argument does and acosh(x) is log(2x).
+        if (x > ldexp(one_value, 57))
+            return log(x) + float128::ln2();
+
+        return log(x + sqrt(sqr(x) - one_value));
     }
     /**
      * @brief Calculates the hyperbolic tangent
@@ -3547,14 +4177,27 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 tanh(const float128 x) noexcept
     {
-        float128 ex = exp(x);     // e^x
-        float128 exm1 = exp(-x);  // e^(-x)
-        //
-        //           e^x - e^(-x)
-        // tanh(x) = ------------
-        //           e^x + e^(-x)
-        //
-        return (ex - exm1) / (ex + exm1);
+        if (x.is_nan() || x.is_zero())
+            return x;
+
+        const float128 a = fabs(x);
+        float128 res;
+        // Past 40 the two exponentials differ by more than the mantissa can express and the
+        // quotient is one to the last bit.
+        if (x.is_inf() || a > float128(40)) {
+            res = float128::one();
+        } else {
+            //           e^x - e^(-x)         e^(2x) - 1
+            // tanh(x) = ------------  =  ----------------
+            //           e^x + e^(-x)      (e^(2x) - 1) + 2
+            //
+            // The right hand form is written in terms of expm1, which holds e^(2x)-1 without the
+            // cancellation that subtracting the two exponentials suffers for a small argument.
+            const float128 t = expm1(a << 1);
+            res = t / (t + float128(2));
+        }
+
+        return (x.is_negative()) ? -res : res;
     }
     /**
      * @brief Calculates the inverse hyperbolic tangent
@@ -3566,11 +4209,29 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 atanh(const float128 x) noexcept
     {
-        constexpr auto one = float128::one();
-        if (fabs(x) >= 1)
-            return 0;
+        if (x.is_nan() || x.is_zero())
+            return x;
 
-        return log((one + x) / (one - x)) >> 1;
+        constexpr auto one_value = float128::one();
+        const float128 a = fabs(x);
+        // The endpoints are poles and outside them the function is undefined. Returning zero for
+        // all three, as this used to, gave atanh(1) a finite value and atanh(2) a defined one.
+        if (a > one_value)
+            return nan();
+        if (a == one_value)
+            return x.is_negative() ? -inf() : inf();
+
+        // 2*atanh(a) = log1p(2a/(1-a)). Splitting the argument as below keeps the numerator from
+        // rounding away for a small a, where the answer is proportional to it: the previous form,
+        // log((1+x)/(1-x)), formed a quotient that rounds to exactly one and then took its
+        // logarithm, which is zero.
+        float128 res;
+        if (a < float128::half())
+            res = log1p((a << 1) + (sqr(a) << 1) / (one_value - a)) >> 1;
+        else
+            res = log1p((a << 1) / (one_value - a)) >> 1;
+
+        return (x.is_negative()) ? -res : res;
     }
     /**
      * @brief Calculates the Maclaurin series constants for the erf function.
@@ -3599,160 +4260,288 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 erf(float128 x) noexcept
     {
-        static const float128 sqrt_pi = sqrt(float128::pi());
-        static const float128 two_by_sqrt_pi = float128(2) / sqrt_pi;
-        constexpr int32_t C_len = 30;
-        static float128 C[C_len];
-        if (C[0].is_zero()) {
-            erf_constants(C, C_len);
-        }
-        if (x.is_zero())
-            return 0;
-        if (x.is_inf() || fabs(x) > 110)
-            return (x.is_positive()) ? 1 : -1;
-        if (x.is_nan())
-            return nan;
+        if (x.is_nan() || x.is_zero())
+            return x;
 
-        auto x_sign = x.get_sign();
-        x.set_sign(0);
+        const uint32_t sign = x.get_sign();
+        const float128 a = fabs(x);
+        float128 res;
 
-        int32_t expo = x.get_exponent();
-        float128 xx = x * x;
-
-        if (x < 2.0) {
-            // Maclaurin series:
-            //                             3      5      7      9
-            //             2              x      x      x      x
-            // erf(x) = -------- * ( x - ---  + ---- - ---- + ----- - ... )
-            //          sqrt(pi)          3      10     42     216
-            //
-            //
-            // each element in the series is:
-            //      n    2n+1
-            //  (-1)  * x
-            //  -------------
-            //  n! * (2n + 1)
-            //
-
-            // the first series element is x
-            // compute the rest of the series:
-            float128 elem_nom = x;
-            for (int i = 1, sign = 1; i < C_len; ++i, sign = 1 - sign) {
-                elem_nom *= xx;
-
-                float128 elem = elem_nom * C[i];  // next element in the series
-                // precision limit has been hit
-                if (elem.get_exponent() + float128::FRAC_BITS < expo)
-                    break;
-                x += (sign) ? -elem : elem;
-            }
-            x *= two_by_sqrt_pi;
-        } else if (x > 4.2) {
-            // x = float128::one() - erfc(x);
-
-            //                     2
-            //                   -x           -3       -5       -7
-            //                   e         -1  x      3x      15x
-            //  erf(x) = 1 - --------- * (x  - -   + ---- -  ----- - ...)
-            //               sqrt(pi)          2      4        8
-            //
-            //
-            // where each element is
-            //      n                -(2n+1)   -n
-            //  (-1)  * (2n - 1)!! * x       * 2
-
-            // the left side of the equation
-            float128 left_side = exp(-xx) / sqrt_pi;
-
-            x = reciprocal(x);  // first element
-            float128 elem, elem1 = x, elem2;
-            xx = x * x;
-            expo = x.get_exponent();
-            for (int i = 1, sign = 1; i < 25; ++i, sign = 1 - sign) {
-                elem1 *= xx;
-                elem2 = double_factorial(2 * i - 1);
-                elem = (elem1 * elem2) >> i;  // next element in the series
-                // precision limit has been hit
-                if (elem2.is_inf() || elem.get_exponent() + float128::FRAC_BITS < expo)
-                    break;
-                x += (sign) ? -elem : elem;
-            }
-
-            x *= left_side;
-            x = float128::one() - x;
+        // erfc(9) is 4.1e-37, which is below half the last place of one, so erf is one from here
+        // on and the series need never be run outside the range it converges quickly over.
+        if (x.is_inf() || a >= float128(9)) {
+            res = float128::one();
         } else {
-            // TODO: implement for other ranges
-            x = ::erf(static_cast<double>(x));
+            //                        2                   n
+            //           2x        -x     inf         (2x^2)
+            // erf(x) = ------ * e     *  sum   ------------------
+            //          sqrt(pi)          n=0    1*3*5*...*(2n+1)
+            //
+            // Every term of this series is positive, unlike the Maclaurin series in x^(2n+1) that
+            // this replaced: that one alternates, and its terms peak around n = x^2 at a value
+            // 2^24 times the sum by the time x reaches 4, so the answer was formed by cancelling
+            // away 24 bits of it. Past x = 2 the old code did not use a series at all - it called
+            // the CRT's double erf and returned 53 correct bits.
+            const float128 xx = sqr(a);
+            // The square rounds, and exp() magnifies that by x^2, which reaches 81 here. Keeping
+            // the exact error of the multiply and applying it as a factor puts those bits back.
+            const float128 xx_err = fma(a, a, -xx);
+            const float128 two_xx = xx << 1;
+
+            // The sum runs to eighty terms near the top of the range and every one of them rounds
+            // against a running total, which alone would cost the answer seven bits. two_sum()
+            // hands back what each addition lost, so it can be carried and added in at the end.
+            float128 term = float128::one();
+            float128 sum = term;
+            float128 lost;
+            for (int32_t n = 1; n < 1024; ++n) {
+                term = term * two_xx / float128(2 * n + 1);
+                float128 rounded, err;
+                two_sum(sum, term, rounded, err);
+                sum = rounded;
+                lost += err;
+                if (term.get_exponent() + FRAC_BITS + 8 < sum.get_exponent())
+                    break;
+            }
+            sum += lost;
+
+            const float128 gaussian = exp(-xx) * (float128::one() - xx_err);
+            res = ((a * sum) << 1) * float128::inv_sqrt_pi() * gaussian;
         }
 
-        x.set_sign(x_sign);
-        return x;
+        res.set_sign(sign);
+        return res;
     }
     /**
-     * @brief Computes the complementary error function of a value.
-     * The erfc functions return a value in the range 0 to 2. If x is too large for erfc, the errno variable is set to ERANGE.
-     * @param x A floating-point value.
-     * @return The erfc functions return the complementary Gauss error function of x.
+     * @brief Computes the complementary error function, 1 - erf(x).
+     *
+     * Above one the answer is a small difference of two values close to one, so it cannot be
+     * reached through erf() - at x = 6 the subtraction would leave 55 of the 113 bits, and past
+     * 13 nothing at all. It is computed directly instead, from Laplace's continued fraction
+     *
+     *                       2
+     *                     -x
+     *                    e                 1
+     *      erfc(x) = ---------- * ------------------------
+     *                 sqrt(pi)     x + (1/2)/(x + 1/(x + ...))
+     *
+     * evaluated with the modified Lentz algorithm. The fraction converges for every x above one,
+     * and fastest where the series form is weakest.
+     *
+     * @param x Input value
+     * @return 1 - erf(x)
      */
     [[nodiscard]] friend FP128_INLINE float128 erfc(float128 x) noexcept
     {
-        if (x.is_zero())
-            return 1;
-        if (x.is_inf())
-            return (x.get_sign()) ? 2 : 0;
         if (x.is_nan())
-            return nan();
+            return x;
+        if (x.is_inf())
+            return x.is_negative() ? float128(2) : float128();
+        if (x.is_zero())
+            return float128::one();
 
-        constexpr float128 one = float128::one();
-        if (fabs(x) < one)
-            return one - erf(x);
+        const float128 one_value = float128::one();
+        // erfc is symmetric about one: the negative half is where the answer approaches two and
+        // keeps every bit, so it is the reflection that is well conditioned there.
+        if (x.is_negative())
+            return float128(2) - erfc(-x);
+        if (x < one_value)
+            return one_value - erf(x);
+        // exp(-x*x) reaches the smallest subnormal at 106.9
+        if (x > float128(107))
+            return float128();
 
-        return (::erfc(static_cast<double>(x)));
+        constexpr int32_t max_iterations = 4096;
+        const float128 tiny = ldexp(one_value, -16000);
+        const float128 epsilon = ldexp(one_value, -FRAC_BITS - 8);
 
-        // auto x_sign = x.get_sign();
-        // x.set_sign(0);
+        float128 f = tiny;
+        float128 c = f;
+        float128 d;
+        for (int32_t n = 1; n < max_iterations; ++n) {
+            // a_1 is one, every a after it is (n-1)/2
+            const float128 a = (n == 1) ? one_value : (float128(n - 1) >> 1);
 
-        // float128 t = reciprocal(one + x >> 1);
-        // static const float128 a[13] = {
-        //    0.00000000000000000,
-        //     -0.0000000000000000087,
-        //     0.0000000000000151128,
-        //     -0.0000000000042211594,
-        //     0.0000000005376941005,
-        //     -0.0000000487263438743,
-        //     0.0000033500543171203,
-        //     -0.0001681266736668477,
-        //     0.0061765455561937135,
-        //     -0.1531173381477592232,
-        //     2.2723844989269186145,
-        //     -18.695741264372354978,
-        //     78.905158514824205072
-        // };
-        //
-        // float128 ans = 0.0;
-        // for (int i = 12; i >= 0; i--) {
-        //     ans = t * ans + a[i];
-        // }
-        // ans *= t * exp(-x * x);
-        // return (x_sign) ? float128(2) - ans : ans;
+            d = x + a * d;
+            if (d.is_zero())
+                d = tiny;
+            c = x + a / c;
+            if (c.is_zero())
+                c = tiny;
+            d = one_value / d;
+
+            const float128 delta = c * d;
+            f *= delta;
+            if (fabs(delta - one_value) < epsilon)
+                break;
+        }
+
+        const float128 xx = sqr(x);
+        const float128 xx_err = fma(x, x, -xx);
+        const float128 gaussian = exp(-xx) * (one_value - xx_err);
+        return gaussian * float128::inv_sqrt_pi() * f;
     }
     /**
      * @brief Tests whether x is finite (not infinite and not NaN).
      * @param x Input value
      * @return Non-zero if finite, zero otherwise.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int isfinite(const float128& x) noexcept { return x.is_finite(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isfinite(const float128& x) noexcept { return x.is_finite(); }
     /**
-     * @brief Computes (x * y) + z without losing precision between operations
+     * @brief Computes (x * y) + z with a single rounding at the end.
+     *
+     * The whole point of a fused multiply add is that the product is not rounded before the
+     * addend reaches it, which is what makes the result correct to the last bit and what lets a
+     * caller recover the error of a multiplication as fma(x, y, -x*y). Writing it as x * y + z
+     * rounds twice and loses everything the addend cancels against.
+     *
+     * The exact product of the two 113 bit mantissas is 226 bits, and the addend is another 113.
+     * Both are placed in a wide accumulator with their leading bits aligned, added or subtracted
+     * there, and the single rounding is applied when the result is read back out. An operand too
+     * far below the other one to reach the accumulator cannot change any bit of the result except
+     * through the tie break, so it is folded into the sticky bit.
+     *
      * @param x The first value to multiply.
      * @param y The second value to multiply.
-     * @param z The second value to multiply.
-     * @return (x * y) + z
+     * @param z The value to add to the product.
+     * @return (x * y) + z, correctly rounded.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 fma(float128 x, float128 y, float128 z) noexcept
+    [[nodiscard]] friend FP128_INLINE constexpr float128 fma(float128 x, float128 y, float128 z) noexcept
     {
-        // TODO: implement properly (w/o losing precision)
-        return x * y + z;
+        const uint32_t product_sign = x.get_sign() ^ y.get_sign();
+
+        // A NaN operand propagates, and so does the invalid product of a zero and an infinity.
+        if (x.is_nan() || y.is_nan() || z.is_nan())
+            return nan();
+        if ((x.is_inf() && y.is_zero()) || (y.is_inf() && x.is_zero()))
+            return nan();
+
+        // An infinite product decides the result on its own, unless the addend is the opposite
+        // infinity and the sum is undefined.
+        if (x.is_inf() || y.is_inf()) {
+            if (z.is_inf() && z.get_sign() != product_sign)
+                return nan();
+            float128 res = inf();
+            res.set_sign(product_sign);
+            return res;
+        }
+        if (z.is_inf())
+            return z;
+
+        // A zero product leaves the addend. Two zeros give a zero that is negative only when both
+        // of them are, which is what round to nearest requires of a sum of opposite signs.
+        if (x.is_zero() || y.is_zero()) {
+            if (!z.is_zero())
+                return z;
+            float128 res;
+            res.set_sign((z.get_sign() == product_sign) ? product_sign : 0);
+            return res;
+        }
+        // A zero addend leaves the product, which the multiply already rounds correctly.
+        if (z.is_zero())
+            return x * y;
+
+        uint64_t lx = 0, hx = 0, ly = 0, hy = 0, lz = 0, hz = 0;
+        int32_t ex = 0, ey = 0, ez = 0;
+        uint32_t sx = 0, sy = 0, sz = 0;
+        x.get_components(lx, hx, ex, sx);
+        y.get_components(ly, hy, ey, sy);
+        z.get_components(lz, hz, ez, sz);
+
+        // The exact 226 bit product of the two 113 bit mantissas. Both were normalized to
+        // [2^112, 2^113), so the product is in [2^224, 2^226) and its value is
+        // product * 2^(ex + ey - 224).
+        uint64_t product[4] {};
+        mul128to256(lx, hx, ly, hy, product);
+        const int32_t product_bits = wide_msb(product, 4);
+
+        // Weight of the leading bit of each operand, which is what they are aligned by.
+        const int32_t product_msb = ex + ey - 2 * FRAC_BITS + product_bits;
+        const int32_t top = (product_msb > ez) ? product_msb : ez;
+
+        // Bit WIDE_TOP of an accumulator carries the weight 2^top.
+        uint64_t product_acc[WIDE_WORDS] {};
+        uint64_t addend_acc[WIDE_WORDS] {};
+        const uint64_t addend[2] = {lz, hz};
+        bool sticky = wide_place(product_acc, product, 4, WIDE_TOP - (top - product_msb) - product_bits);
+        sticky = wide_place(addend_acc, addend, 2, WIDE_TOP - (top - ez) - FRAC_BITS) || sticky;
+
+        // Only the operand with the smaller leading bit can have been placed below the
+        // accumulator, so a sticky bit always belongs to the smaller of the two.
+        uint64_t* acc = product_acc;
+        uint32_t sign = product_sign;
+        if (product_sign == sz) {
+            wide_add(product_acc, addend_acc);
+        } else {
+            const int32_t cmp = wide_cmp(product_acc, addend_acc);
+            // Equal accumulators mean equal values: a dropped tail puts its operand more than 157
+            // bits below the other one, which no accumulator of the larger one can match.
+            if (cmp == 0)
+                return float128();
+
+            if (cmp > 0) {
+                wide_sub(product_acc, addend_acc);
+            } else {
+                wide_sub(addend_acc, product_acc);
+                acc = addend_acc;
+                sign = sz;
+            }
+            // What the subtrahend lost below the accumulator makes the difference smaller by less
+            // than one of its last places. Borrowing that one place and marking the remainder
+            // sticky says exactly that.
+            if (sticky)
+                wide_dec(acc);
+        }
+
+        const int32_t msb = wide_msb(acc, WIDE_WORDS);
+        int32_t expo = top - WIDE_TOP + msb;
+
+        // Read the 113 bit mantissa out of the accumulator, with the bit below it and whether
+        // anything below that was set.
+        uint64_t l = 0, h = 0;
+        uint64_t guard = 0;
+        const int32_t lsb = msb - FRAC_BITS;
+        if (lsb <= 0) {
+            // Fewer bits survived than the mantissa holds, so the result is exact. Cancellation
+            // that deep cannot coexist with a dropped tail, which needs the operands far apart.
+            l = acc[0];
+            h = acc[1];
+            shift_left128_inplace_safe(l, h, -lsb);
+        } else {
+            const int32_t word = lsb >> 6;
+            const int32_t bit = lsb & 63;
+            l = acc[word] >> bit;
+            h = (word + 1 < WIDE_WORDS) ? (acc[word + 1] >> bit) : 0;
+            if (bit != 0) {
+                if (word + 1 < WIDE_WORDS)
+                    l |= acc[word + 1] << (64 - bit);
+                if (word + 2 < WIDE_WORDS)
+                    h |= acc[word + 2] << (64 - bit);
+            }
+            h &= FRAC_UNITY | UPPER_FRAC_MASK;
+
+            guard = FP128_GET_BIT(acc[(lsb - 1) >> 6], (lsb - 1) & 63);
+            for (int32_t i = 0; i < ((lsb - 1) >> 6); ++i)
+                sticky = sticky || acc[i] != 0;
+            const int32_t below = (lsb - 1) & 63;
+            if (below != 0)
+                sticky = sticky || (acc[(lsb - 1) >> 6] & FP128_MAX_VALUE_64(below)) != 0;
+        }
+
+        // round half to even
+        if (guard != 0 && (sticky || (l & 1) != 0)) {
+            if (++l == 0)
+                ++h;
+            // Rounding up out of the mantissa lands on the next power of two.
+            if ((h >> EXP_SHIFT) != 1) {
+                h >>= 1;
+                ++expo;
+            }
+        }
+
+        float128 res;
+        res.set_components(l, h, expo, sign);
+        return res;
     }
     /**
      * @brief Gets the mantissa and exponent of a floating-point number.
@@ -3793,12 +4582,1325 @@ public:
         return x >> -exp;
     }
 
+    /**
+     * @name Classification and comparison
+     *
+     * The `<cmath>` predicates. They are functions rather than the macros the C header defines, in
+     * the same way the standard library's own C++ overloads are, so they take part in overload
+     * resolution and can be found by argument dependent lookup.
+     * @{
+     */
+
+    /// @brief True when the sign bit is set, including for -0 and for a negative NaN.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool signbit(const float128& x) noexcept { return x.get_sign() != 0; }
+    /// @brief True when x is neither zero, subnormal, infinite nor NaN.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isnormal(const float128& x) noexcept { return x.is_normal() && !x.is_zero(); }
+    /// @brief One of FP_NAN, FP_INFINITE, FP_ZERO, FP_SUBNORMAL or FP_NORMAL.
+    [[nodiscard]] friend FP128_INLINE constexpr int fpclassify(const float128& x) noexcept
+    {
+        if (x.is_nan())
+            return FP_NAN;
+        if (x.is_inf())
+            return FP_INFINITE;
+        if (x.is_zero())
+            return FP_ZERO;
+        return x.is_subnormal() ? FP_SUBNORMAL : FP_NORMAL;
+    }
+    /// @brief True when either operand is a NaN, so that the two do not compare in any order.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isunordered(const float128& x, const float128& y) noexcept
+    {
+        return x.is_nan() || y.is_nan();
+    }
+    /// @brief x > y, false rather than unordered when either is a NaN.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isgreater(const float128& x, const float128& y) noexcept
+    {
+        return !isunordered(x, y) && x > y;
+    }
+    /// @brief x >= y, false when either is a NaN.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isgreaterequal(const float128& x, const float128& y) noexcept
+    {
+        return !isunordered(x, y) && x >= y;
+    }
+    /// @brief x < y, false when either is a NaN.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isless(const float128& x, const float128& y) noexcept
+    {
+        return !isunordered(x, y) && x < y;
+    }
+    /// @brief x <= y, false when either is a NaN.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool islessequal(const float128& x, const float128& y) noexcept
+    {
+        return !isunordered(x, y) && x <= y;
+    }
+    /// @brief x < y or x > y, false when either is a NaN.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool islessgreater(const float128& x, const float128& y) noexcept
+    {
+        return !isunordered(x, y) && (x < y || x > y);
+    }
+    /// @}
+
+    /**
+     * @brief A quiet NaN carrying the payload spelled out in the argument.
+     *
+     * Mirrors the C library's nan(): the string is read as an unsigned integer, decimal by
+     * default, hexadecimal after an 0x prefix, and its low bits become the NaN's fraction. An
+     * empty or unparsable string gives the default NaN.
+     *
+     * @param payload Digits of the payload, may be empty
+     * @return A quiet NaN.
+     */
+    [[nodiscard]] friend FP128_INLINE float128 nan(const char* payload) noexcept
+    {
+        uint64_t bits = 1;
+        if (payload != nullptr && *payload != '\0') {
+            const uint64_t parsed = strtoull(payload, nullptr, 0);
+            // A zero fraction is an infinity rather than a NaN, so the default payload stands in.
+            if (parsed != 0)
+                bits = parsed;
+        }
+        // The leading fraction bit marks the NaN quiet; the payload fills the bits below it.
+        float128 res = float128(bits, 0, INF_EXP_BIASED, 0);
+        res.high |= QUIET_NAN_BIT;
+        return res;
+    }
+
+    /// @brief True when x is an integer whose last place is one, which is the parity a tie needs.
+    [[nodiscard]] FP128_INLINE static constexpr bool is_odd_int(const float128& x) noexcept
+    {
+        uint64_t l = 0, h = 0;
+        int32_t expo = 0;
+        uint32_t sign = 0;
+        x.get_components(l, h, expo, sign);
+        // Below one there is no units bit; above 2^112 the last place is two or more, so every
+        // value that far out is even.
+        if (expo < 0 || expo > FRAC_BITS)
+            return false;
+        const int32_t bit = FRAC_BITS - expo;
+        return (bit < 64) ? ((l >> bit) & 1) != 0 : ((h >> (bit - 64)) & 1) != 0;
+    }
+
+    /**
+     * @name Rounding to the current mode
+     *
+     * The library rounds to nearest with ties to even and offers no way to change that, so
+     * nearbyint and rint are the same function and neither can raise the inexact exception rint is
+     * otherwise allowed to. round() differs from both: it breaks a tie away from zero.
+     * @{
+     */
+    [[nodiscard]] friend FP128_INLINE constexpr float128 rint(const float128& x) noexcept
+    {
+        if (x.is_special() || x.is_zero() || x.is_int())
+            return x;
+
+        const float128 truncated = trunc(x);
+        const float128 fraction = fabs(x - truncated);  // exact
+        const float128 half_value = float128::half();
+        if (fraction < half_value)
+            return truncated;
+
+        float128 step = float128::one();
+        step.set_sign(x.get_sign());
+        if (fraction > half_value)
+            return truncated + step;
+
+        // Exactly halfway: the tie goes to the even neighbour.
+        return is_odd_int(truncated) ? truncated + step : truncated;
+    }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 nearbyint(const float128& x) noexcept { return rint(x); }
+    /// @}
+
+    /**
+     * @name Exponent manipulation
+     * @{
+     */
+    /// @brief x * 2^n, the same operation ldexp performs.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 scalbn(const float128& x, int n) noexcept { return ldexp(x, n); }
+    /// @brief x * 2^n for a long exponent, clamped to what the format can reach.
+    [[nodiscard]] friend FP128_INLINE constexpr float128 scalbln(const float128& x, long n) noexcept
+    {
+        // Anything past the format's range saturates the same way the shift itself would, and
+        // clamping keeps the conversion to int well defined.
+        constexpr long limit = 2 * (EXP_BIAS + FRAC_BITS);
+        const long clamped = (n > limit) ? limit : ((n < -limit) ? -limit : n);
+        return ldexp(x, static_cast<int>(clamped));
+    }
+    /// @}
+
+    /**
+     * @brief The representable value next to x in the direction of y.
+     * @param x Starting value
+     * @param y Value giving the direction
+     * @return The neighbour of x towards y, or y itself when the two are equal.
+     */
+    [[nodiscard]] friend FP128_INLINE constexpr float128 nextafter(const float128& x, const float128& y) noexcept
+    {
+        if (x.is_nan() || y.is_nan())
+            return nan();
+        if (x == y)
+            return y;  // the sign of y is what the standard hands back here
+        return (y > x) ? nextUp(x) : nextDown(x);
+    }
+    /// @brief The neighbour of x towards y. The same as nextafter: there is no wider type to convert from.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 nexttoward(const float128& x, const float128& y) noexcept
+    {
+        return nextafter(x, y);
+    }
+
+    /**
+     * @brief |x| mod |y|, along with the low bits of the quotient it implies.
+     *
+     * The shared engine behind fmod, remainder and remquo. All three are exact operations on the
+     * mantissas, and all three need the same long division; only what they do with the quotient
+     * differs.
+     *
+     * @param x Dividend, must be finite and non zero
+     * @param y Divisor, must be finite and non zero
+     * @param quotient Receives the low bits of the integer quotient
+     * @return The remainder, with a positive sign.
+     */
+    [[nodiscard]] FP128_INLINE static float128 fmod_magnitude(const float128& x, const float128& y, uint64_t& quotient) noexcept
+    {
+        quotient = 0;
+
+        uint64_t lx = 0, hx = 0, ly = 0, hy = 0;
+        int32_t ex = 0, ey = 0;
+        uint32_t sx = 0, sy = 0;
+        x.get_components(lx, hx, ex, sx);
+        y.get_components(ly, hy, ey, sy);
+
+        if (ex < ey || (ex == ey && uint128_t(lx, hx) < uint128_t(ly, hy)))
+            return fabs(x);
+
+        uint128_t rem(lx, hx);
+        const uint128_t mod(ly, hy);
+        uint128_t block_quotient = rem / mod;
+        rem -= block_quotient * mod;
+        uint64_t low = 0, high = 0;
+        block_quotient.get_components(low, high);
+        quotient = low;
+
+        int32_t shift = ex - ey;
+        constexpr int32_t block = 15;
+        while (shift > 0) {
+            const int32_t step = (shift < block) ? shift : block;
+            rem <<= step;
+            shift -= step;
+            block_quotient = rem / mod;
+            rem -= block_quotient * mod;
+            block_quotient.get_components(low, high);
+            // Only the low bits of the quotient are ever wanted, so the overflow is dropped.
+            quotient = (quotient << step) + low;
+        }
+
+        if (rem.is_zero())
+            return float128();
+
+        uint64_t rl = 0, rh = 0;
+        rem.get_components(rl, rh);
+        const int32_t msb = static_cast<int32_t>(log2(rl, rh));
+        shift_left128_inplace_safe(rl, rh, FRAC_BITS - msb);
+
+        float128 res;
+        res.set_components(rl, rh, ey - FRAC_BITS + msb, 0);
+        return res;
+    }
+
+    /**
+     * @brief IEEE 754 remainder: x - n*y with n the quotient rounded to the nearest even integer.
+     *
+     * Unlike fmod, whose result keeps the sign of x, this one lands in [-|y|/2, |y|/2].
+     *
+     * @param x Dividend
+     * @param y Divisor
+     * @return The remainder.
+     */
+    [[nodiscard]] friend FP128_INLINE float128 remainder(const float128& x, const float128& y) noexcept
+    {
+        int quotient = 0;
+        return remquo(x, y, &quotient);
+    }
+
+    /**
+     * @brief The IEEE remainder together with the low bits of the quotient.
+     * @param x Dividend
+     * @param y Divisor
+     * @param quo Receives at least the low three bits of the quotient, with the sign of x/y
+     * @return The remainder.
+     */
+    [[nodiscard]] friend FP128_INLINE float128 remquo(const float128& x, const float128& y, int* quo) noexcept
+    {
+        if (quo != nullptr)
+            *quo = 0;
+        if (x.is_nan() || y.is_nan() || x.is_inf() || y.is_zero())
+            return nan();
+        if (y.is_inf() || x.is_zero())
+            return x;
+
+        uint64_t bits = 0;
+        const float128 magnitude = fabs(y);
+        float128 rem = fmod_magnitude(x, y, bits);
+
+        // fmod leaves the remainder in [0, |y|); the IEEE one is the nearer of that and
+        // |y| - it, with a tie going to whichever leaves an even quotient.
+        const float128 twice = rem << 1;
+        const bool round_up = (twice > magnitude) || (twice == magnitude && (bits & 1) != 0);
+        if (round_up) {
+            rem -= magnitude;
+            ++bits;
+        }
+
+        if (quo != nullptr) {
+            // The standard asks for the low bits of the magnitude of the quotient, signed by the
+            // signs of the operands. Seven bits is the customary amount and fits any int.
+            const int low_bits = static_cast<int>(bits & 0x7F);
+            *quo = (x.get_sign() != y.get_sign()) ? -low_bits : low_bits;
+        }
+
+        rem.set_sign(rem.is_zero() ? x.get_sign() : (x.get_sign() ^ rem.get_sign()));
+        return rem;
+    }
+
+    /**
+     * @brief Length of the diagonal of a box, computed without an intermediate overflow.
+     * @param x First side
+     * @param y Second side
+     * @param z Third side
+     * @return sqrt(x*x + y*y + z*z)
+     */
+    [[nodiscard]] friend FP128_INLINE float128 hypot(const float128& x, const float128& y, const float128& z) noexcept
+    {
+        if (x.is_inf() || y.is_inf() || z.is_inf())
+            return inf();
+        if (x.is_nan() || y.is_nan() || z.is_nan())
+            return nan();
+
+        // Scaling by the largest term keeps every square inside the format's range, which squaring
+        // the values as they came would not: a side above 2^8192 overflows on its own.
+        const float128 largest = fmax(fabs(x), fmax(fabs(y), fabs(z)));
+        if (largest.is_zero())
+            return largest;
+
+        const int32_t expo = ilogb(largest);
+        const float128 a = ldexp(x, -expo);
+        const float128 b = ldexp(y, -expo);
+        const float128 c = ldexp(z, -expo);
+        return ldexp(sqrt(sqr(a) + sqr(b) + sqr(c)), expo);
+    }
+
+    /// @brief Terms of the Stirling series lgamma() runs. Sixteen reach 2^-119 for an argument of 40.
+    static constexpr int32_t STIRLING_TERMS = 16;
+
+    /**
+     * @brief Natural logarithm of the absolute value of the gamma function.
+     *
+     * Stirling's asymptotic series converges usefully only for a large argument, so a small one is
+     * walked up to 40 with the recurrence gamma(x+1) = x*gamma(x) and the logarithms of the
+     * factors are subtracted off afterwards. A negative argument goes through the reflection
+     * formula, which is why the result is the logarithm of the absolute value: the gamma function
+     * alternates sign between the poles at the non positive integers.
+     *
+     * @param x Input value
+     * @return log(|gamma(x)|)
+     */
+    [[nodiscard]] friend FP128_INLINE float128 lgamma(float128 x) noexcept
+    {
+        if (x.is_nan())
+            return x;
+        if (x.is_inf())
+            return inf();
+        // The non positive integers are the poles of the gamma function
+        if (x.is_zero() || (x.is_negative() && x.is_int()))
+            return inf();
+        // gamma(1) and gamma(2) are both one. The recurrence and the series below would reach the
+        // logarithm of 31! and subtract it from itself, which cancels to a small non zero value
+        // rather than to the exact answer.
+        if (x == float128::one() || x == float128(2))
+            return float128();
+
+        constexpr float128 coefficients[STIRLING_TERMS] = {
+            float128(0x5555555555555555, 0x555555555555, 0x3FFB, 0),  // B2 / (2*1)
+            float128(0x6C16C16C16C16C17, 0x6C16C16C16C1, 0x3FF6, 1),  // B4 / (4*3)
+            float128(0xA01A01A01A01A01A, 0xA01A01A01A01, 0x3FF4, 0),  // B6 / (6*5)
+            float128(0x3813813813813814, 0x381381381381, 0x3FF4, 1),  // B8 / (8*7)
+            float128(0x3570EA73806E5479, 0xB951E2B18FF2, 0x3FF4, 0),  // B10 / (10*9)
+            float128(0xC81F6AB0D9993C7D, 0xF6AB0D9993C7, 0x3FF5, 1),  // B12 / (12*11)
+            float128(0xA41A41A41A41A41A, 0xA41A41A41A41, 0x3FF7, 0),  // B14 / (14*13)
+            float128(0x7DC2064A8ED3175C, 0xE4286CB0F539, 0x3FF9, 1),  // B16 / (16*15)
+            float128(0xFFA1876FE96381E0, 0x6FE96381E067, 0x3FFC, 0),  // B18 / (18*17)
+            float128(0x9EDBDB9CE625987D, 0x6476701181F3, 0x3FFF, 1),  // B20 / (20*19)
+            float128(0x5A74F53910C8B380, 0xACE44322CE00, 0x4002, 0),  // B22 / (22*21)
+            float128(0xAAB67EE25D73C0F9, 0x39B2525CCCC1, 0x4006, 1),  // B24 / (24*23)
+            float128(0x1B4E81B4E81B4E82, 0x12234E81B4E8, 0x400A, 0),  // B26 / (26*25)
+            float128(0x7EB3FEDDD8496920, 0x1A198AE1C4AB, 0x400E, 1),  // B28 / (28*27)
+            float128(0xA38433DC9FB888D4, 0x51A2089A6E11, 0x4012, 0),  // B30 / (30*29)
+            float128(0x77880C2D3577880C, 0xD1089B142D35, 0x4016, 1),  // B32 / (32*31)
+        };
+        constexpr float128 half_log_two_pi(0x4A69297920028832, 0xD67F1C864BEB, 0x3FFE, 0);
+        constexpr float128 stirling_limit(0, 0, EXP_BIAS + 5, 0);  // 32, where sixteen terms suffice
+
+        // gamma(x) * gamma(1-x) = pi / sin(pi*x) reflects the negative half onto the positive one,
+        // where the series lives.
+        if (x.is_negative()) {
+            const float128 reflected = sin(float128::pi() * x);
+            return log(float128::pi() / fabs(reflected)) - lgamma(float128::one() - x);
+        }
+
+        // Walk up to where the asymptotic series is accurate, remembering what to divide out.
+        float128 scale_log;
+        while (x < stirling_limit) {
+            scale_log += log(x);
+            x += float128::one();
+        }
+
+        const float128 inv_xx = float128::one() / sqr(x);
+        float128 series;
+        for (int32_t i = STIRLING_TERMS - 1; i >= 1; --i)
+            series = (series + coefficients[i]) * inv_xx;
+        series = (series + coefficients[0]) / x;
+
+        return (x - float128::half()) * log(x) - x + half_log_two_pi + series - scale_log;
+    }
+
+    /**
+     * @brief The gamma function.
+     *
+     * Exact for the small integer arguments, where the answer is a factorial the format holds
+     * without rounding, and exp(lgamma) elsewhere. The exponential is what limits the accuracy: a
+     * logarithm as large as 7000 carries its own last bit into the seventh place of the result.
+     *
+     * @param x Input value
+     * @return gamma(x)
+     */
+    [[nodiscard]] friend FP128_INLINE float128 tgamma(float128 x) noexcept
+    {
+        if (x.is_nan())
+            return x;
+        if (x.is_inf())
+            return x.is_negative() ? nan() : x;
+        // The poles, and the two zeros of 1/gamma that a signed zero argument picks out
+        if (x.is_zero())
+            return x.is_negative() ? -inf() : inf();
+        if (x.is_negative() && x.is_int())
+            return nan();
+        // gamma(1756) overflows
+        if (x > float128(1756))
+            return inf();
+
+        // 34! is the largest factorial a binary128 holds exactly, so every integer argument up to
+        // 35 comes back with no rounding at all.
+        if (x.is_int() && x <= float128(35)) {
+            float128 result = float128::one();
+            for (float128 i = float128(2); i < x; i += float128::one())
+                result *= i;
+            return result;
+        }
+
+        const float128 magnitude = exp(lgamma(x));
+        if (x.is_positive())
+            return magnitude;
+
+        // Between two poles the gamma function keeps one sign, alternating with every step: it is
+        // negative on (-1, 0), positive on (-2, -1), and so on, which is the parity of floor(x).
+        const float128 floor_x = floor(x);
+        return is_odd_int(floor_x) ? -magnitude : magnitude;
+    }
+
+    /// @brief Absolute value, the name `<cmath>` gives the floating point overload alongside fabs.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 abs(const float128& x) noexcept { return fabs(x); }
+
     /// @brief User-defined literal implementation for constructing float128 from a string.
     friend float128 operator""_f128(const char* literal) { return float128(literal); }
 };
 
 static_assert(sizeof(float128) == sizeof(uint64_t) * 2);
 
+/***********************************************************************************
+ *                        Text conversion and standard library integration
+ ************************************************************************************/
+
+namespace detail
+{
+/// @brief Default precision the e, f and g styles use when none is given, as in printf.
+inline constexpr int32_t DEFAULT_PRECISION = 6;
+
+/// @brief Appends the decimal exponent of a scientific form, with a sign and at least two digits.
+inline void append_exponent(std::string& out, int32_t exponent, char marker)
+{
+    out += marker;
+    out += (exponent < 0) ? '-' : '+';
+    // The magnitude is taken in the unsigned domain, where the negation wraps. Negating the signed
+    // value is undefined for the most negative one and produces the same bit pattern for the rest.
+    uint32_t magnitude = (exponent < 0) ? (0u - static_cast<uint32_t>(exponent)) : static_cast<uint32_t>(exponent);
+
+    // Ten digits is the widest a uint32_t can be. No exponent this function is handed comes close -
+    // the largest is 16494, from the hexadecimal form of the smallest subnormal - but the buffer is
+    // sized for the type rather than for the callers, so the loops below cannot run past it.
+    //
+    // The digits are produced least significant first and so are written from the end of the
+    // buffer backwards, which leaves them already in order and lets the whole run be appended at
+    // once. Filling forwards and reversing afterwards needs three loops over one shared counter,
+    // and MSVC's code analysis cannot see that the counter stays in range across all of them.
+    constexpr int32_t max_digits = 10;
+    char digits[max_digits];
+    int32_t index = max_digits;
+    while (index > 0) {
+        digits[--index] = static_cast<char>('0' + (magnitude % 10));
+        magnitude /= 10;
+        if (magnitude == 0)
+            break;
+    }
+
+    // The exponent always shows at least two digits, as it does for a double.
+    while (index > max_digits - 2)
+        digits[--index] = '0';
+
+    out.append(digits + index, static_cast<size_t>(max_digits - index));
+}
+
+/**
+ * @brief Fewest significant digits that read back as the same value.
+ *
+ * The search is a bisection rather than a scan because the property is monotone: a decimal with
+ * more digits is at least as close to the value as one with fewer, so if some length reads back
+ * correctly then every longer one does too.
+ *
+ * @param low Low QWORD of the mantissa
+ * @param high High QWORD of the mantissa
+ * @param exponent Unbiased exponent of the value
+ * @return Digit count in [1, 36].
+ */
+[[nodiscard]] inline int32_t shortest_digit_count(uint64_t low, uint64_t high, int32_t exponent)
+{
+    char digits[40];
+    int32_t lower = 1;
+    int32_t upper = 36;  // max_digits10, which always reads back
+
+    while (lower < upper) {
+        const int32_t middle = (lower + upper) / 2;
+        const int32_t exponent10 = to_decimal_digits(low, high, exponent, middle, digits);
+
+        uint64_t back_low = 0, back_high = 0;
+        int32_t back_exponent = 0;
+        const bool parsed = from_decimal_digits(digits, middle, exponent10 - middle, back_low, back_high, back_exponent);
+        if (parsed && back_low == low && back_high == high && back_exponent == exponent)
+            upper = middle;
+        else
+            lower = middle + 1;
+    }
+    return lower;
+}
+
+/**
+ * @brief Renders a float128 as text.
+ *
+ * The one place the character form of a value is produced. std::format, the stream inserter,
+ * to_chars and the conversion to std::string all come through here so that they cannot disagree
+ * with each other.
+ *
+ * @param value Value to render
+ * @param style One of 'a', 'e', 'f' or 'g', or '\0' for the shortest form that reads back exactly
+ * @param precision Digits after the point, or significant digits for 'g'. Negative selects the
+ *        default for the style
+ * @param uppercase Emit the digits, the exponent marker and the special values in upper case
+ * @param alternate Keep the decimal point and, for 'g', the trailing zeros
+ * @param sign_char Character to emit for a non negative value: '-' means emit nothing
+ * @return The rendered text.
+ */
+[[nodiscard]] inline std::string render(const float128& value, char style, int32_t precision, bool uppercase, bool alternate, char sign_char)
+{
+    std::string out;
+    if (value.is_negative())
+        out += '-';
+    else if (sign_char != '-')
+        out += sign_char;
+
+    if (value.is_nan()) {
+        out += uppercase ? "NAN" : "nan";
+        return out;
+    }
+    if (value.is_inf()) {
+        out += uppercase ? "INF" : "inf";
+        return out;
+    }
+
+    const char* const hex_digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+
+    // The hexadecimal form is a direct reading of the encoding, so it needs none of the decimal
+    // machinery and is exact by construction at any precision.
+    if (style == 'a') {
+        out += uppercase ? "0X" : "0x";
+        if (value.is_zero()) {
+            out += '0';
+            if (alternate || precision > 0) {
+                out += '.';
+                for (int32_t i = 0; i < precision; ++i)
+                    out += '0';
+            }
+            append_exponent(out, 0, uppercase ? 'P' : 'p');
+            return out;
+        }
+
+        uint64_t low = 0, high = 0;
+        int32_t exponent = 0;
+        uint32_t sign = 0;
+        value.get_components(low, high, exponent, sign);
+
+        // 28 hex digits hold the whole fraction, and the leading one sits above the point.
+        char fraction[28];
+        for (int32_t i = 0; i < 28; ++i) {
+            const int32_t shift = 108 - 4 * i;
+            const uint64_t nibble = (shift >= 64) ? ((high >> (shift - 64)) & 0xF) : ((low >> shift) & 0xF);
+            fraction[i] = hex_digits[nibble];
+        }
+
+        const auto hex_value = [](char c) {
+            if (c >= '0' && c <= '9')
+                return c - '0';
+            return ((c >= 'a') ? (c - 'a') : (c - 'A')) + 10;
+        };
+
+        int32_t kept = (precision >= 0) ? precision : 28;
+        if (kept > 28)
+            kept = 28;
+        // Rounding a shortened fraction: the first dropped digit decides, ties go up. A carry can
+        // run through the fraction and into the leading one, which is the next power of two.
+        bool leading_two = false;
+        if (precision >= 0 && precision < 28) {
+            if (hex_value(fraction[precision]) >= 8) {
+                int32_t index = precision - 1;
+                while (index >= 0) {
+                    const int32_t digit = hex_value(fraction[index]);
+                    if (digit != 15) {
+                        fraction[index] = hex_digits[digit + 1];
+                        break;
+                    }
+                    fraction[index] = '0';
+                    --index;
+                }
+                if (index < 0)
+                    leading_two = true;
+            }
+        }
+        if (precision < 0) {
+            // Trailing zeros carry no information in the shortest form.
+            while (kept > 0 && fraction[kept - 1] == '0')
+                --kept;
+        }
+
+        out += leading_two ? '2' : '1';
+        if (kept > 0 || alternate) {
+            out += '.';
+            out.append(fraction, static_cast<size_t>(kept));
+        }
+        append_exponent(out, exponent, uppercase ? 'P' : 'p');
+        return out;
+    }
+
+    if (value.is_zero()) {
+        out += '0';
+        // The fixed and scientific layouts always show the digits asked for; the general one shows
+        // none unless the alternate form wanted them.
+        int32_t zeros = 0;
+        if (style == 'f' || style == 'e')
+            zeros = (precision >= 0) ? precision : DEFAULT_PRECISION;
+        else if (alternate)
+            zeros = (precision > 0) ? precision - 1 : DEFAULT_PRECISION - 1;
+
+        if (zeros > 0 || alternate) {
+            out += '.';
+            out.append(static_cast<size_t>(zeros), '0');
+        }
+        if (style == 'e')
+            append_exponent(out, 0, uppercase ? 'E' : 'e');
+        return out;
+    }
+
+    uint64_t low = 0, high = 0;
+    int32_t exponent = 0;
+    uint32_t sign = 0;
+    value.get_components(low, high, exponent, sign);
+
+    char digits[MAX_OUTPUT_DIGITS];
+    int32_t significant = 0;
+    int32_t exponent10 = 0;
+
+    if (style == '\0') {
+        significant = shortest_digit_count(low, high, exponent);
+        exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+    } else if (style == 'e') {
+        significant = ((precision >= 0) ? precision : DEFAULT_PRECISION) + 1;
+        if (significant > MAX_OUTPUT_DIGITS)
+            significant = MAX_OUTPUT_DIGITS;
+        exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+    } else if (style == 'g') {
+        significant = (precision > 0) ? precision : ((precision == 0) ? 1 : DEFAULT_PRECISION);
+        if (significant > MAX_OUTPUT_DIGITS)
+            significant = MAX_OUTPUT_DIGITS;
+        exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+    } else {
+        // Fixed notation asks for a count of digits after the point rather than significant ones,
+        // and how many that is depends on where the value sits. One digit is generated first to
+        // find that out, then the real request is made.
+        const int32_t after_point = (precision >= 0) ? precision : DEFAULT_PRECISION;
+        bool exact = false;
+        int32_t probe_exponent10 = to_decimal_digits(low, high, exponent, 1, digits, &exact);
+        significant = probe_exponent10 + after_point;
+
+        // A single digit probe rounds, and a value just below a power of ten rounds up into the
+        // next one: 99 comes back as 1e2 and claims one more digit than it has. Generating the
+        // digits reveals the true exponent, and one retry with it is always enough because the
+        // rounding can only move the exponent by one.
+        if (significant > 0 && significant <= MAX_OUTPUT_DIGITS) {
+            const int32_t actual_exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+            if (actual_exponent10 != probe_exponent10) {
+                probe_exponent10 = actual_exponent10;
+                significant = actual_exponent10 + after_point;
+            }
+        }
+
+        if (significant <= 0) {
+            // The value is below half of the last place asked for, or exactly on it. A tie goes to
+            // the even digit, which is the zero already there.
+            const bool round_up = (significant == 0) && (digits[0] > '5' || (digits[0] == '5' && !exact));
+            out += '0';
+            if (after_point > 0 || alternate) {
+                out += '.';
+                for (int32_t i = 0; i < after_point; ++i)
+                    out += (round_up && i == after_point - 1) ? '1' : '0';
+            }
+            return out;
+        }
+
+        if (significant > MAX_OUTPUT_DIGITS) {
+            // Past MAX_OUTPUT_DIGITS the exact expansion is no longer produced and the rest of
+            // the request is filled with zeros. The expansion of a subnormal runs to 16494 places
+            // after the point; the cap is set at what writing the widest finite value out in full
+            // needs, which is 4933.
+            exponent10 = to_decimal_digits(low, high, exponent, MAX_OUTPUT_DIGITS, digits);
+            const int32_t padding = significant - MAX_OUTPUT_DIGITS;
+            significant = MAX_OUTPUT_DIGITS;
+            std::string body(digits, static_cast<size_t>(significant));
+            body.append(static_cast<size_t>(padding), '0');
+            // Lay the point out from the exponent the generator returned.
+            if (exponent10 <= 0) {
+                out += "0.";
+                out.append(static_cast<size_t>(-exponent10), '0');
+                out += body;
+            } else {
+                out.append(body, 0, static_cast<size_t>(exponent10));
+                out += '.';
+                out.append(body, static_cast<size_t>(exponent10), std::string::npos);
+            }
+            return out;
+        }
+
+        exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+    }
+
+    const int32_t scientific_exponent = exponent10 - 1;
+
+    int32_t kept = significant;
+    if ((style == 'g' || style == '\0') && !alternate) {
+        while (kept > 1 && digits[kept - 1] == '0')
+            --kept;
+    }
+
+    bool scientific = (style == 'e');
+    if (style == 'g') {
+        // printf's rule for %g, which std::format keeps for the g type.
+        scientific = (scientific_exponent < -4) || (scientific_exponent >= significant);
+    } else if (style == '\0') {
+        // The default is whichever layout is shorter, with a tie going to the fixed one, which is
+        // what std::to_chars produces and therefore what std::format gives a double. The rule for
+        // %g would print 100 as 1e+02: it compares the exponent against the digit count, and the
+        // shortest form of a round number has very few digits.
+        int32_t fixed_length = 0;
+        if (exponent10 <= 0)
+            fixed_length = 2 - exponent10 + kept;
+        else if (exponent10 >= kept)
+            fixed_length = exponent10;
+        else
+            fixed_length = kept + 1;
+
+        int32_t exponent_digits = 2;
+        for (int32_t magnitude = (scientific_exponent < 0) ? -scientific_exponent : scientific_exponent; magnitude >= 100; magnitude /= 10)
+            ++exponent_digits;
+        const int32_t scientific_length = kept + ((kept > 1) ? 1 : 0) + 2 + exponent_digits;
+
+        scientific = scientific_length < fixed_length;
+    }
+
+    if (scientific) {
+        out += digits[0];
+        if (kept > 1 || alternate) {
+            out += '.';
+            out.append(digits + 1, static_cast<size_t>(kept - 1));
+        }
+        append_exponent(out, scientific_exponent, uppercase ? 'E' : 'e');
+        return out;
+    }
+
+    if (exponent10 <= 0) {
+        out += "0.";
+        out.append(static_cast<size_t>(-exponent10), '0');
+        out.append(digits, static_cast<size_t>(kept));
+    } else if (exponent10 >= kept) {
+        out.append(digits, static_cast<size_t>(kept));
+        out.append(static_cast<size_t>(exponent10 - kept), '0');
+        if (alternate)
+            out += '.';
+    } else {
+        out.append(digits, static_cast<size_t>(exponent10));
+        out += '.';
+        out.append(digits + exponent10, static_cast<size_t>(kept - exponent10));
+    }
+
+    // Fixed notation pads out to the requested number of digits after the point.
+    if (style == 'f') {
+        const int32_t after_point = (precision >= 0) ? precision : DEFAULT_PRECISION;
+        const size_t point = out.find('.');
+        const size_t written = (point == std::string::npos) ? 0 : (out.size() - point - 1);
+        if (after_point > 0) {
+            if (point == std::string::npos)
+                out += '.';
+            for (size_t i = written; i < static_cast<size_t>(after_point); ++i)
+                out += '0';
+        }
+    }
+    return out;
+}
+}  // namespace detail
+
+/**
+ * @brief The shortest decimal string that reads back as this exact value.
+ * @param value Value to convert
+ * @return Decimal text, in scientific notation when the exponent is far from zero.
+ */
+[[nodiscard]] inline std::string to_string(const float128& value)
+{
+    return detail::render(value, '\0', -1, false, false, '-');
+}
+
+/**
+ * @brief Converts text to a float128, in the shape of std::from_chars.
+ *
+ * Reads the longest prefix of [first, last) that forms a number: an optional sign, decimal digits
+ * with an optional point and an optional exponent, or one of inf, infinity and nan. The result is
+ * the representable value nearest the one the text names, correctly rounded.
+ *
+ * @param first Start of the text
+ * @param last One past the end of the text
+ * @param value Receives the parsed value, untouched when nothing was parsed
+ * @return ptr points past what was consumed; ec is invalid_argument when no number was found and
+ *         result_out_of_range when the value is beyond the format's range.
+ */
+inline std::from_chars_result from_chars(const char* first, const char* last, float128& value)
+{
+    std::from_chars_result result {first, std::errc {}};
+    const char* cursor = first;
+    if (cursor == last) {
+        result.ec = std::errc::invalid_argument;
+        return result;
+    }
+
+    bool negative = false;
+    if (*cursor == '-' || *cursor == '+') {
+        negative = (*cursor == '-');
+        ++cursor;
+    }
+
+    const auto lower = [](char c) { return static_cast<char>((c >= 'A' && c <= 'Z') ? (c - 'A' + 'a') : c); };
+    const auto matches = [&](const char* word, size_t length) {
+        if (static_cast<size_t>(last - cursor) < length)
+            return false;
+        for (size_t i = 0; i < length; ++i) {
+            if (lower(cursor[i]) != word[i])
+                return false;
+        }
+        return true;
+    };
+
+    if (matches("inf", 3)) {
+        cursor += 3;
+        if (matches("inity", 5))
+            cursor += 5;
+        value = negative ? -float128::inf() : float128::inf();
+        result.ptr = cursor;
+        return result;
+    }
+    if (matches("nan", 3)) {
+        cursor += 3;
+        value = float128::nan();
+        value.set_sign(negative ? 1 : 0);
+        result.ptr = cursor;
+        return result;
+    }
+
+    // The digits are collected without the point, which only decides the exponent.
+    char digits[detail::MAX_SIGNIFICANT_DIGITS];
+    int32_t count = 0;
+    int32_t exponent10 = 0;
+    bool any_digit = false;
+    bool seen_significant = false;
+
+    // What is being built is `digits` read as an integer, times 10^exponent10. A digit before the
+    // point that does not fit raises the exponent, since its place is still there. One after the
+    // point lowers it when it is kept, and a leading zero after the point lowers it as well even
+    // though nothing is stored for it.
+    const auto take_integer = [&](char digit) {
+        any_digit = true;
+        seen_significant = seen_significant || (digit != '0');
+        if (!seen_significant)
+            return;
+        if (count < detail::MAX_SIGNIFICANT_DIGITS)
+            digits[count++] = digit;
+        else
+            ++exponent10;
+    };
+    const auto take_fraction = [&](char digit) {
+        any_digit = true;
+        seen_significant = seen_significant || (digit != '0');
+        if (!seen_significant) {
+            --exponent10;
+            return;
+        }
+        if (count < detail::MAX_SIGNIFICANT_DIGITS) {
+            digits[count++] = digit;
+            --exponent10;
+        }
+    };
+
+    while (cursor < last && *cursor >= '0' && *cursor <= '9')
+        take_integer(*cursor++);
+
+    if (cursor < last && *cursor == '.') {
+        ++cursor;
+        while (cursor < last && *cursor >= '0' && *cursor <= '9')
+            take_fraction(*cursor++);
+    }
+
+    if (!any_digit) {
+        result.ec = std::errc::invalid_argument;
+        return result;
+    }
+    result.ptr = cursor;
+
+    // An exponent is only consumed when it is well formed, so that "1e" reads as 1.
+    if (cursor < last && (*cursor == 'e' || *cursor == 'E')) {
+        const char* probe = cursor + 1;
+        bool exponent_negative = false;
+        if (probe < last && (*probe == '-' || *probe == '+')) {
+            exponent_negative = (*probe == '-');
+            ++probe;
+        }
+        if (probe < last && *probe >= '0' && *probe <= '9') {
+            int64_t magnitude = 0;
+            while (probe < last && *probe >= '0' && *probe <= '9') {
+                if (magnitude < 1000000)
+                    magnitude = magnitude * 10 + (*probe - '0');
+                ++probe;
+            }
+            exponent10 += static_cast<int32_t>(exponent_negative ? -magnitude : magnitude);
+            result.ptr = probe;
+        }
+    }
+
+    uint64_t low = 0, high = 0;
+    int32_t exponent = 0;
+    if (!detail::from_decimal_digits(digits, count, exponent10, low, high, exponent)) {
+        if (exponent > 100000) {
+            value = negative ? -float128::inf() : float128::inf();
+            result.ec = std::errc::result_out_of_range;
+        } else {
+            value = float128();
+            value.set_sign(negative ? 1 : 0);
+            if (exponent < -100000)
+                result.ec = std::errc::result_out_of_range;
+        }
+        return result;
+    }
+
+    value.set_components(low, high, exponent, negative ? 1u : 0u);
+    return result;
+}
+
+/**
+ * @brief Converts a float128 to text, in the shape of std::to_chars.
+ * @param first Start of the output range
+ * @param last One past the end of the output range
+ * @param value Value to convert
+ * @param fmt Layout to use
+ * @param precision Digits after the point, or significant digits for `general`
+ * @return ptr points past the last character written; ec is value_too_large when the range was too
+ *         small, in which case nothing was written.
+ */
+inline std::to_chars_result to_chars(char* first, char* last, const float128& value, std::chars_format fmt, int precision)
+{
+    char style = '\0';
+    switch (fmt) {
+    case std::chars_format::scientific: style = 'e'; break;
+    case std::chars_format::fixed:      style = 'f'; break;
+    case std::chars_format::hex:        style = 'a'; break;
+    default:                            style = 'g'; break;
+    }
+
+    const std::string text = detail::render(value, style, precision, false, false, '-');
+    if (text.size() > static_cast<size_t>(last - first))
+        return {last, std::errc::value_too_large};
+
+    for (size_t i = 0; i < text.size(); ++i)
+        first[i] = text[i];
+    return {first + text.size(), std::errc {}};
+}
+
+/// @brief Converts a float128 to text with the default precision for the layout.
+inline std::to_chars_result to_chars(char* first, char* last, const float128& value, std::chars_format fmt)
+{
+    return to_chars(first, last, value, fmt, -1);
+}
+
+/// @brief Converts a float128 to the shortest text that reads back as the same value.
+inline std::to_chars_result to_chars(char* first, char* last, const float128& value)
+{
+    const std::string text = detail::render(value, '\0', -1, false, false, '-');
+    if (text.size() > static_cast<size_t>(last - first))
+        return {last, std::errc::value_too_large};
+
+    for (size_t i = 0; i < text.size(); ++i)
+        first[i] = text[i];
+    return {first + text.size(), std::errc {}};
+}
+
+/**
+ * @brief Writes a float128 to a stream, honouring its formatting state.
+ *
+ * The stream's precision, its fixed, scientific and hexfloat flags, showpos, showpoint, uppercase,
+ * width, fill and adjustfield are all applied, so a float128 behaves in a stream the way a double
+ * does.
+ */
+inline std::ostream& operator<<(std::ostream& os, const float128& value)
+{
+    const std::ios_base::fmtflags flags = os.flags();
+    const std::ios_base::fmtflags style_flags = flags & std::ios_base::floatfield;
+
+    char style = '\0';
+    int32_t precision = static_cast<int32_t>(os.precision());
+    if (style_flags == std::ios_base::fixed) {
+        style = 'f';
+    } else if (style_flags == std::ios_base::scientific) {
+        style = 'e';
+    } else if (style_flags == (std::ios_base::fixed | std::ios_base::scientific)) {
+        style = 'a';
+        precision = -1;  // hexfloat ignores the precision
+    } else {
+        // The default floatfield is the general layout, where the precision counts significant
+        // digits and zero means one.
+        style = 'g';
+    }
+
+    const char sign_char = (flags & std::ios_base::showpos) ? '+' : '-';
+    const bool uppercase = (flags & std::ios_base::uppercase) != 0;
+    const bool alternate = (flags & std::ios_base::showpoint) != 0;
+    std::string text = detail::render(value, style, precision, uppercase, alternate, sign_char);
+
+    const std::streamsize width = os.width();
+    os.width(0);
+    if (static_cast<std::streamsize>(text.size()) < width) {
+        const size_t padding = static_cast<size_t>(width) - text.size();
+        const std::ios_base::fmtflags adjust = flags & std::ios_base::adjustfield;
+        if (adjust == std::ios_base::left) {
+            text.append(padding, os.fill());
+        } else if (adjust == std::ios_base::internal && !text.empty() && (text[0] == '-' || text[0] == '+')) {
+            // internal puts the fill between the sign and the digits
+            text.insert(1, padding, os.fill());
+        } else {
+            text.insert(0, padding, os.fill());
+        }
+    }
+    return os << text;
+}
+
+/**
+ * @brief Reads a float128 from a stream.
+ *
+ * Accepts what the constructor from a string does. Failure leaves the value untouched and sets
+ * failbit, the way the builtin extractors do.
+ */
+inline std::istream& operator>>(std::istream& is, float128& value)
+{
+    std::string token;
+    if (!(is >> token))
+        return is;
+
+    float128 parsed;
+    const std::from_chars_result result = from_chars(token.data(), token.data() + token.size(), parsed);
+    if (result.ec == std::errc::invalid_argument || result.ptr != token.data() + token.size()) {
+        is.setstate(std::ios_base::failbit);
+        return is;
+    }
+
+    value = parsed;
+    return is;
+}
+
 }  // namespace fp128
+
+namespace std
+{
+/**
+ * @brief Numeric properties of fp128::float128, the binary128 interchange format.
+ *
+ * Specialized so that a function template written against a builtin floating point type - anything
+ * reaching for numeric_limits<T>::epsilon() to size a tolerance, or for max() to seed a minimum -
+ * compiles and behaves correctly when instantiated with float128.
+ *
+ * The values are given as encodings rather than computed, which keeps every one of them usable in
+ * a constant expression and independent of the string parser.
+ */
+template <> class numeric_limits<fp128::float128>
+{
+public:
+    static constexpr bool is_specialized = true;
+    static constexpr bool is_signed = true;
+    static constexpr bool is_integer = false;
+    static constexpr bool is_exact = false;
+    static constexpr bool has_infinity = true;
+    static constexpr bool has_quiet_NaN = true;
+    static constexpr bool has_signaling_NaN = true;
+    static constexpr bool is_bounded = true;
+    static constexpr bool is_modulo = false;
+    /// @brief The format is binary128 exactly as IEEE 754-2008 defines it.
+    static constexpr bool is_iec559 = true;
+    /// @brief No floating point status word exists, so nothing can trap or be flagged.
+    static constexpr bool traps = false;
+    static constexpr bool tinyness_before = false;
+    static constexpr float_round_style round_style = round_to_nearest;
+
+    /// @brief Mantissa bits including the implicit leading one.
+    static constexpr int digits = 113;
+    /// @brief Decimal digits that survive a round trip through the type.
+    static constexpr int digits10 = 33;
+    /// @brief Decimal digits needed to distinguish every value of the type.
+    static constexpr int max_digits10 = 36;
+    static constexpr int radix = 2;
+    static constexpr int min_exponent = -16381;
+    static constexpr int max_exponent = 16384;
+    static constexpr int min_exponent10 = -4931;
+    static constexpr int max_exponent10 = 4932;
+
+    // has_denorm and has_denorm_loss are deprecated in C++23 but remain part of the interface a
+    // generic caller may read, so they are provided.
+    static constexpr float_denorm_style has_denorm = denorm_present;
+    static constexpr bool has_denorm_loss = false;
+
+    /// @brief Smallest positive normal value, 2^-16382.
+    [[nodiscard]] static constexpr fp128::float128 min() noexcept { return fp128::float128(0, 0x0001000000000000ull); }
+    /// @brief Largest finite value, (2 - 2^-112) * 2^16383.
+    [[nodiscard]] static constexpr fp128::float128 max() noexcept { return fp128::float128(UINT64_MAX, 0x7FFEFFFFFFFFFFFFull); }
+    /// @brief Most negative finite value.
+    [[nodiscard]] static constexpr fp128::float128 lowest() noexcept { return fp128::float128(UINT64_MAX, 0xFFFEFFFFFFFFFFFFull); }
+    /// @brief Difference between one and the next larger value, 2^-112.
+    [[nodiscard]] static constexpr fp128::float128 epsilon() noexcept { return fp128::float128(0, 0x3F8F000000000000ull); }
+    /// @brief Largest rounding error in units in the last place, one half.
+    [[nodiscard]] static constexpr fp128::float128 round_error() noexcept { return fp128::float128(0, 0x3FFE000000000000ull); }
+    /// @brief Smallest positive subnormal, 2^-16494.
+    [[nodiscard]] static constexpr fp128::float128 denorm_min() noexcept { return fp128::float128(1, 0); }
+    [[nodiscard]] static constexpr fp128::float128 infinity() noexcept { return fp128::float128::inf(); }
+    [[nodiscard]] static constexpr fp128::float128 quiet_NaN() noexcept { return fp128::float128::nan(); }
+    [[nodiscard]] static constexpr fp128::float128 signaling_NaN() noexcept { return fp128::float128::signaling_nan(); }
+};
+
+/// @brief const, volatile and cv qualified float128 have the same numeric properties.
+template <> class numeric_limits<const fp128::float128> : public numeric_limits<fp128::float128>
+{
+};
+template <> class numeric_limits<volatile fp128::float128> : public numeric_limits<fp128::float128>
+{
+};
+template <> class numeric_limits<const volatile fp128::float128> : public numeric_limits<fp128::float128>
+{
+};
+
+/**
+ * @brief std::format support for fp128::float128.
+ *
+ * Accepts the whole floating point format specification: fill and alignment, a sign, the alternate
+ * form, zero padding, a width, a precision, and any of the a, A, e, E, f, F, g and G types. An
+ * empty specification gives the shortest text that reads back as the same value, which is what
+ * std::format produces for a double.
+ *
+ * A width or precision given as a nested replacement field is not supported; both have to be
+ * written out as digits.
+ */
+template <> struct formatter<fp128::float128, char>
+{
+    constexpr auto parse(basic_format_parse_context<char>& context)
+    {
+        auto it = context.begin();
+        const auto end = context.end();
+        if (it == end || *it == '}')
+            return it;
+
+        // [[fill]align]
+        const auto is_align = [](char c) { return c == '<' || c == '>' || c == '^'; };
+        if (it + 1 != end && is_align(*(it + 1))) {
+            fill = *it;
+            align = *(it + 1);
+            it += 2;
+        } else if (is_align(*it)) {
+            align = *it++;
+        }
+
+        // [sign]
+        if (it != end && (*it == '+' || *it == '-' || *it == ' '))
+            sign = *it++;
+
+        // [#]
+        if (it != end && *it == '#') {
+            alternate = true;
+            ++it;
+        }
+
+        // [0], which is an alignment rather than a fill in its own right
+        if (it != end && *it == '0') {
+            zero_pad = true;
+            ++it;
+        }
+
+        // [width]
+        while (it != end && *it >= '0' && *it <= '9')
+            width = width * 10 + (*it++ - '0');
+
+        // [.precision]
+        if (it != end && *it == '.') {
+            ++it;
+            precision = 0;
+            while (it != end && *it >= '0' && *it <= '9')
+                precision = precision * 10 + (*it++ - '0');
+        }
+
+        // [type]
+        if (it != end && *it != '}') {
+            switch (*it) {
+            case 'a':
+            case 'A':
+            case 'e':
+            case 'E':
+            case 'f':
+            case 'F':
+            case 'g':
+            case 'G':
+                type = *it++;
+                break;
+            default:
+                throw format_error("invalid type in the format specification for float128");
+            }
+        }
+
+        if (it != end && *it != '}')
+            throw format_error("unmatched brace in the format specification for float128");
+        return it;
+    }
+
+    template <typename FormatContext> auto format(const fp128::float128& value, FormatContext& context) const
+    {
+        const string text = render(value);
+        return std::copy(text.begin(), text.end(), context.out());
+    }
+
+    /// @brief Builds the text, including the padding the specification asks for.
+    [[nodiscard]] string render(const fp128::float128& value) const
+    {
+        const bool uppercase = (type >= 'A' && type <= 'Z');
+        const char style = static_cast<char>(uppercase ? (type - 'A' + 'a') : type);
+        string text = fp128::detail::render(value, style, precision, uppercase, alternate, sign);
+
+        if (static_cast<int>(text.size()) >= width)
+            return text;
+
+        const size_t padding = static_cast<size_t>(width) - text.size();
+        // Zero padding goes between the sign and the digits, and only when no alignment was given.
+        // A special value is never zero padded, the way it is not for a double either.
+        if (zero_pad && align == 0 && !value.is_nan() && !value.is_inf()) {
+            const size_t offset = (!text.empty() && (text[0] == '-' || text[0] == '+' || text[0] == ' ')) ? 1u : 0u;
+            text.insert(offset, padding, '0');
+            return text;
+        }
+
+        switch (align) {
+        case '<':
+            text.append(padding, fill);
+            break;
+        case '^':
+            text.insert(0, padding / 2, fill);
+            text.append(padding - padding / 2, fill);
+            break;
+        case '>':
+        default:
+            // A number aligns right by default, as every arithmetic type does.
+            text.insert(0, padding, fill);
+            break;
+        }
+        return text;
+    }
+
+    char fill = ' ';       ///< Character the padding is made of.
+    char align = 0;        ///< One of < > ^, or zero when none was given.
+    char sign = '-';       ///< One of + - space.
+    char type = 0;         ///< One of a A e E f F g G, or zero for the shortest form.
+    bool alternate = false;///< The # flag: keep the point and the trailing zeros.
+    bool zero_pad = false; ///< The 0 flag: pad with zeros after the sign.
+    int width = 0;         ///< Minimum field width.
+    int precision = -1;    ///< Digits after the point, or -1 when none was given.
+};
+
+/**
+ * @brief Hash support, so a float128 can be a key in an unordered container.
+ *
+ * The two zeros compare equal and therefore have to hash equal, which the raw encoding would not
+ * do: they differ in the sign bit.
+ */
+template <> struct hash<fp128::float128>
+{
+    [[nodiscard]] size_t operator()(const fp128::float128& value) const noexcept
+    {
+        uint64_t low = 0, high = 0;
+        value.get_bits(low, high);
+        if (value.is_zero())
+            low = high = 0;
+
+        // splitmix64's finalizer, applied to the two halves in turn
+        uint64_t state = low + 0x9E3779B97F4A7C15ull;
+        state = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9ull;
+        state = (state ^ (state >> 27)) * 0x94D049BB133111EBull;
+        state ^= high + 0x9E3779B97F4A7C15ull + (state << 6) + (state >> 2);
+        state = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9ull;
+        return static_cast<size_t>(state ^ (state >> 31));
+    }
+};
+
+/// @name Common type
+///
+/// float128 is wider than every builtin arithmetic type, so a mixed expression produces a
+/// float128. Without these the default common_type would try to form the ternary operator over the
+/// two, which is ambiguous: float128 converts to double and double converts to float128.
+/// @{
+template <typename T>
+    requires is_arithmetic_v<T>
+struct common_type<fp128::float128, T>
+{
+    using type = fp128::float128;
+};
+template <typename T>
+    requires is_arithmetic_v<T>
+struct common_type<T, fp128::float128>
+{
+    using type = fp128::float128;
+};
+template <> struct common_type<fp128::float128, fp128::float128>
+{
+    using type = fp128::float128;
+};
+/// @}
+}  // namespace std
 
 #endif  // FP128_FLOAT128_H
