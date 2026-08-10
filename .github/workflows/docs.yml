@@ -1,0 +1,92 @@
+# Builds the Doxygen documentation and publishes it to https://ericgur.github.io/fixed_point128/
+#
+# This deploys through the GitHub Pages API rather than by pushing to a gh-pages branch, so the
+# repository must have Settings -> Pages -> Source set to "GitHub Actions". The configure-pages
+# step below sets that automatically, but it can also be set by hand.
+#
+# Deploying this way also means Pages no longer runs Jekyll over the repository. That matters here:
+# Jekyll picked up the Jekyll site inside the GoogleTest submodule and failed on its stylesheet,
+# which is what broke every "pages build and deployment" run.
+
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Needed by actions/deploy-pages: id-token for the deployment's OIDC token, pages to publish.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  # Pinned so that a doxygen release cannot change the output, or start emitting warnings that
+  # WARN_AS_ERROR in the Doxyfile would then turn into a failed build.
+  DOXYGEN_VERSION: 1.14.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The documentation is generated from include/ only. The GoogleTest submodule is 100 MB
+          # of sources that nothing here reads.
+          submodules: false
+
+      - name: Install Doxygen ${{ env.DOXYGEN_VERSION }}
+        run: |
+          curl -fsSL "https://www.doxygen.nl/files/doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz" -o doxygen.tar.gz
+          tar -xzf doxygen.tar.gz
+          echo "${PWD}/doxygen-${DOXYGEN_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Read the library version
+        # Doxyfile takes PROJECT_NUMBER from this, so the published pages carry the version of the
+        # headers they were generated from.
+        run: |
+          version=$(sed -nE 's/^#define[[:space:]]+FP128_VERSION_(MAJOR|MINOR|PATCH|BUILD)[[:space:]]+([0-9]+).*/\2/p' \
+                    include/fp128_shared.h | paste -sd '.')
+          echo "FP128_DOC_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Documenting fixed_point128 ${version}"
+
+      - name: Build the documentation
+        run: |
+          doxygen --version
+          doxygen DoxyGen/Doxyfile
+
+      # A pull request stops here: it has proved the documentation still builds. The steps below
+      # touch repository settings and upload a deployable artifact, which only main needs.
+      - name: Configure Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+        with:
+          # Switches the repository from the legacy branch based Pages build to this workflow.
+          enablement: true
+
+      - name: Upload the site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: DoxyGen/html
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # Never let two deployments race. Queue them rather than cancelling, so a run that is already
+    # publishing gets to finish.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

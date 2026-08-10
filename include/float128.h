@@ -164,7 +164,7 @@ float128 tgamma(float128 x) noexcept;
 constexpr float128 abs(const float128& x) noexcept;
 /// The only one of these that a call cannot reach through argument dependent lookup: its argument
 /// is a plain character pointer, so the name has to be visible at namespace scope - and a call has
-/// to be qualified as fp128::nan(...) wherever <cmath> puts its own nan(const char*) in scope too.
+/// to be qualified as fp128::nan(...) wherever `<cmath>` puts its own nan(const char*) in scope too.
 float128 nan(const char* payload) noexcept;
 /// @}
 
@@ -186,7 +186,8 @@ float128 double_factorial(int x) noexcept;
  * All of float128's methods are inline for maximum performance.
  *
  * <B>Implementation notes:</B>
- * <UL> Same bit layout as binary128: 112 bit fraction, 15 bit exponent and 1 bit for the sign.
+ * <UL>
+ * <LI>Same bit layout as binary128: 112 bit fraction, 15 bit exponent and 1 bit for the sign.</LI>
  * <LI>A float128 object is not thread safe. Accessing a const object from multiple threads is safe.</LI>
  * <LI>Only 64 bit builds are supported.</LI>
  * </UL>
@@ -2006,23 +2007,6 @@ public:
     }
     /// @}
     /**
-     * @brief Normalize the fraction to bit 112, rounding half to even.
-     *
-     * The multiply and the divide both produce more bits than the fraction can hold and then throw
-     * the surplus away. Rounding correctly needs two pieces of information about what was
-     * discarded: the highest dropped bit, which chooses the direction, and whether anything below
-     * it was set, which separates an exact tie from a remainder above half. The caller passes the
-     * latter for the words it dropped before calling; this function collects the rest.
-     *
-     * norm_fraction() below rounds from a three bit window instead, which cannot see the discarded
-     * low words at all, so its ties resolve arbitrarily.
-     *
-     * @param l Low part of the fraction
-     * @param h High part of the fraction
-     * @param e Unbiased exponent, adjusted to match the normalized fraction
-     * @param sticky True when the caller already dropped one or more set bits below l
-     */
-    /**
      * @brief Normalizes the product of two mantissas to bit 112, rounding half to even.
      *
      * The multiply and the square both arrive here with (h:l) equal to their 256 bit product shifted
@@ -2062,6 +2046,23 @@ public:
                 ++e;
         }
     }
+    /**
+     * @brief Normalize the fraction to bit 112, rounding half to even.
+     *
+     * The multiply and the divide both produce more bits than the fraction can hold and then throw
+     * the surplus away. Rounding correctly needs two pieces of information about what was
+     * discarded: the highest dropped bit, which chooses the direction, and whether anything below
+     * it was set, which separates an exact tie from a remainder above half. The caller passes the
+     * latter for the words it dropped before calling; this function collects the rest.
+     *
+     * norm_fraction() below rounds from a three bit window instead, which cannot see the discarded
+     * low words at all, so its ties resolve arbitrarily.
+     *
+     * @param l Low part of the fraction
+     * @param h High part of the fraction
+     * @param e Unbiased exponent, adjusted to match the normalized fraction
+     * @param sticky True when the caller already dropped one or more set bits below l
+     */
     FP128_INLINE constexpr void norm_fraction_sticky(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) const noexcept
     {
         if (l == 0 && h == 0) {
@@ -2279,7 +2280,7 @@ public:
      *
      * The binary128 nearest each constant, given as the encoding rather than parsed from a decimal
      * string: the string constructor is accurate to about an ulp, which is one bit too few to
-     * define a constant the rest of the library computes from. The set mirrors <numbers>, so a
+     * define a constant the rest of the library computes from. The set mirrors `<numbers>`, so a
      * generic function template written against std::numbers has the same names available here.
      * @{
      */
@@ -2639,8 +2640,8 @@ public:
 
     /**
      * @brief Return the NaN constant
-     * @param
-     * @return
+     * @return A quiet NaN. The argument only exists so that the call can be found by argument
+     *         dependent lookup, its value is ignored.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 nan(const float128&) { return float128::nan(); }
     /**
@@ -3196,8 +3197,9 @@ public:
     }
     /**
      * @brief returns the double factorial of a number
-     * @param x
-     * @param res
+     * @param x The number to compute the double factorial of. Values below 100 come from a
+     *          precomputed table.
+     * @return x!!, or infinity for the values above the table.
      */
     [[nodiscard]] friend FP128_INLINE float128 double_factorial(int x) noexcept
     {
@@ -3440,11 +3442,6 @@ public:
 
         return exp(y * lan_x);
     }
-    /**
-     * @brief Calculates the natural Log (base e) of x: log(x)
-     * @param x The number to perform log on.
-     * @return log(x)
-     */
     /// @brief Largest |t| the log1p_small() series is used for. Chosen so twelve terms suffice.
     [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log1p_small_limit() noexcept { return float128(0, 0, EXP_BIAS - 4, 0); }
     /// @brief Terms of the log1p_small() series. |s| stays below 2^-4.9, so s^24 is past the last bit.
@@ -3490,6 +3487,11 @@ public:
 
         return (s * acc) << 1;
     }
+    /**
+     * @brief Calculates the natural Log (base e) of x: log(x)
+     * @param x The number to perform log on.
+     * @return log(x)
+     */
     [[nodiscard]] friend FP128_INLINE float128 log(float128 x) noexcept
     {
         // Sterbenz guarantees the subtraction is exact over the range the branch covers, so the
@@ -4583,7 +4585,7 @@ public:
     /**
      * @name Classification and comparison
      *
-     * The <cmath> predicates. They are functions rather than the macros the C header defines, in
+     * The `<cmath>` predicates. They are functions rather than the macros the C header defines, in
      * the same way the standard library's own C++ overloads are, so they take part in overload
      * resolution and can be found by argument dependent lookup.
      * @{
@@ -5002,7 +5004,7 @@ public:
         return is_odd_int(floor_x) ? -magnitude : magnitude;
     }
 
-    /// @brief Absolute value, the name <cmath> gives the floating point overload alongside fabs.
+    /// @brief Absolute value, the name `<cmath>` gives the floating point overload alongside fabs.
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 abs(const float128& x) noexcept { return fabs(x); }
 
     /// @brief User-defined literal implementation for constructing float128 from a string.

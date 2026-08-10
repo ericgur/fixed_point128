@@ -302,7 +302,6 @@ public:
     /**
      * @brief cross-template Copy constructor, can be used between two different fixed_point128 templates
      * @param rhs fixed_point128 instance with from a different template instance.
-     * @return This object.
      */
     template <int32_t I2> FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128<I2>& rhs) noexcept
     {
@@ -3099,7 +3098,6 @@ private:
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
      * @param x The number to perform log on.
-     * @param f Optional: how many fraction bits in the result. Default to all.
      * @return log(x)
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 log(fixed_point128 x)
@@ -3205,7 +3203,7 @@ template <int32_t I> inline std::istream& operator>>(std::istream& is, fixed_poi
 namespace std
 {
 /**
- * @brief Numeric properties of fixed_point128<I>.
+ * @brief Numeric properties of `fixed_point128<I>`.
  *
  * A fixed point type is exact on its own grid rather than approximate like a floating point one,
  * so is_exact is true and epsilon is the spacing of that grid - the same everywhere, unlike a

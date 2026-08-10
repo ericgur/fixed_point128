@@ -717,12 +717,12 @@ public:
     /**
      * @brief Squares this object in place.
      *
-     * Cheaper than operator*=(*this): a square is symmetric, so the low*high and high*low
+     * Cheaper than `operator*=(*this)`: a square is symmetric, so the `low*high` and `high*low`
      * cross products are the same value. Computing it once and doubling it replaces one of
-     * the three multiplies with an addition. The temporary copy that operator*= needs to
+     * the three multiplies with an addition. The temporary copy that `operator*=` needs to
      * guard against aliasing is not needed either.
      *
-     * The result is truncated to 128 bit and is bit identical to (*this) * (*this), which for
+     * The result is truncated to 128 bit and is bit identical to `(*this) * (*this)`, which for
      * the signed type means it is negative in the same overflow cases.
      *
      * @return This object.
@@ -2066,7 +2066,7 @@ template <bool IsSigned> struct hash<fp128::int128_base<IsSigned>>
  * @brief std::format support for the 128 bit integer types.
  *
  * Accepts fill and alignment, a sign, a width and the d type. The other integer presentations that
- * <format> defines for a builtin - b, o, x and c - are not offered, because the conversion the
+ * `<format>` defines for a builtin - b, o, x and c - are not offered, because the conversion the
  * type provides is decimal.
  */
 template <bool IsSigned> struct formatter<fp128::int128_base<IsSigned>, char>

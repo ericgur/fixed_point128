@@ -6,6 +6,9 @@
  
  All types reside in the `fp128` namespace.
 
+ **API documentation: [ericgur.github.io/fixed_point128](https://ericgur.github.io/fixed_point128/)** - every
+ class, function and constant, generated from the headers on each push to `main`.
+
 ## fixed_point128 Template class Highlights
  - Most operations are very fast. 1-10x slower than double precision. ~10x faster than MPIR at similar precision.
  - Up to 38 fraction digits (decimal) are supported.
@@ -186,6 +189,31 @@ fp128_shared.h
 All headers depend on `fp128_shared.h`. The `float128` class additionally depends on `uint128_t.h`
 and on `fp128_decimal.h`. Do not include `fp128_shared.h`, `int128_shared.h` or `fp128_decimal.h`
 directly; they are pulled in automatically by the other headers.
+
+---
+
+## Documentation
+
+The complete reference is published at
+**[ericgur.github.io/fixed_point128](https://ericgur.github.io/fixed_point128/)**. It is generated
+by Doxygen from the comments in `include/`, so it always matches the headers on `main`:
+
+- [Class list](https://ericgur.github.io/fixed_point128/annotated.html) - `fixed_point128`,
+  `float128`, `int128_base` and the `std` specializations, each with every member documented.
+- [Namespace `fp128`](https://ericgur.github.io/fixed_point128/namespacefp128.html) - the free
+  functions, the type aliases and the constants.
+- [File list](https://ericgur.github.io/fixed_point128/files.html) - one page per header, each
+  linked to a browsable, cross referenced copy of the source.
+
+To build it locally, install [Doxygen](https://www.doxygen.nl/) 1.9.5 or newer and run the following
+from the repository root. The output goes to `DoxyGen/html`, which is git-ignored.
+
+```sh
+doxygen DoxyGen/Doxyfile
+```
+
+`.github/workflows/docs.yml` runs that same command and publishes the result. The section below is
+a summary of what each header contains; the generated pages are the reference.
 
 ---
 

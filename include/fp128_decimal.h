@@ -353,7 +353,7 @@ inline constexpr int32_t FRACTION_LIMBS = 520;
  * @param requested Significant digits wanted, clamped to MAX_SIGNIFICANT_DIGITS
  * @param digits Output buffer, receives `requested` digits as characters with no terminator
  * @param exact Optional, set to true when the digits are the whole value and nothing was discarded
- * @return The decimal exponent: the value is 0.<digits> * 10^result.
+ * @return The decimal exponent: the value is `0.<digits>` * 10^result.
  */
 inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, int32_t exponent, int32_t requested, char* digits,
                                  bool* exact = nullptr) noexcept

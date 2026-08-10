@@ -233,6 +233,7 @@ static constexpr bool FP128_CPP_STYLE_MODULO = true;  ///< Use C++ modulo semant
 #define FP128_ASSERT(x)
 #define FP128_THROW_ONLY_IN_DEBUG noexcept
 #endif  // _DEBUG
+/** @} */  // end Utility Macros
 
 /// @name Platform-Specific Intrinsics
 /// @brief Compiler-specific intrinsic wrappers for bit manipulation and extended arithmetic.
@@ -732,8 +733,26 @@ FP128_FORCE_INLINE static constexpr uint32_t popcnt32(uint32_t x) noexcept
 #endif
 
 #define FP128_ALIGN16 FP128_ALIGN(16)
-/** @} */  // end Utility Macros
+/** @} */  // end Platform-Specific Intrinsics
 
+/**
+ * @brief Everything the library provides.
+ *
+ * The namespace holds four value types and the free functions that operate on them:
+ *
+ * - fp128::int128_t and fp128::uint128_t, 128 bit integers, both aliases of fp128::int128_base.
+ * - fp128::fixed_point128, a fixed point type whose single template parameter splits the 128 bits
+ *   between the integer and the fraction.
+ * - fp128::float128, an IEEE 754 binary128 floating point type.
+ *
+ * Each of them supports the operators, the `<cmath>` functions, the `std::numeric_limits`,
+ * `std::hash` and `std::formatter` specializations, and the stream insertion and extraction that
+ * the corresponding builtin type does, so they can stand in for one in generic code.
+ *
+ * The rest of the namespace is the machinery those types are built from - 128 bit shifts, multiply,
+ * divide and bit counting over pairs of QWORDs - which is public because the types are header only
+ * and inline everything, not because a user is expected to call it.
+ */
 namespace fp128
 {
 
@@ -924,7 +943,6 @@ template <typename T>[[nodiscard]] constexpr uint32_t array_length(const T& a)
  * @param l Low QWORD
  * @param h High QWORD
  * @param shift Bits to shift, between 1-63
- * @return void
  */
 FP128_INLINE constexpr void shift_right128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
 {
@@ -938,7 +956,6 @@ FP128_INLINE constexpr void shift_right128_inplace(uint64_t& l, uint64_t& h, int
  * @param l Low QWORD
  * @param h High QWORD
  * @param shift Bits to shift, between 1-63
- * @return void
  */
 FP128_INLINE constexpr void shift_left128_inplace(uint64_t& l, uint64_t& h, int shift) noexcept
 {
@@ -983,7 +1000,6 @@ FP128_INLINE constexpr void shift_left128_inplace(uint64_t& l, uint64_t& h, int 
  * @param l Low QWORD
  * @param h High QWORD
  * @param shift Bits to shift, between 1-inf
- * @return void
  */
 FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
 {
@@ -1035,7 +1051,6 @@ FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe(uint64_t& l, uint6
  * @param l Low QWORD
  * @param h High QWORD
  * @param shift Bits to shift, between 1-inf
- * @return void
  */
 FP128_INLINE constexpr void shift_left128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
 {
@@ -1150,7 +1165,6 @@ template <int shift> [[nodiscard]] FP128_INLINE constexpr uint64_t shift_right12
  * @brief converts a 128 integer to negative via 2's complement.
  * @param l Low QWORD (ref)
  * @param h High QWORD (ref)
- * @return void
  */
 FP128_INLINE constexpr void twos_complement128(uint64_t& l, uint64_t& h) noexcept
 {
@@ -1350,8 +1364,9 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
 }
 /**
  * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
- * @param x input value.
- * @return Number of 1 bits in x.
+ * @param l Low QWORD
+ * @param h High QWORD
+ * @return Number of 1 bits in the 128 bit value.
  */
 [[nodiscard]] FP128_INLINE constexpr uint64_t popcnt128(uint64_t l, uint64_t h) noexcept
 {
