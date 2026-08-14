@@ -1274,7 +1274,7 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     fp from_i32((int32_t)1);           // int32_t
     fp from_cstr("1.5");               // const char*
     fp from_str(std::string("1.5"));   // std::string
-    fp from_raw(0ull, 1ull, 0u);       // raw (low, high, sign)
+    fp from_raw(0ull, 1ull);           // raw (low, high)
 
     // cross-template copy constructor (I2 = 10)
     fixed_point128<10> f10(1.5);
@@ -1298,7 +1298,11 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)(bool)from_double;
 
     // --- Arithmetic compound-assignment operators ---
-    fp a = fp::e();
+    // The operands are kept small enough that nothing below leaves the range of any instantiation
+    // this is called with, fixed_point128<1> included, whose range stops at 2. An overflowed value
+    // lands wherever the wrap takes it, possibly negative, and log() rejects a non positive
+    // argument by throwing - which is a crash rather than a measurement.
+    fp a = fp::half();
     fp b = fp::golden_ratio();
     fp c;
 
@@ -1388,7 +1392,8 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)fp::epsilon();
 
     // --- Friend math functions (CRT-style) ---
-    fp val = fp::e();
+    // below one, so log1p() and exp() stay in range as well - see the note at 'a' above
+    fp val = fp::half();
     fp half_val = fp::half();
 
     (void)fabs(val);
@@ -1510,10 +1515,10 @@ int main(int argc, char* argv[])
         types.selectAll();
     }
 
-    // Force instantiation of all public methods and friend functions for I=1, 40 and 64.
+    // Force instantiation of all public methods and friend functions for I=1, 40 and 63.
     force_instantiation<1>();
     force_instantiation<40>();
-    force_instantiation<64>();
+    force_instantiation<63>();
 
     bench(types);
 

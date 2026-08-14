@@ -13,7 +13,8 @@
  - Most operations are very fast. 1-10x slower than double precision. ~10x faster than MPIR at similar precision.
  - Up to 38 fraction digits (decimal) are supported.
  - Has a superset of integer and floating point functions including all standard C/C++ operators.
- - The single template parameter **\<I\>** allows the user to specify 1-64 bits for the integer part, the rest are allocated to the fraction.
+ - The single template parameter **\<I\>** allows the user to specify 1-63 bits for the integer part, the sign takes one bit and the rest are allocated to the fraction.
+ - Exactly 128 bits wide, held as a two's complement value with the sign in the top bit - so it takes as much space as it uses.
  - An object can be created from all int/float types as well as from strings representing a float.
  - Supports conversions from one template instance to another (2 instances with different **\<I\>** parameter).
 
@@ -221,9 +222,15 @@ a summary of what each header contains; the generated pages are the reference.
 
 ### fixed_point128.h
 
-Template class `fixed_point128<I>` where **I** is the number of integer bits (range `[1, 64]`). The remaining `128 - I` bits store the fractional part. This gives compile-time control over the trade-off between range and precision.
+Template class `fixed_point128<I>` where **I** is the number of integer bits (range `[1, 63]`). One bit holds the sign and the remaining `127 - I` store the fractional part. This gives compile-time control over the trade-off between range and precision.
 
-**Data layout:** `uint64_t low` + `uint64_t high` + `uint32_t sign` (separate sign bit).
+**Data layout:** `uint64_t low` + `uint64_t high`, exactly 128 bits and nothing else. The pair is a two's complement integer with the sign in the MSB of `high`, and the value it stands for is that integer divided by 2<sup>F</sup>, where `F = 127 - I`:
+
+```
+value = (int128)(high:low) / 2^F
+```
+
+The representable range is therefore `[-2^I, 2^I - 2^-F]`, asymmetric like every two's complement type: the most negative value has no positive counterpart, so negating it - or taking `fabs` of it - wraps back to itself, exactly as `-INT64_MIN` does. Overflow is silent throughout.
 
 **Features:**
 - Construction from integer types, `double`, C strings (accurate to 37 decimal digits), and raw components.

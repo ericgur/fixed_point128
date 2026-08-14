@@ -40,8 +40,8 @@
  * @brief Header-only 128-bit fixed-point arithmetic library.
  *
  * Provides the `fixed_point128<I>` template class where I is the number of
- * integer bits (range [1, 64]), with the remaining 128-I bits used for the
- * fractional part. Supports full arithmetic (+, -, *, /, %, shifts),
+ * integer bits (range [1, 63]), with one bit used for the sign and the
+ * remaining 127-I for the fractional part. Supports full arithmetic (+, -, *, /, %, shifts),
  * comparison operators, type conversions (int, float, double, string), and
  * a comprehensive set of math functions (sqrt, sin, cos, tan, atan, atan2,
  * sinh, cosh, tanh, exp, log, pow, etc.).
@@ -49,7 +49,7 @@
  * Platform-specific intrinsics are used for MSVC and GCC/Clang to maximize
  * performance. All methods are inline. The library is 64-bit only.
  *
- * @tparam I Number of integer bits in [1, 64]. The fraction uses 128-I bits.
+ * @tparam I Number of integer bits in [1, 63]. The fraction uses 127-I bits and the sign takes one.
  *
  * @see fp128_shared.h for supporting intrinsics and utilities.
  */
@@ -146,15 +146,30 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  * @brief 128 bit fixed point class template.
  *
  * This template provides a floating point-like type that performs various math operations quickly compared to traditional high precision libraries.
- * The only template parameter <B>I</B> is the bit count of the integer part. The fraction part complements <B>I</B> to 128 bit.<BR>
- * <B>I</B> is limited to the range [1,64] in order to simplify the implementation and increase performance.<BR>
+ * The only template parameter <B>I</B> is the bit count of the integer part, not counting the sign.
+ * The sign takes one bit and the fraction takes the remaining 127 - <B>I</B>.<BR>
+ * <B>I</B> is limited to the range [1,63] in order to simplify the implementation and increase performance.<BR>
  * This restriction is enforced at compile time.
  * All of fixed_point128's methods are inline for maximum performance.
+ *
+ * <B>Representation:</B><BR>
+ * The object is exactly 128 bits wide and holds nothing but the value. Those bits are a two's
+ * complement integer, held as the QWORD pair (high:low) with the sign in the MSB of <B>high</B>,
+ * and the value they stand for is that integer divided by 2^<B>F</B>:
+ * @code
+ *     value = (int128)(high:low) / 2^F,  where F = 127 - I
+ * @endcode
+ * The representable range is therefore [-2^I, 2^I - 2^-F], which is the asymmetric range of every
+ * two's complement type: the most negative value has no positive counterpart, so negating it (and
+ * fabs of it) wraps back to itself.
  *
  * <B>Implementation notes:</B>
  * <UL>
  * <LI>Overflow is handled silently, similar to builtin integer operations.</LI>
- * <LI>Unlike integer operations, the sign is held in a separate data member which simplifies the implementation.</LI>
+ * <LI>The sign is part of the value rather than a separate field, so addition, subtraction, the
+ *     comparisons and the bitwise operators are the plain 128 bit integer operations and there is
+ *     no negative zero to normalize away.</LI>
+ * <LI>Multiplication and division work on magnitudes internally and restore the sign afterwards.</LI>
  * <LI>A fixed_point128 object is not thread safe. Accessing a const object from multiple threads is safe.</LI>
  * <LI>fixed_point128 is <B>conditionally safe</B>, 2 different non const objects can be accessed concurrently.</LI>
  * <LI>Only 64 bit builds are supported.</LI>
@@ -191,7 +206,7 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
 template <int32_t I> class fixed_point128
 {
     // build time validation of template parameters
-    static_assert(1 <= I && I <= 64, "Template parameter <I> must be in the [1,64] range!");
+    static_assert(1 <= I && I <= 63, "Template parameter <I> must be in the [1,63] range!");
     static_assert(sizeof(void*) == 8, "fixed_point128 is supported in 64 bit builds only!");
 
     // friends
@@ -201,26 +216,88 @@ template <int32_t I> class fixed_point128
 private:
     /// @name Data Members
     /// @{
-    uint64_t low;   ///< Lower 64-bit QWORD of the 128-bit value.
-    uint64_t high;  ///< Upper 64-bit QWORD of the 128-bit value.
-    uint32_t sign;  ///< Sign bit: 0 = positive, 1 = negative.
+    uint64_t low;   ///< Lower 64-bit QWORD of the 128-bit two's complement value.
+    uint64_t high;  ///< Upper 64-bit QWORD of the 128-bit two's complement value. Bit 63 holds the sign.
     /// @}
 
 public:
-    static constexpr int32_t F = 128 - I;  ///< Fraction bit count (128 - I).
+    static constexpr int32_t F = 127 - I;  ///< Fraction bit count (127 - I). The remaining bit is the sign.
 
 private:
     /// @name Internal Constants
     /// @{
-    static constexpr int32_t upper_frac_bits = F - 64;                   ///< Fraction bits residing in the upper QWORD.
+    static constexpr int32_t upper_frac_bits = F - 64;                   ///< Fraction bits residing in the upper QWORD (63 - I).
     static constexpr uint64_t unity = 1ull << upper_frac_bits;           ///< Upper QWORD value representing 1.0.
     static inline const double upper_unity = ::pow(2, 64 - F);           ///< Scale factor for upper QWORD to double conversion.
     static inline const double lower_unity_l = ::pow(2, -F);             ///< Scale factor for lower QWORD (low 32 bits) to double.
     static inline const double lower_unity_h = ::pow(2, 32 - F);         ///< Scale factor for lower QWORD (high 32 bits) to double.
-    static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits;  ///< Bitmask for integer bits in the upper QWORD.
+    static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits;  ///< Bitmask for the sign and integer bits in the upper QWORD.
     static constexpr int32_t max_frac_digits = (int)(F / 3.3);           ///< Maximum meaningful base-10 fractional digits.
-    static constexpr uint64_t max_uint_value = FP128_MAX_VALUE_64(I);    ///< Maximum integer representable value.
+    static constexpr uint64_t sign_mask = 1ull << 63;                    ///< Bitmask of the sign bit within the upper QWORD.
     /// @}
+
+    /**
+     * @brief Reads the magnitude of this object into a QWORD pair.
+     *
+     * The multiply, divide and floating point conversions all need |x| as an unsigned 128 bit
+     * value; this is the one place that knows how to produce it. The most negative value is its own
+     * two's complement, and 2^127 is exactly what its magnitude is as an unsigned pair, so that
+     * case needs no special handling.
+     *
+     * The sign is returned as a mask rather than a bool so that two of them combine with xor. The
+     * negation is left as a branch on purpose: two branchless spellings were measured, the two's
+     * complement as (x ^ -1) + 1 against (x ^ 0) + 0, and computing both forms for a conditional
+     * move to pick between. Both are slower - by 30% and 20% respectively on the multiply and on
+     * everything built on it - MSVC putting the pair through memory rather than keeping it in
+     * registers.
+     *
+     * @param l Receives the low QWORD of the magnitude
+     * @param h Receives the high QWORD of the magnitude
+     * @return The sign as a mask, all ones when the object was negative and all zeros otherwise.
+     *         Two of them can be combined with xor to give the sign of a quotient, and NegateIf()
+     *         takes one.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t GetMagnitude(uint64_t& l, uint64_t& h) const noexcept
+    {
+        l = low;
+        h = high;
+        const uint64_t sign_bits = static_cast<uint64_t>(static_cast<int64_t>(high) >> 63);
+        if (sign_bits != 0)
+            twos_complement128(l, h);
+
+        return sign_bits;
+    }
+
+    /**
+     * @brief Negates this object in place, in the two's complement sense.
+     * The most negative value has no positive counterpart and is left unchanged, which is the same
+     * silent wrap the builtin integer types perform.
+     */
+    FP128_FORCE_INLINE constexpr void Negate() noexcept { twos_complement128(low, high); }
+
+    /**
+     * @brief Negates this object when the mask says to, without branching.
+     * The counterpart of GetMagnitude(), which produces the masks this takes.
+     * @param sign_bits All ones to negate, all zeros to leave the object alone.
+     */
+    FP128_FORCE_INLINE constexpr void NegateIf(uint64_t sign_bits) noexcept
+    {
+        if (sign_bits != 0)
+            twos_complement128(low, high);
+    }
+
+    /**
+     * @brief Replaces this object with its magnitude, in place.
+     * What the division does to its numerator: the work below it is unsigned and the sign goes back
+     * on at the end.
+     * @return The sign as a mask, in the form NegateIf() takes.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t TakeMagnitude() noexcept
+    {
+        const uint64_t sign_bits = static_cast<uint64_t>(static_cast<int64_t>(high) >> 63);
+        NegateIf(sign_bits);
+        return sign_bits;
+    }
 
     /**
      * @brief Extracts the mantissa of a floating point representation of this object, rounded.
@@ -230,15 +307,17 @@ private:
      * builtin conversions do.<BR>
      * Rounding needs three pieces of information: the bits that survive, the highest dropped bit
      * (which chooses the direction) and whether anything below it is set (the sticky bit, which
-     * distinguishes an exact tie from a remainder larger than half). The sign is held separately
-     * from the magnitude, so it plays no part here.
+     * distinguishes an exact tie from a remainder larger than half). The caller passes the
+     * magnitude, so the sign plays no part here.
      *
+     * @param low Low QWORD of the magnitude.
+     * @param high High QWORD of the magnitude.
      * @param msb Bit position of the most significant set bit. Must be larger than frac_bits.
      * @param frac_bits Fraction bit count of the target type, 23 for float or 52 for double.
      * @return The rounded mantissa. Holds frac_bits+1 bits, or frac_bits+2 when rounding carried
      *         into the next power of 2.
      */
-    [[nodiscard]] FP128_INLINE constexpr uint64_t RoundedMantissa(int32_t msb, int32_t frac_bits) const noexcept
+    [[nodiscard]] FP128_INLINE static constexpr uint64_t RoundedMantissa(uint64_t low, uint64_t high, int32_t msb, int32_t frac_bits) noexcept
     {
         const int32_t shift = msb - frac_bits;  // count of dropped bits, at least 1
         uint64_t mant = shift_right128(low, high, shift);
@@ -270,22 +349,20 @@ private:
 
 public:
     /**
-     * @brief Reads the raw representation: the 128 bit magnitude and the separate sign.
-     * @param l Receives the low QWORD of the magnitude
-     * @param h Receives the high QWORD
-     * @param s Receives the sign, 1 when the value is negative
+     * @brief Reads the raw representation: the two QWORDs of the 128 bit two's complement value.
+     * @param l Receives the low QWORD
+     * @param h Receives the high QWORD, sign included
      */
-    FP128_FORCE_INLINE constexpr void get_components(uint64_t& l, uint64_t& h, uint32_t& s) const noexcept
+    FP128_FORCE_INLINE constexpr void get_components(uint64_t& l, uint64_t& h) const noexcept
     {
         l = low;
         h = high;
-        s = sign;
     }
 
-    static constexpr uint64_t max_int_value = int_mask >> upper_frac_bits;  ///< Maximum representable integer value.
-    typedef fixed_point128<I> type;                                         ///< Self type alias.
-    typedef fixed_point128<I>* ptr_type;                                    ///< Pointer type alias.
-    typedef fixed_point128<I>& ref_type;                                    ///< Reference type alias.
+    static constexpr uint64_t max_int_value = FP128_MAX_VALUE_64(I);  ///< Largest representable positive integer, 2^I - 1.
+    typedef fixed_point128<I> type;                                   ///< Self type alias.
+    typedef fixed_point128<I>* ptr_type;                              ///< Pointer type alias.
+    typedef fixed_point128<I>& ref_type;                              ///< Reference type alias.
 
     /// @name Constructors
     /// @{
@@ -293,19 +370,19 @@ public:
     /**
      * @brief Default constructor, creates an instance with a value of zero.
      */
-    FP128_FORCE_INLINE constexpr fixed_point128() noexcept : low(0), high(0), sign(0) {}
+    FP128_FORCE_INLINE constexpr fixed_point128() noexcept : low(0), high(0) {}
     /**
      * @brief Copy constructor
      * @param rhs Object to copy from
      */
-    FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128& rhs) noexcept : low(rhs.low), high(rhs.high), sign(rhs.sign) {}
+    FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128& rhs) noexcept : low(rhs.low), high(rhs.high) {}
     /**
      * @brief cross-template Copy constructor, can be used between two different fixed_point128 templates
+     * A value too large for the destination wraps silently, as everywhere else in this class.
      * @param rhs fixed_point128 instance with from a different template instance.
      */
     template <int32_t I2> FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128<I2>& rhs) noexcept
     {
-        sign = rhs.sign;
         if constexpr (I == I2) {
             high = rhs.high;
             low = rhs.low;
@@ -319,10 +396,11 @@ public:
         }
         // rhs has more integer bits and less fraction bits
         else {  // I > I2
-            // shift right by I - I2 bits
+            // shift right by I - I2 bits, replicating the sign bit so a negative value stays negative
             constexpr int shift = I - I2;
-            low = shift_right128_round(rhs.low, rhs.high, shift);
-            high = rhs.high >> shift;
+            low = rhs.low;
+            high = rhs.high;
+            shift_right128_inplace_safe_signed(low, high, shift);
         }
     }
 
@@ -331,10 +409,11 @@ public:
      * Doesn't modify the right hand side object. Acts like a copy constructor.
      * @param rhs Object to copy from
      */
-    FP128_FORCE_INLINE constexpr fixed_point128(fixed_point128&& rhs) noexcept : low(rhs.low), high(rhs.high), sign(rhs.sign) {}
+    FP128_FORCE_INLINE constexpr fixed_point128(fixed_point128&& rhs) noexcept : low(rhs.low), high(rhs.high) {}
     /**
      * @brief Constructor from the double type
-     * Underflow goes to zero. Overflow, NaN and +-INF go to max supported positive value.
+     * Underflow goes to zero. Overflow, NaN and +-INF saturate to the extreme value carrying the
+     * sign of the input: max() for a positive one and lowest() for a negative one.
      * Not constexpr: the exponent and mantissa are read through the Double union, and reading the
      * inactive member of a union is not allowed during constant evaluation.
      * @param x Input value
@@ -344,21 +423,20 @@ public:
         // very common case
         if (x == 0) {
             low = high = 0;
-            sign = 0;
             return;
         }
 
         // hack the double bit fields
         const Double d(x);
 
-        sign = static_cast<uint32_t>(d.s());
+        const uint32_t negative = static_cast<uint32_t>(d.s());
         const int32_t e = static_cast<int32_t>(d.e()) - 1023;
         uint64_t f = d.f();
 
         // overflow which also catches NaN and Inf
         if (e >= I) {
-            high = low = UINT64_MAX;
-            sign = 0;
+            low = (negative) ? 0 : UINT64_MAX;
+            high = (negative) ? sign_mask : ~sign_mask;
             return;
         }
 
@@ -366,7 +444,9 @@ public:
         if (e >= -F) {
             // bit 52 in f is the unity value of the float. it needs to move to the unity position in fixed point
             f |= FP128_ONE_SHIFT(dbl_frac_bits);
-            int32_t bits_to_shift = 64 - I - dbl_frac_bits + e;
+            // the leading one of f sits at bit 52 and belongs at bit F + e, which is this many bits
+            // into the upper QWORD. The magnitude is built first and negated below if needed.
+            int32_t bits_to_shift = F - 64 - dbl_frac_bits + e;
 
             // f fits in high QWORD
             if (bits_to_shift >= 0) {
@@ -391,36 +471,36 @@ public:
                     low = f >> bits_to_shift;
                 }
             }
+
+            if (negative)
+                Negate();
         }
         // too small to be represented, no need to bother.
         else {
             high = low = 0;
-            sign = 0;
         }
     }
     /**
      * @brief Constructor from uint64_t type
+     * A value of 2^I or above overflows into the sign and wraps silently.
      * @param x Input value
      */
     FP128_FORCE_INLINE constexpr fixed_point128(uint64_t x) noexcept
     {
         low = 0;
-        sign = 0;
         high = x << upper_frac_bits;
     }
     /**
      * @brief Constructor from int64_t type
+     * The shift is done in the unsigned domain, where it wraps rather than overflowing, and a
+     * negative value carries its sign bits along with it: scaling a two's complement value by a
+     * power of two is the same left shift its magnitude needs.
      * @param x Input value
      */
     FP128_FORCE_INLINE constexpr fixed_point128(int64_t x) noexcept
     {
         low = 0;
-        sign = FP128_GET_BIT(x, 63);
-        // The magnitude is taken in the unsigned domain, where the negation wraps. Negating the
-        // signed value instead is undefined for the most negative one, which has no positive
-        // counterpart, and produces the same bit pattern for every other value.
-        const uint64_t magnitude = (sign != 0) ? (0ull - static_cast<uint64_t>(x)) : static_cast<uint64_t>(x);
-        high = magnitude << upper_frac_bits;
+        high = static_cast<uint64_t>(x) << upper_frac_bits;
     }
     /**
      * @brief Constructor from uint32_t type
@@ -429,8 +509,7 @@ public:
     FP128_FORCE_INLINE constexpr fixed_point128(uint32_t x) noexcept
     {
         low = 0;
-        sign = 0;
-        high = (uint64_t)x << upper_frac_bits;
+        high = static_cast<uint64_t>(x) << upper_frac_bits;
     }
     /**
      * @brief Constructor from int32_t type
@@ -439,66 +518,66 @@ public:
     FP128_FORCE_INLINE constexpr fixed_point128(int32_t x) noexcept
     {
         low = 0;
-        sign = FP128_GET_BIT(x, 31);
-        // see the note in the int64_t constructor on why the magnitude is taken unsigned
-        const uint64_t magnitude = (sign != 0) ? (0ull - static_cast<uint64_t>(x)) : static_cast<uint64_t>(x);
-        high = magnitude << upper_frac_bits;
+        // sign extended to 64 bits first, see the int64_t constructor
+        high = static_cast<uint64_t>(static_cast<int64_t>(x)) << upper_frac_bits;
     }
     /**
      * @brief Constructor from const char* (C string).
      * Accurate up to 37 digits after the decimal point.
      * Allows creating very high precision values. Much slower than the rhs constructors.
+     * A value too large for the type wraps silently, which unlike the saturation the double
+     * constructor performs can land on either sign.
      * @param x Input string
      */
     fixed_point128(const char* x) noexcept
     {
+        // 10^-n in fixed_point128<1> form, which holds 126 fraction bits whatever I is
         static fixed_point128<1> base10_table[] = {
-            //  {low QWORD,             high QWORD,         sign}
-            {0x0000000000000000ull, 0x8000000000000000ull, 0},  // 10^0, not used, makes the code simpler
-            {0xCCCCCCCCCCCCCCCDull, 0x0CCCCCCCCCCCCCCCull, 0},  // 10^-1
-            {0x147AE147AE147AE1ull, 0x0147AE147AE147AEull, 0},  // 10^-2
-            {0xCED916872B020C4Aull, 0x0020C49BA5E353F7ull, 0},  // 10^-3
-            {0x94AF4F0D844D013Bull, 0x000346DC5D638865ull, 0},  // 10^-4
-            {0xC21187E7C06E19B9ull, 0x000053E2D6238DA3ull, 0},  // 10^-5
-            {0xC69B5A63F9A49C2Cull, 0x000008637BD05AF6ull, 0},  // 10^-6
-            {0x7A42BC3D32907604ull, 0x000000D6BF94D5E5ull, 0},  // 10^-7
-            {0x8C39DF9FB841A567ull, 0x00000015798EE230ull, 0},  // 10^-8
-            {0xDAD2965CC5A02A24ull, 0x0000000225C17D04ull, 0},  // 10^-9
-            {0xAF7B756FAD5CD103ull, 0x0000000036F9BFB3ull, 0},  // 10^-10
-            {0x5E592557F7BC7B4Dull, 0x00000000057F5FF8ull, 0},  // 10^-11
-            {0x096F5088CBF93F88ull, 0x00000000008CBCCCull, 0},  // 10^-12
-            {0x3424BB40E132865Aull, 0x00000000000E12E1ull, 0},  // 10^-13
-            {0xB86A12B9B01EA709ull, 0x0000000000016849ull, 0},  // 10^-14
-            {0x5F3DCEAC2B3643E7ull, 0x0000000000002407ull, 0},  // 10^-15
-            {0x5652FB1137856D31ull, 0x000000000000039Aull, 0},  // 10^-16
-            {0x3BD5191B525A2485ull, 0x000000000000005Cull, 0},  // 10^-17
-            {0x392EE8E921D5D074ull, 0x0000000000000009ull, 0},  // 10^-18
-            {0xEC1E4A7DB69561A5ull, 0x0000000000000000ull, 0},  // 10^-19
-            {0x179CA10C9242235Dull, 0x0000000000000000ull, 0},  // 10^-20
-            {0x025C768141D369F0ull, 0x0000000000000000ull, 0},  // 10^-21
-            {0x003C7240202EBDCBull, 0x0000000000000000ull, 0},  // 10^-22
-            {0x00060B6CD004AC94ull, 0x0000000000000000ull, 0},  // 10^-23
-            {0x00009ABE14CD4475ull, 0x0000000000000000ull, 0},  // 10^-24
-            {0x00000F79687AED3Full, 0x0000000000000000ull, 0},  // 10^-25
-            {0x0000018C240C4AEDull, 0x0000000000000000ull, 0},  // 10^-26
-            {0x000000279D346DE4ull, 0x0000000000000000ull, 0},  // 10^-27
-            {0x00000003F61ED7CAull, 0x0000000000000000ull, 0},  // 10^-28
-            {0x0000000065697BFBull, 0x0000000000000000ull, 0},  // 10^-29
-            {0x000000000A2425FFull, 0x0000000000000000ull, 0},  // 10^-30
-            {0x0000000001039D66ull, 0x0000000000000000ull, 0},  // 10^-31
-            {0x000000000019F624ull, 0x0000000000000000ull, 0},  // 10^-32
-            {0x000000000002989Dull, 0x0000000000000000ull, 0},  // 10^-33
-            {0x0000000000004276ull, 0x0000000000000000ull, 0},  // 10^-34
-            {0x00000000000006A5ull, 0x0000000000000000ull, 0},  // 10^-35
-            {0x00000000000000AAull, 0x0000000000000000ull, 0},  // 10^-36
-            {0x0000000000000011ull, 0x0000000000000000ull, 0},  // 10^-37
-            {0x0000000000000002ull, 0x0000000000000000ull, 0}   // 10^-38
+            //  {low QWORD,             high QWORD}
+            {0x0000000000000000ull, 0x4000000000000000ull},  // 10^0, not used, makes the code simpler
+            {0x6666666666666666ull, 0x0666666666666666ull},  // 10^-1
+            {0x0A3D70A3D70A3D71ull, 0x00A3D70A3D70A3D7ull},  // 10^-2
+            {0xE76C8B4395810625ull, 0x0010624DD2F1A9FBull},  // 10^-3
+            {0xCA57A786C226809Dull, 0x0001A36E2EB1C432ull},  // 10^-4
+            {0xE108C3F3E0370CDDull, 0x000029F16B11C6D1ull},  // 10^-5
+            {0x634DAD31FCD24E16ull, 0x00000431BDE82D7Bull},  // 10^-6
+            {0xBD215E1E99483B02ull, 0x0000006B5FCA6AF2ull},  // 10^-7
+            {0x461CEFCFDC20D2B3ull, 0x0000000ABCC77118ull},  // 10^-8
+            {0x6D694B2E62D01512ull, 0x0000000112E0BE82ull},  // 10^-9
+            {0xD7BDBAB7D6AE6882ull, 0x000000001B7CDFD9ull},  // 10^-10
+            {0x2F2C92ABFBDE3DA7ull, 0x0000000002BFAFFCull},  // 10^-11
+            {0x04B7A84465FC9FC4ull, 0x0000000000465E66ull},  // 10^-12
+            {0x9A125DA07099432Dull, 0x0000000000070970ull},  // 10^-13
+            {0xDC35095CD80F5385ull, 0x000000000000B424ull},  // 10^-14
+            {0xAF9EE756159B21F4ull, 0x0000000000001203ull},  // 10^-15
+            {0x2B297D889BC2B698ull, 0x00000000000001CDull},  // 10^-16
+            {0x1DEA8C8DA92D1242ull, 0x000000000000002Eull},  // 10^-17
+            {0x9C97747490EAE83Aull, 0x0000000000000004ull},  // 10^-18
+            {0x760F253EDB4AB0D3ull, 0x0000000000000000ull},  // 10^-19
+            {0x0BCE5086492111AFull, 0x0000000000000000ull},  // 10^-20
+            {0x012E3B40A0E9B4F8ull, 0x0000000000000000ull},  // 10^-21
+            {0x001E392010175EE6ull, 0x0000000000000000ull},  // 10^-22
+            {0x000305B66802564Aull, 0x0000000000000000ull},  // 10^-23
+            {0x00004D5F0A66A23Bull, 0x0000000000000000ull},  // 10^-24
+            {0x000007BCB43D769Full, 0x0000000000000000ull},  // 10^-25
+            {0x000000C612062576ull, 0x0000000000000000ull},  // 10^-26
+            {0x00000013CE9A36F2ull, 0x0000000000000000ull},  // 10^-27
+            {0x00000001FB0F6BE5ull, 0x0000000000000000ull},  // 10^-28
+            {0x0000000032B4BDFDull, 0x0000000000000000ull},  // 10^-29
+            {0x0000000005121300ull, 0x0000000000000000ull},  // 10^-30
+            {0x000000000081CEB3ull, 0x0000000000000000ull},  // 10^-31
+            {0x00000000000CFB12ull, 0x0000000000000000ull},  // 10^-32
+            {0x0000000000014C4Full, 0x0000000000000000ull},  // 10^-33
+            {0x000000000000213Bull, 0x0000000000000000ull},  // 10^-34
+            {0x0000000000000353ull, 0x0000000000000000ull},  // 10^-35
+            {0x0000000000000055ull, 0x0000000000000000ull},  // 10^-36
+            {0x0000000000000009ull, 0x0000000000000000ull},  // 10^-37
+            {0x0000000000000001ull, 0x0000000000000000ull}   // 10^-38
         };
         constexpr uint64_t base10_table_size = array_length(base10_table);
         static_assert(max_frac_digits < base10_table_size);
 
         low = high = 0;
-        sign = 0;
         if (x == nullptr)
             return;
 
@@ -521,9 +600,10 @@ public:
             return;
         }
 
-        // set negative sign if needed
+        // note a negative sign if present. The magnitude is built first and negated at the end.
+        bool negative = false;
         if (*p == '-') {
-            sign = 1;
+            negative = true;
             ++p;
         } else if (*p == '+')
             ++p;
@@ -532,6 +612,8 @@ public:
         // number is an integer
         if (dec == nullptr) {
             high = std::strtoull(p, nullptr, 10) << upper_frac_bits;
+            if (negative)
+                Negate();
             return;
         }
 
@@ -549,9 +631,12 @@ public:
             ++p;
         }
 
+        // the fraction was accumulated with 126 bits of it, this instantiation keeps F of them
         frac >>= (I - 1);
         low = frac.low;
         high = frac.high + int_val;
+        if (negative)
+            Negate();
     }
     /**
      * @brief Constructor from std::string.
@@ -565,12 +650,13 @@ public:
         *this = temp;
     }
     /**
-     * @brief Constructor from the 3 fixed_point128 base elements, useful for creating very small constants.
+     * @brief Constructor from the two QWORDs of the raw value, useful for creating very small constants.
+     * The pair is read as a 128 bit two's complement integer scaled by 2^-F, so a negative value is
+     * spelled with the MSB of h set rather than with a separate sign.
      * @param l Low QWORD
-     * @param h High QWORD
-     * @param s Sign - zero for positive, 1 for negative.
+     * @param h High QWORD, sign included
      */
-    FP128_FORCE_INLINE constexpr fixed_point128(uint64_t l, uint64_t h, uint32_t s) noexcept : low(l), high(h), sign(s != 0) {}
+    FP128_FORCE_INLINE constexpr fixed_point128(uint64_t l, uint64_t h) noexcept : low(l), high(h) {}
 
     /**
      * @brief Destructor
@@ -585,7 +671,6 @@ public:
     {
         high = rhs.high;
         low = rhs.low;
-        sign = rhs.sign;
         return *this;
     }
     /**
@@ -597,7 +682,6 @@ public:
     {
         high = rhs.high;
         low = rhs.low;
-        sign = rhs.sign;
         return *this;
     }
     /**
@@ -607,7 +691,6 @@ public:
      */
     template <int32_t I2> FP128_FORCE_INLINE constexpr fixed_point128<I>& operator=(const fixed_point128<I2>& rhs) noexcept
     {
-        sign = rhs.sign;
         if constexpr (I == I2) {
             high = rhs.high;
             low = rhs.low;
@@ -621,10 +704,11 @@ public:
         }
         // rhs has more integer bits and less fraction bits
         else {  // I > I2
-            // shift right by I - I2 bits
+            // shift right by I - I2 bits, replicating the sign bit
             constexpr int shift = I - I2;
-            low = shift_right128_round(rhs.low, rhs.high, shift);
-            high = rhs.high >> shift;
+            low = rhs.low;
+            high = rhs.high;
+            shift_right128_inplace_safe_signed(low, high, shift);
         }
 
         return *this;
@@ -637,33 +721,36 @@ public:
     /// @{
 
     /**
-     * @brief operator uint64_t - converts to a uint64_t
-     * @return Object value.
-     */
-    [[nodiscard]] FP128_FORCE_INLINE constexpr operator uint64_t() const noexcept { return (high >> upper_frac_bits) & UINT64_MAX; }
-    /**
      * @brief operator int64_t - converts to a int64_t
+     * The fraction is truncated towards zero, as the builtin floating point to integer conversions
+     * do, rather than shifted away - which would round a negative value towards minus infinity.
      * @return Object value.
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr operator int64_t() const noexcept
     {
-        const int64_t res = (sign) ? -1ll : 1ll;
-        return res * ((high >> upper_frac_bits) & UINT64_MAX);
+        uint64_t l = 0, h = 0;
+        const uint64_t sign_bits = GetMagnitude(l, h);
+        const uint64_t magnitude = h >> upper_frac_bits;
+        // negated in the unsigned domain, which wraps instead of overflowing for the most negative
+        // value of a 64 bit result. (x ^ -1) - -1 is that negation, and (x ^ 0) - 0 leaves it.
+        return static_cast<int64_t>((magnitude ^ sign_bits) - sign_bits);
     }
     /**
-     * @brief operator uint32_t - converts to a uint32_t
+     * @brief operator uint64_t - converts to a uint64_t
+     * A negative value wraps modulo 2^64, the way a builtin signed to unsigned conversion does.
      * @return Object value.
      */
-    [[nodiscard]] FP128_FORCE_INLINE constexpr operator uint32_t() const noexcept { return (high >> upper_frac_bits) & UINT32_MAX; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator uint64_t() const noexcept { return static_cast<uint64_t>(operator int64_t()); }
     /**
      * @brief operator int32_t - converts to a int32_t
-     * @return Object value.
+     * @return Object value, truncated towards zero and wrapped to 32 bits.
      */
-    [[nodiscard]] FP128_FORCE_INLINE constexpr operator int32_t() const noexcept
-    {
-        int32_t res = (sign) ? -1 : 1;
-        return res * ((int32_t)((int64_t)high >> upper_frac_bits) & (UINT32_MAX));
-    }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator int32_t() const noexcept { return static_cast<int32_t>(operator int64_t()); }
+    /**
+     * @brief operator uint32_t - converts to a uint32_t
+     * @return Object value, truncated towards zero and wrapped to 32 bits.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE constexpr operator uint32_t() const noexcept { return static_cast<uint32_t>(operator int64_t()); }
     /**
      * @brief operator float - converts to a float
      * Not constexpr: the result is assembled through the Float union, and writing one member of a
@@ -675,27 +762,27 @@ public:
         if (!*this)
             return 0.0f;
 
-        const int32_t msb = 127 - static_cast<int32_t>(lzcnt128(*this));
+        // the conversion is done on the magnitude, the sign is put back by Float::make()
+        uint64_t l = 0, h = 0;
+        const uint32_t s = static_cast<uint32_t>(GetMagnitude(l, h) & 1);
+        const int32_t msb = 127 - static_cast<int32_t>(lzcnt128(l, h));
         const int32_t expo = msb - F;  // base 2 exponent of the value
 
-        // A float only reaches down to 2^-126 before going denormal. That can only happen for
-        // I == 1, whose smallest value is 2^-127, so route it through double, which has the range
-        // to hold it exactly and converts down to a denormal correctly.
-        if (expo + 127 <= 0)
-            return static_cast<float>(operator double());
+        // A float only reaches down to 2^-126 before going denormal. The smallest value of any
+        // instantiation is 2^-F, and F peaks at 126, so no value here is denormal as a float.
 
         // the value fits in the fraction, no bits are lost so no rounding is needed.
         // float doesn't hold the msb, it's implicit, so bit [22:0] hold the rest of the value
         if (msb <= flt_frac_bits) {
-            return Float::make(sign, static_cast<uint32_t>(expo + 127), static_cast<uint32_t>(low << (flt_frac_bits - msb)));
+            return Float::make(s, static_cast<uint32_t>(expo + 127), static_cast<uint32_t>(l << (flt_frac_bits - msb)));
         }
 
         // more bits than the fraction can hold, drop the extra ones with rounding.
         // rounding up can carry into the next power of 2, costing a fraction bit and
         // incrementing the exponent
-        const uint64_t mant = RoundedMantissa(msb, flt_frac_bits);
+        const uint64_t mant = RoundedMantissa(l, h, msb, flt_frac_bits);
         const uint64_t carry = mant >> (flt_frac_bits + 1);
-        return Float::make(sign, static_cast<uint32_t>(expo + static_cast<int32_t>(carry) + 127), static_cast<uint32_t>(mant >> carry));
+        return Float::make(s, static_cast<uint32_t>(expo + static_cast<int32_t>(carry) + 127), static_cast<uint32_t>(mant >> carry));
     }
     /**
      * @brief operator double - converts to a double
@@ -710,21 +797,24 @@ public:
         if (!*this)
             return 0.0;
 
-        const int32_t msb = 127 - static_cast<int32_t>(lzcnt128(*this));
+        // the conversion is done on the magnitude, the sign is put back by Double::make()
+        uint64_t l = 0, h = 0;
+        const uint64_t s = GetMagnitude(l, h) & 1;
+        const int32_t msb = 127 - static_cast<int32_t>(lzcnt128(l, h));
         const int32_t expo = msb - F;  // base 2 exponent of the value
 
         // the value fits in the fraction, no bits are lost so no rounding is needed.
         // double doesn't hold the msb, it's implicit, so bit [51:0] hold the rest of the value
         if (msb <= dbl_frac_bits) {
-            return Double::make(sign, static_cast<uint64_t>(expo + 1023), low << (dbl_frac_bits - msb));
+            return Double::make(s, static_cast<uint64_t>(expo + 1023), l << (dbl_frac_bits - msb));
         }
 
         // more bits than the fraction can hold, drop the extra ones with rounding.
         // rounding up can carry into the next power of 2, costing a fraction bit and
         // incrementing the exponent
-        const uint64_t mant = RoundedMantissa(msb, dbl_frac_bits);
+        const uint64_t mant = RoundedMantissa(l, h, msb, dbl_frac_bits);
         const uint64_t carry = mant >> (dbl_frac_bits + 1);
-        return Double::make(sign, static_cast<uint64_t>(expo + static_cast<int32_t>(carry) + 1023), mant >> carry);
+        return Double::make(s, static_cast<uint64_t>(expo + static_cast<int32_t>(carry) + 1023), mant >> carry);
     }
     /**
      * @brief operator long double - converts to a long double
@@ -745,16 +835,16 @@ public:
         static thread_local char str[128];  // need roughly a (meaningful) decimal digits per 3.2 bits
 
         char* p = &str[0];
-        fixed_point128 temp = *this;
-
-        // number is negative
-        if (temp.sign)
+        // the digits are produced from the magnitude, the sign is written out separately
+        uint64_t l = 0, h = 0;
+        if (GetMagnitude(l, h))
             *p++ = '-';
 
-        uint64_t integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
+        uint64_t integer = FP128_GET_BITS(h, upper_frac_bits, I + 1);
         // the size argument is what is left of the buffer, not its total size plus the offset
         p += snprintf(p, sizeof(str) - static_cast<size_t>(p - str), "%llu", integer);
-        temp.high &= ~int_mask;  // remove the integer part
+        // what is left is the fraction, which is below one and so always a positive value of this type
+        fixed_point128 temp(l, h & ~int_mask);
         // check if temp has additional digits (not zero)
         if (temp) {
             *p++ = '.';
@@ -770,7 +860,7 @@ public:
                 temp *= 10;  // move another digit to the integer area
             } else {
                 temp *= 10;  // move another digit to the integer area
-                integer = FP128_GET_BITS(temp.high, upper_frac_bits, 63);
+                integer = FP128_GET_BITS(temp.high, upper_frac_bits, I + 1);
             }
             *p++ = '0' + (char)integer;
             temp.high &= ~int_mask;
@@ -785,7 +875,7 @@ public:
             } else {
                 fixed_point128 t = temp;
                 t *= 10;
-                next_digit = FP128_GET_BITS(t.high, upper_frac_bits, 63);
+                next_digit = FP128_GET_BITS(t.high, upper_frac_bits, I + 1);
             }
             if (next_digit >= 5) {
                 // carry-propagate backwards through the digit string
@@ -835,7 +925,7 @@ public:
      *
      * Hinted rather than forced, unlike the other one line forwarders (see FP128_FORCE_INLINE).
      * operator>>= is itself forced, so forcing this one too would expand the whole shift, its
-     * sign fixup included, at every use of the by value form. The equivalent pair in float128
+     * rounding included, at every use of the by value form. The equivalent pair in float128
      * measurably hurt a loop that shifts alongside other arithmetic; this one is left hinted for
      * the same reason. The callee being forced means the shift is inlined either way once the
      * compiler decides to inline this wrapper.
@@ -866,7 +956,11 @@ public:
      */
     FP128_FORCE_INLINE constexpr fixed_point128& operator+=(const fixed_point128& rhs) noexcept
     {
-        return AddMagnitude(rhs, rhs.sign);
+        // a two's complement addition needs no attention to the signs at all: the sum of the two
+        // 128 bit patterns is the pattern of the sum, and a result outside the range wraps silently
+        const uint8_t carry = addcarryx_u64(0, low, rhs.low, &low);
+        addcarryx_u64(carry, high, rhs.high, &high);
+        return *this;
     }
     /**
      * @brief Add a value to this object
@@ -881,11 +975,11 @@ public:
      */
     FP128_FORCE_INLINE constexpr fixed_point128& operator-=(const fixed_point128& rhs) noexcept
     {
-        // Subtracting rhs is adding it with the opposite sign. Passing the flipped sign to the
-        // shared core is what keeps this as cheap as operator+=: forming an actual negated copy
-        // instead (*this += -rhs) costs a temporary plus the reset_sign_for_zero() that
-        // operator-() performs on it, and inverts which branch of the core the common case takes.
-        return AddMagnitude(rhs, rhs.sign ^ 1);
+        // subtracted directly rather than by adding the two's complement of rhs, which would cost
+        // a negation that the borrow chain gets for free. Both wrap on overflow.
+        const uint8_t borrow = subborrow_u64(0, low, rhs.low, &low);
+        subborrow_u64(borrow, high, rhs.high, &high);
+        return *this;
     }
     /**
      * @brief Subtract a value to this object
@@ -907,19 +1001,29 @@ public:
         uint64_t res[4];  // 256 bit of result
         uint64_t temp1[2], temp2[2];
 
+        // The magnitudes are multiplied and the sign is put back at the end. Multiplying the two's
+        // complement patterns directly is possible - the signed product is the unsigned one less
+        // 2^128 times each negative operand, and the window kept below reaches that far - but it
+        // rounds the tie of a negative product towards positive infinity, and correcting that back
+        // to away from zero costs more than it saves. Three spellings of the correction were
+        // measured against this one and every one of them was slower, by 20% here and by up to 20%
+        // again in the functions built on it.
+        uint64_t lhs_low = 0, lhs_high = 0, rhs_low = 0, rhs_high = 0;
+        const uint64_t result_sign = GetMagnitude(lhs_low, lhs_high) ^ rhs.GetMagnitude(rhs_low, rhs_high);
+
         // multiply low QWORDs
-        res[0] = mulx_u64(low, rhs.low, &res[1]);
+        res[0] = mulx_u64(lhs_low, rhs_low, &res[1]);
 
         // multiply high QWORDs (overflow can happen)
-        res[2] = mulx_u64(high, rhs.high, &res[3]);
+        res[2] = mulx_u64(lhs_high, rhs_high, &res[3]);
 
         // multiply low this and high rhs
-        temp1[0] = mulx_u64(low, rhs.high, &temp1[1]);
+        temp1[0] = mulx_u64(lhs_low, rhs_high, &temp1[1]);
         uint8_t carry = addcarryx_u64(0, res[1], temp1[0], &res[1]);
         res[3] += addcarryx_u64(carry, res[2], temp1[1], &res[2]);
 
         // multiply high this and low rhs
-        temp2[0] = mulx_u64(high, rhs.low, &temp2[1]);
+        temp2[0] = mulx_u64(lhs_high, rhs_low, &temp2[1]);
         carry = addcarryx_u64(0, res[1], temp2[0], &res[1]);
         res[3] += addcarryx_u64(carry, res[2], temp2[1], &res[2]);
 
@@ -935,9 +1039,7 @@ public:
         high = shift_right128<lsb>(res[index + 1], res[index + 2]);
 
         FP128_ADD_ROUND_BIT(low, high, need_rounding);
-        // set the sign
-        sign ^= rhs.sign;
-        reset_sign_for_zero();
+        NegateIf(result_sign);
         return *this;
     }
     /**
@@ -945,8 +1047,8 @@ public:
      *
      * Cheaper than operator*=(*this): a square is symmetric, so the two cross products
      * low*high and high*low are the same value and only one 64x64->128 bit multiply is
-     * needed instead of two. The sign is also known in advance (a square is never
-     * negative), which removes the sign xor and the zero-sign fixup.
+     * needed instead of two. The sign is also known in advance - a magnitude times itself is
+     * the answer as it stands - which removes the sign combination and the negation.
      *
      * The 256 bit intermediate product is accumulated exactly as in operator*=, so the
      * result is bit identical to (*this) * (*this), including rounding.
@@ -960,14 +1062,19 @@ public:
         uint64_t res[4];  // 256 bit of result
         uint64_t cross[2];
 
+        // squared on the magnitude, as operator*= multiplies on it, which is what makes the two
+        // agree bit for bit for a negative value as well as a positive one
+        uint64_t l = 0, h = 0;
+        (void)GetMagnitude(l, h);
+
         // multiply the low QWORD by itself
-        res[0] = mulx_u64(low, low, &res[1]);
+        res[0] = mulx_u64(l, l, &res[1]);
 
         // multiply the high QWORD by itself (overflow can happen)
-        res[2] = mulx_u64(high, high, &res[3]);
+        res[2] = mulx_u64(h, h, &res[3]);
 
         // the low * high cross product, which appears twice in the sum
-        cross[0] = mulx_u64(low, high, &cross[1]);
+        cross[0] = mulx_u64(l, h, &cross[1]);
 
         uint8_t carry = addcarryx_u64(0, res[1], cross[0], &res[1]);
         res[3] += addcarryx_u64(carry, res[2], cross[1], &res[2]);
@@ -987,8 +1094,6 @@ public:
         high = shift_right128<lsb>(res[index + 1], res[index + 2]);
 
         FP128_ADD_ROUND_BIT(low, high, need_rounding);
-        // a square is never negative, and the sign of zero is zero as well
-        sign = 0;
         return *this;
     }
     /**
@@ -1006,19 +1111,26 @@ public:
             // unsigned domain, where the negation wraps; negating the signed value is undefined
             // for the most negative one.
             uint64_t magnitude = static_cast<uint64_t>(x);
+            bool negate_result = false;
             if constexpr (std::is_signed_v<T>) {
                 // always do positive multiplication
                 if (x < 0) {
                     magnitude = 0ull - magnitude;
-                    sign ^= 1;
+                    negate_result = true;
                 }
             }
 
-            return operator*=(magnitude);
+            operator*=(magnitude);
+            if (negate_result)
+                Negate();
+
+            return *this;
         }
     }
     /**
      * @brief Multiplies a 64 bit value to this object
+     * The product is taken modulo 2^128, which is the signed product of a two's complement value by
+     * an unsigned one: multiplying is repeated addition and addition already wraps correctly.
      * @param x Right hand side operand
      * @return This object.
      */
@@ -1029,13 +1141,14 @@ public:
         // multiply low QWORDs
         low = mulx_u64(low, x, &temp);
         high = high * x + temp;
-        reset_sign_for_zero();
         return *this;
     }
     /**
      * @brief Divide this object by x.
      * @param rhs Right hand side operator (denominator)
      * @return this object.
+     * @throws std::logic_error when rhs is zero, leaving this object in an unspecified state - the
+     *         magnitude of what it held, the sign not yet put back.
      */
     FP128_INLINE fixed_point128& operator/=(const fixed_point128& rhs)
     {
@@ -1044,19 +1157,27 @@ public:
         if (!*this)
             return *this;
 
+        // The sign of the quotient is settled here and everything below works on magnitudes: the
+        // shift, div_64bit and the long division are all unsigned. Taking the magnitude of the
+        // numerator in place leaves this object holding it until the sign is put back at the end.
+        uint64_t denom_low = 0, denom_high = 0;
+        const uint64_t result_sign = TakeMagnitude() ^ rhs.GetMagnitude(denom_low, denom_high);
+
         // exponent of 2, convert to a much faster shift operation
-        if (1 == popcnt128(rhs.low, rhs.high)) {
-            const auto expo = rhs.get_exponent();
+        if (1 == popcnt128(denom_low, denom_high)) {
+            // the leading one of the magnitude sits at bit 127 - lzcnt and stands for 2^(that - F)
+            const int32_t expo = I - static_cast<int32_t>(lzcnt128(denom_low, denom_high));
             if (expo > 0)
-                *this >>= (int32_t)expo;
+                shift_right128_inplace_safe(low, high, expo);
             else if (expo < 0)
-                *this <<= (int32_t)-expo;
+                shift_left128_inplace_safe(low, high, -expo);
         }
-        // optimization for when dividing by an integer
-        else if (rhs.is_int() && (uint64_t)rhs <= UINT64_MAX) {
+        // optimization for when dividing by an integer. The integer part of a magnitude is at most
+        // 2^63, so it always fits in the QWORD div_64bit takes.
+        else if (rhs.is_int()) {
             uint64_t q[2] {};
             const uint64_t nom[2] = {low, high};
-            const uint64_t denom = (uint64_t)rhs;
+            const uint64_t denom = denom_high >> upper_frac_bits;
             uint64_t r;
             if (0 == div_64bit((uint64_t*)q, &r, (uint64_t*)nom, denom, 2)) {
                 need_rounding = r > (denom >> 1);
@@ -1065,28 +1186,21 @@ public:
             } else {  // error
                 FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
             }
-        } else if constexpr (FP128_USE_RECIPROCAL_FOR_DIVISION != 0) {
-            *this *= fabs(reciprocal(rhs));
         } else {
-            uint64_t q[4] {};
-            const uint64_t nom[4] = {0, 0, low, high};
-            const uint64_t denom[2] = {rhs.low, rhs.high};
-
-            if (0 == div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
-                static constexpr uint64_t half = 1ull << (I - 1);  // used for rounding
-                need_rounding = (q[0] & half) != 0;
-                // result in q needs to shifted left by F (F bits were added to the right)
-                // shifting right by 128-F is simpler.
-                if constexpr (I == 64) {
-                    high = q[1];
-                    low = q[0];
-                } else if constexpr (I < 64) {
-                    high = FP128_SHIFTRIGHT128(q[1], q[2], I);
-                    low = FP128_SHIFTRIGHT128(q[0], q[1], I);
-                }
-            } else {  // error
-                FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+            bool use_long_division = true;
+            if constexpr (FP128_USE_RECIPROCAL_FOR_DIVISION != 0) {
+                // A numerator magnitude of 2^127 is what lowest() leaves behind. It reads as a
+                // negative value of this type, so the multiply cannot be used for it and the long
+                // division, which works on the raw QWORDs, takes over. Every other magnitude, and
+                // the divisor's - which is not a power of two here, so it is not 2^127 either -
+                // is an ordinary positive value.
+                use_long_division = high >= sign_mask;
+                if (!use_long_division)
+                    *this *= reciprocal(fixed_point128(denom_low, denom_high));
             }
+
+            if (use_long_division)
+                need_rounding = DivideMagnitude(denom_low, denom_high);
         }
 
         // Left as a branch, unlike the carry propagating form operator*= and square() use. Both
@@ -1097,8 +1211,7 @@ public:
             ++low;
             high += low == 0;
         }
-        sign ^= rhs.sign;
-        reset_sign_for_zero();
+        NegateIf(result_sign);
         return *this;
     }
     /**
@@ -1115,15 +1228,20 @@ public:
             // unsigned domain, where the negation wraps; negating the signed value is undefined
             // for the most negative one.
             uint64_t magnitude = static_cast<uint64_t>(x);
+            bool negate_result = false;
             if constexpr (std::is_signed_v<T>) {
                 // always do positive division
                 if (x < 0) {
                     magnitude = 0ull - magnitude;
-                    sign ^= 1;
+                    negate_result = true;
                 }
             }
 
-            return operator/=(magnitude);
+            operator/=(magnitude);
+            if (negate_result)
+                Negate();
+
+            return *this;
         }
     }
     /**
@@ -1140,7 +1258,8 @@ public:
         // Convert to a much faster shift operation
         const Double d(x);
         if (0 == d.f()) {
-            sign ^= static_cast<uint32_t>(d.s());
+            if (d.s())
+                Negate();
             const int32_t e = static_cast<int32_t>(d.e()) - 1023;
             return (e >= 0) ? *this >>= e : *this <<= -e;
         }
@@ -1157,6 +1276,10 @@ public:
     {
         if (0 == x)
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
+
+        // div_64bit is unsigned, so the magnitude is divided and the sign put back afterwards
+        const uint64_t sign_bits = TakeMagnitude();
+
         const uint64_t nom[2] = {low, high};
         // div_64bit shortcuts a numerator that is smaller than the divisor and returns without
         // writing the quotient at all, so the destination has to start at zero. Otherwise a value
@@ -1164,10 +1287,11 @@ public:
         low = high = 0;
         // the results is stored in low and high, the function returns non zero if error (divide by zero or overflow)
         if (0 != div_64bit(&low, nullptr, (uint64_t*)nom, x, 2)) {
-            *this = 0;
+            low = high = 0;
+        } else {
+            NegateIf(sign_bits);
         }
 
-        reset_sign_for_zero();
         return *this;
     }
     /**
@@ -1200,8 +1324,7 @@ public:
             *this -= rhs * trunc(x_div_y);
         }
 
-        // Note if signs are the same, for nom/denom, the result keeps the sign.
-        reset_sign_for_zero();
+        // the result keeps the sign of the numerator, as fmod() does
         return *this;
     }
     /**
@@ -1213,28 +1336,30 @@ public:
     template <typename T> FP128_FORCE_INLINE fixed_point128& operator%=(T rhs) { return operator%=(fixed_point128(rhs)); }
     /**
      * @brief Shift right this object.
+     * The shift is arithmetic: the sign bit is replicated, so the result is the value divided by
+     * 2^shift and rounded to nearest, with a tie going to the even neighbour.
      * @param shift Bits to shift. Negative or very high values cause undefined behavior.
      * @return This object.
      */
     FP128_FORCE_INLINE constexpr fixed_point128& operator>>=(int32_t shift) noexcept
     {
-        shift_right128_inplace_safe(low, high, shift);
-        reset_sign_for_zero();
+        shift_right128_inplace_safe_signed(low, high, shift);
         return *this;
     }
     /**
      * @brief Shift left this object.
+     * A value shifted past the range of the type wraps silently, sign included.
      * @param shift Bits to shift. Negative or very high values cause undefined behavior.
      * @return This object.
      */
     FP128_FORCE_INLINE constexpr fixed_point128& operator<<=(int32_t shift) noexcept
     {
         shift_left128_inplace_safe(low, high, shift);
-        reset_sign_for_zero();
         return *this;
     }
     /**
      * @brief Bitwise AND=
+     * The operators below work on all 128 bits, the sign bit included.
      * @param rhs AND mask.
      * @return This object.
      */
@@ -1251,7 +1376,7 @@ public:
      */
     template <typename T> FP128_FORCE_INLINE constexpr fixed_point128& operator&=(const T& rhs) { return operator&=(fixed_point128(rhs)); }
     /**
-     * @brief Bitwise OR= of the object's, the sign of the object is untouched
+     * @brief Bitwise OR=
      * @param rhs OR mask.
      * @return This object.
      */
@@ -1268,7 +1393,7 @@ public:
      */
     template <typename T> FP128_FORCE_INLINE constexpr fixed_point128& operator|=(const T& rhs) { return operator|=(fixed_point128(rhs)); }
     /**
-     * @brief Bitwise XOR= of the object's, the sign of the object is untouched
+     * @brief Bitwise XOR=
      * @param rhs XOR mask.
      * @return This object.
      */
@@ -1335,14 +1460,13 @@ public:
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator!() const noexcept { return high == 0 && low == 0; }
     /**
-     * @brief Bitwise not (~).
+     * @brief Bitwise not (~). Flips all 128 bits, the sign included, which makes it -x - epsilon().
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr fixed_point128 operator~() const noexcept
     {
         fixed_point128 temp(*this);
         temp.high = ~high;
         temp.low = ~low;
-        temp.reset_sign_for_zero();
         return temp;
     }
     /**
@@ -1354,13 +1478,14 @@ public:
         return temp;
     }
     /**
-     * @brief Unary -. Returns a copy of the object with sign inverted.
+     * @brief Unary -. Returns the two's complement of the object.
+     * The most negative value has no positive counterpart and is returned unchanged, the same
+     * silent wrap the builtin integer types perform.
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr fixed_point128 operator-() const noexcept
     {
         fixed_point128 temp(*this);
-        temp.sign ^= 1;
-        temp.reset_sign_for_zero();
+        temp.Negate();
         return temp;
     }
 
@@ -1374,22 +1499,24 @@ public:
      * @return True when the fraction is zero.
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_int() const noexcept {
-        if constexpr (I == 64) {
+        if constexpr (I == 63) {
+            // the fraction is exactly the low QWORD, shifting high by 64 would be undefined
             return 0 == low;
         } else {
-            return 0 == low && 0 == (high << I);
+            // the fraction bits of the upper QWORD are the ones below the integer part and the sign
+            return 0 == low && 0 == (high << (I + 1));
         }
     }
     /**
      * @brief Returns true if the value is positive (including zero)
      * @return True when the value is positive
      */
-    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_positive() const noexcept { return 0 == sign; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_positive() const noexcept { return 0 == (high & sign_mask); }
     /**
      * @brief Returns true if the value negative (smaller than zero)
      * @return True when the value is negative
      */
-    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_negative() const noexcept { return 1 == sign; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_negative() const noexcept { return 0 != (high & sign_mask); }
     /**
      * @brief Returns true if the value is zero
      * @return Returns true if the value is zero
@@ -1410,12 +1537,13 @@ public:
     /**
      * @brief Returns the exponent of the object - like the base 2 exponent of a floating point
      * A value of 2.1 would return 1, values in the range [0.5,1.0) would return -1.
+     * Reads the magnitude, so the sign of the value makes no difference.
      * @return Exponent of the number
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr int32_t get_exponent() const noexcept
     {
         const int32_t s = static_cast<int32_t>(lzcnt128(*this));
-        return I - 1 - s;
+        return I - s;
     }
     /**
      * @brief Returns an instance of fixed_point128 with the value of pi
@@ -1483,7 +1611,7 @@ public:
     /**
      * @brief Return an instance of fixed_point128 with the value of 0.5
      * Shifting one() right is exact for any <B>I</B>. Note that 0.5 lands in the low QWORD when
-     * <B>I</B> is 64, which rules out spelling it as a constant of the upper QWORD alone.
+     * <B>I</B> is 63, which rules out spelling it as a constant of the upper QWORD alone.
      * @return 0.5
      */
     [[nodiscard]] FP128_FORCE_INLINE static constexpr fixed_point128 half() noexcept { return one() >> 1; }
@@ -1491,14 +1619,9 @@ public:
      * @brief Return an instance of fixed_point128 with the smallest positive value possible
      * @return 1
      */
-    [[nodiscard]] FP128_FORCE_INLINE static constexpr fixed_point128 epsilon() noexcept { return fixed_point128(1, 0, 0); }
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr fixed_point128 epsilon() noexcept { return fixed_point128(1, 0); }
 
 private:
-    /**
-     * @brief Set the sign to 0 when both low and high are zero, i.e. avoid having negative zero value
-     */
-    FP128_FORCE_INLINE constexpr void reset_sign_for_zero() noexcept { sign &= (0 != low || 0 != high); }
-
     /**
      * @brief Number of Mercator series terms log2_fraction() needs for this instantiation.
      *
@@ -1506,6 +1629,26 @@ private:
      * once that is below the last bit of the result with eight bits to spare.
      */
     static constexpr int32_t LOG2_TERMS = (F + 8 + log2_reduction_bits - 1) / log2_reduction_bits;
+
+    /**
+     * @brief Reads entry n of log2_inv_n_table as a fixed_point128<1>.
+     *
+     * The table holds 1/(n*ln2) with 127 fraction bits, which is the form float128's log2 wants;
+     * fixed_point128<1> carries 126, so each entry is shifted down by a bit as it is read.
+     *
+     * The shift cannot be hoisted out of the series loop by rescaling the whole recurrence. Doing
+     * that is sound - the accumulator is linear in the table entries, so leaving them doubled just
+     * doubles the answer - but the accumulator peaks around 1.47 and a doubled one would not fit
+     * the range of fixed_point128<1>, which stops just under 2.
+     *
+     * @param n Index into the table.
+     * @return The entry, scaled for the type the series runs in.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE static fixed_point128<1> Log2InvN(size_t n) noexcept
+    {
+        const uint64_t high = log2_inv_n_table[n][0], low = log2_inv_n_table[n][1];
+        return fixed_point128<1>(shift_right128<1>(low, high), high >> 1);
+    }
 
     /**
      * @brief Fraction part of log2(x) for x in [1,2), by argument reduction and a short series.
@@ -1521,10 +1664,10 @@ private:
      *    |z| <= 2^-6 each term buys six more bits, so LOG2_TERMS of them suffice.
      * -# Scaling. The result is converted to this instantiation's scaling exactly once, at the end.
      *
-     * The series runs in fixed_point128<1>, which has 127 fraction bits whatever the caller's I is.
-     * That is what keeps the accuracy: z is exact to 2^-128 coming out of the reduction, and
+     * The series runs in fixed_point128<1>, which has 126 fraction bits whatever the caller's I is.
+     * That is what keeps the accuracy: z is exact to 2^-127 coming out of the reduction, and
      * rounding it onto a grid of F bits before the series would cost 0.72 ulp of the result all on
-     * its own. Holding it at 127 bits instead leaves the table entry and the final conversion as
+     * its own. Holding it at 126 bits instead leaves the table entry and the final conversion as
      * the only meaningful error terms. The accumulator stays below 1.02 and 1/ln(2) is 1.443, so
      * both fit the range of fixed_point128<1>, which is just under 2.
      *
@@ -1554,33 +1697,31 @@ private:
         uint64_t p_low = 0, p_high = 0;
         mul128_high(m_low, m_high, log2_recip_table[j][1], log2_recip_table[j][0], p_low, p_high);
 
-        // z = 2 * (x/2 * recip) - 1, which is the product with its leading bit removed and is
-        // therefore already the raw form of a fixed_point128<1>. It is normally non negative; a
-        // reciprocal that rounded down can take it just below zero.
+        // z = 2 * (x/2 * recip) - 1, which is the product with its leading bit removed. Subtracting
+        // one half from the raw fraction wraps in the unsigned domain into exactly the two's
+        // complement of a negative difference, which is what a reciprocal that rounded down
+        // produces. The difference stands for z scaled by 2^127, one bit more than the 126 the raw
+        // form of a fixed_point128<1> carries, so it is shifted down by one - arithmetically, z
+        // having a sign now.
         constexpr uint64_t one_half = 1ull << 63;
-        work_t z;
-        if (p_high >= one_half) {
-            z = work_t(p_low, p_high - one_half, 0);
-        } else {
-            const uint64_t borrow = (p_low != 0) ? 1ull : 0ull;
-            z = work_t(0ull - p_low, one_half - p_high - borrow, 1);
-        }
+        uint64_t z_low = p_low, z_high = p_high - one_half;
+        shift_right128_inplace_safe_signed(z_low, z_high, 1);
+        const work_t z(z_low, z_high);
 
         // Horner over 1/(n*ln2), from the last term down, so the result is already base two.
-        work_t acc(log2_inv_n_table[LOG2_TERMS - 1][1], log2_inv_n_table[LOG2_TERMS - 1][0], 0);
+        work_t acc = Log2InvN(LOG2_TERMS - 1);
         for (int32_t n = LOG2_TERMS - 1; n >= 1; --n) {
-            const work_t inv_n(log2_inv_n_table[n - 1][1], log2_inv_n_table[n - 1][0], 0);
-            acc = inv_n - z * acc;
+            acc = Log2InvN(n - 1) - z * acc;
         }
         const work_t series = z * acc;
 
         // -log2(recip), the part of the answer the reduction removed, converted from a raw 128 bit
-        // fraction to this scaling. The shift is by I, which reaches 64 for the widest integer
+        // fraction to this scaling. The shift is by I + 1, which reaches 64 for the widest integer
         // part, so it goes through the variant that handles a shift of a whole QWORD.
         uint64_t table_low = log2_value_table[j][1], table_high = log2_value_table[j][0];
-        shift_right128_inplace_safe(table_low, table_high, I);
+        shift_right128_inplace_safe(table_low, table_high, I + 1);
 
-        return fixed_point128(table_low, table_high, 0) + fixed_point128(series);
+        return fixed_point128(table_low, table_high) + fixed_point128(series);
     }
 
     /**
@@ -1623,47 +1764,46 @@ private:
     }
 
     /**
-     * @brief Adds the magnitude of rhs to this object, treating rhs as if it carried sign rhsSign.
+     * @brief Divides the magnitude this object holds by another magnitude, in place.
      *
-     * Shared core of operator+= and operator-=. In a sign and magnitude representation the two
-     * differ only in the sign attributed to the addend, so passing that sign in as a parameter lets
-     * both operators reach the same code without either of them building a negated copy of rhs.
+     * The long division path of operator/=, which two of that function's branches reach. Both
+     * operands are unsigned 128 bit magnitudes rather than values of this type, and that is what
+     * lets this serve the one numerator the reciprocal path cannot: 2^127, which is the magnitude
+     * of lowest() and reads as a negative value when held in a fixed_point128.
      *
-     * Two cases:
-     * - Like signs: the magnitudes add and the sign is unchanged. Two instructions, and no zero
-     *   check is needed because a sum of magnitudes is zero only when both operands already were.
-     * - Unlike signs: the magnitudes subtract and the larger one keeps its sign. Which of the two
-     *   is larger is not established up front: the difference is taken in one direction and its
-     *   borrow out answers the question for free, so the ordinary case costs a subtract and a
-     *   not-taken branch. Only when the subtraction ran the wrong way round does the two's
-     *   complement pass run, turning the wrapped difference back into a magnitude.
+     * The numerator is extended with 128 zero bits below it, so the quotient arrives with 128
+     * fraction bits and is brought down to the F this type keeps.
      *
-     * @param rhs Right hand side operand; only its magnitude is read, its sign is ignored.
-     * @param rhsSign Sign to attribute to rhs: rhs.sign to add it, rhs.sign ^ 1 to subtract it.
-     * @return This object.
+     * @param denom_low Low QWORD of the divisor's magnitude
+     * @param denom_high High QWORD of the divisor's magnitude
+     * @return True when the dropped part of the quotient reached half a bit, which the caller
+     *         rounds up for.
      */
-    FP128_FORCE_INLINE constexpr fixed_point128& AddMagnitude(const fixed_point128& rhs, uint32_t rhsSign) noexcept
+    FP128_INLINE bool DivideMagnitude(uint64_t denom_low, uint64_t denom_high)
     {
-        // like signs: the magnitudes add and the sign is unchanged
-        if (rhsSign == sign) {
-            const uint8_t carry = addcarryx_u64(0, low, rhs.low, &low);
-            addcarryx_u64(carry, high, rhs.high, &high);
-            return *this;
+        uint64_t q[4] {};
+        const uint64_t nom[4] = {0, 0, low, high};
+        const uint64_t denom[2] = {denom_low, denom_high};
+
+        if (0 != div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+            FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
         }
 
-        // unlike signs: the magnitudes subtract. Writing each half of the difference straight back
-        // is safe even when rhs aliases this object - as it does for a -= a, which reaches this
-        // branch - because every QWORD of rhs is read before its counterpart here is overwritten.
-        const uint8_t borrow = subborrow_u64(0, low, rhs.low, &low);
-        // A borrow out of the high QWORD means rhs had the larger magnitude, so the difference
-        // wrapped and the result takes rhs's sign. Equal magnitudes do not borrow and yield a zero
-        // whose sign is cleared below.
-        if (subborrow_u64(borrow, high, rhs.high, &high)) {
-            twos_complement128(low, high);
-            sign = rhsSign;
+        // the quotient carries 128 fraction bits and this type keeps F of them, so it is shifted
+        // right by 128 - F, which is I + 1
+        constexpr uint64_t half = 1ull << I;  // the highest bit dropped, used for rounding
+        const bool need_rounding = (q[0] & half) != 0;
+        if constexpr (I == 63) {
+            // a shift of exactly one QWORD, which the intrinsic behind FP128_SHIFTRIGHT128 takes
+            // modulo 64 and would leave unshifted
+            low = q[1];
+            high = q[2];
+        } else {
+            high = FP128_SHIFTRIGHT128(q[1], q[2], I + 1);
+            low = FP128_SHIFTRIGHT128(q[0], q[1], I + 1);
         }
-        reset_sign_for_zero();
-        return *this;
+
+        return need_rounding;
     }
 
     /// @}
@@ -1893,7 +2033,7 @@ private:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
     {
-        return lhs.sign == rhs.sign && lhs.high == rhs.high && lhs.low == rhs.low;
+        return lhs.high == rhs.high && lhs.low == rhs.low;
     }
     /// @overload
     template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const fixed_point128& lhs, const T& rhs) noexcept
@@ -1913,7 +2053,7 @@ private:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
     {
-        return lhs.sign != rhs.sign || lhs.high != rhs.high || lhs.low != rhs.low;
+        return lhs.high != rhs.high || lhs.low != rhs.low;
     }
     /// @overload
     template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const fixed_point128& lhs, const T& rhs) noexcept
@@ -1933,15 +2073,12 @@ private:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
     {
-        // signs are different
-        if (lhs.sign != rhs.sign)
-            return lhs.sign > rhs.sign;  // true when lhs.sign is 1 and rhs.sign is 0
+        // the upper QWORDs are compared as signed values, which settles the sign and the magnitude
+        // above bit 64 in one step; the lower ones are pure magnitude and compare unsigned
+        if (lhs.high != rhs.high)
+            return static_cast<int64_t>(lhs.high) < static_cast<int64_t>(rhs.high);
 
-        // MSB is the same, check the LSB
-        if (lhs.high == rhs.high)
-            return (lhs.sign) ? lhs.low > rhs.low : lhs.low < rhs.low;
-
-        return (lhs.sign) ? lhs.high > rhs.high : lhs.high < rhs.high;
+        return lhs.low < rhs.low;
     }
     /// @overload
     template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const fixed_point128& lhs, const T& rhs) noexcept
@@ -1978,15 +2115,11 @@ private:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const fixed_point128& lhs, const fixed_point128& rhs) noexcept
     {
-        // signs are different
-        if (lhs.sign != rhs.sign)
-            return lhs.sign < rhs.sign;  // true when sign is 0 and rhs.sign is 1
+        // see operator< above
+        if (lhs.high != rhs.high)
+            return static_cast<int64_t>(lhs.high) > static_cast<int64_t>(rhs.high);
 
-        // MSB is the same, check the LSB
-        if (lhs.high == rhs.high)
-            return (lhs.sign) ? lhs.low < rhs.low : lhs.low > rhs.low;
-
-        return (lhs.sign) ? lhs.high < rhs.high : lhs.high > rhs.high;
+        return lhs.low > rhs.low;
     }
     /// @overload
     template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const fixed_point128& lhs, const T& rhs) noexcept
@@ -2025,12 +2158,15 @@ private:
     /**
      * @brief Returns the absolute value
      * @param x Input value
-     * @return A copy of x with sign removed
+     * @return A copy of x with the sign removed. lowest() has no positive counterpart and comes
+     *         back unchanged, the same silent wrap the builtin integer types perform.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 fabs(const fixed_point128& x) noexcept
     {
         fixed_point128 temp = x;
-        temp.sign = 0;
+        if (temp.is_negative())
+            temp.Negate();
+
         return temp;
     }
     /**
@@ -2040,15 +2176,9 @@ private:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 floor(const fixed_point128& x) noexcept
     {
-        if (x.is_int())
-            return x;
-
-        fixed_point128 res;
-        res.high = x.high & x.int_mask;
-        res.high += (uint64_t)x.is_negative() << upper_frac_bits;
-        res.low = 0;
-        res.sign = x.sign;
-        return res;
+        // dropping the fraction bits of a two's complement value moves it towards minus infinity,
+        // which is what floor does, so the mask is the whole of it
+        return fixed_point128(0, x.high & int_mask);
     }
 
     /**
@@ -2061,14 +2191,8 @@ private:
         if (x.is_int())
             return x;
 
-        fixed_point128 res;
-        res.high = x.high & x.int_mask;
-        res.high += (uint64_t)x.is_positive() << upper_frac_bits;
-        res.low = 0;
-        res.sign = x.sign;
-        // ceil(-0.5) is zero, and a zero carrying a sign compares unequal to every other zero
-        res.reset_sign_for_zero();
-        return res;
+        // the integer above the floor, which for a value with a fraction is the ceiling
+        return fixed_point128(0, (x.high & int_mask) + unity);
     }
     /**
      * @brief Rounds towards zero
@@ -2077,12 +2201,8 @@ private:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 trunc(const fixed_point128& x) noexcept
     {
-        // truncating a value below one produces zero, which must not keep the sign of the input.
-        // The comparison operators test the sign field, so a negative zero would compare unequal
-        // to zero and smaller than it.
-        fixed_point128 res(0, x.high & x.int_mask, x.sign);
-        res.reset_sign_for_zero();
-        return res;
+        // towards zero is up for a negative value and down for a positive one
+        return (x.is_negative()) ? ceil(x) : floor(x);
     }
     /**
      * @brief Rounds towards the nearest integer.
@@ -2092,14 +2212,10 @@ private:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 round(const fixed_point128& x) noexcept
     {
-        // save the sign
-        auto sign = x.sign;
-        fixed_point128 res = floor(fabs(x) + fixed_point128::half());
-
-        // restore the sign, unless the result rounded down to zero
-        res.sign = sign;
-        res.reset_sign_for_zero();
-        return res;
+        // the magnitude is rounded and the sign put back, which is what rounding away from zero on
+        // a tie means
+        const fixed_point128 res = floor(fabs(x) + fixed_point128::half());
+        return (x.is_negative()) ? -res : res;
     }
     /**
      * @brief Retrieves an integer that represents the base-2 exponent of the specified value.
@@ -2115,10 +2231,8 @@ private:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 copysign(const fixed_point128& x, const fixed_point128& y) noexcept
     {
-        fixed_point128 res = x;
-        res.sign = y.sign;
-        res.reset_sign_for_zero();
-        return res;
+        const fixed_point128 magnitude = fabs(x);
+        return (y.is_negative()) ? -magnitude : magnitude;
     }
     /**
      * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/root.
@@ -2139,15 +2253,10 @@ private:
         if (iptr == nullptr)
             return 0;
 
-        iptr->high = x.high & x.int_mask;  // lose the fraction
-        iptr->low = 0;
-        iptr->sign = x.sign;
-        iptr->reset_sign_for_zero();  // |x| < 1 leaves a zero integer part, which must be unsigned
-
-        fixed_point128 res = x;
-        res.high &= ~x.int_mask;  // lose the integer part
-        res.reset_sign_for_zero();
-        return res;
+        *iptr = trunc(x);  // the integer part, carrying the sign of x
+        // What is left is the fraction, which carries that sign as well. The subtraction is exact:
+        // the two parts have no bits in common.
+        return x - *iptr;
     }
     /**
      * @brief Determines the positive difference between the first and second values.
@@ -2192,12 +2301,16 @@ private:
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 sqr(fixed_point128 x) noexcept { return x.square(); }
     /**
      * @brief Calculates the left zero count of value x, ignoring the sign.
+     * Counted on the magnitude, so a negative value gives the same answer as its opposite rather
+     * than the zero its two's complement bits would produce.
      * @param x input value.
      * @return lzc (uint32_t) of th result.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr uint64_t lzcnt128(const fixed_point128& x) noexcept
     {
-        return (x.high != 0) ? lzcnt64(x.high) : 64 + lzcnt64(x.low);
+        uint64_t l = 0, h = 0;
+        (void)x.GetMagnitude(l, h);
+        return (h != 0) ? lzcnt64(h) : 64 + lzcnt64(l);
     }
     /**
      * @brief Calculates the square root using Newton's method.
@@ -2209,7 +2322,7 @@ private:
     [[nodiscard]] friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x, uint32_t iterations = 3) noexcept
     {
         static const fixed_point128 factor = "0.70710678118654752440084436210484903928483593768847403658833981";  // sqrt(2) / 2
-        if (x.sign || !x)
+        if (x.is_negative() || !x)
             return 0;
 
         // normalize the input to the range [0.5, 1)
@@ -2573,8 +2686,8 @@ private:
         // The guard is close to free: sin(candidate) is the value the next iteration needs anyway,
         // and the converged case below leaves before evaluating it at all, so the whole function
         // measures ~1% slower than the unguarded loop it replaced.
-        auto sign = x.sign;
-        x.sign = 0;
+        const bool negative = x.is_negative();
+        x = fabs(x);
         fixed_point128 res = ::asin(static_cast<double>(x));
         fixed_point128 sin_res = sin(res);
         fixed_point128 residual = fabs(sin_res - x);
@@ -2606,9 +2719,7 @@ private:
             residual = candidate_residual;
         }
 
-        res.sign = sign;
-        res.reset_sign_for_zero();  // asin(-0) must not produce a signed zero
-        return res;
+        return (negative) ? -res : res;
     }
     /**
      * @brief Calculate the cosine function
@@ -2729,8 +2840,8 @@ private:
         constexpr int max_iterations = 6;
 
         // make argument positive, save the sign
-        auto sign = x.sign;
-        x.sign = 0;
+        const bool negative = x.is_negative();
+        x = fabs(x);
 
         // limit argument to 0..1
         if (x > 1) {
@@ -2757,10 +2868,9 @@ private:
         // restore complement if needed
         if (comp)
             res = half_pi - res;
+
         // restore sign if needed
-        res.sign = sign;
-        res.reset_sign_for_zero();  // atan(-0) must not produce a signed zero
-        return res;
+        return (negative) ? -res : res;
     }
     /**
      * @brief Calculate the inverse tangent function of the ratio y / x
@@ -3231,24 +3341,25 @@ public:
     static constexpr bool traps = false;
     static constexpr bool tinyness_before = false;
 
-    /// @brief Magnitude bits. The sign is held separately, so all 128 of them carry value.
-    static constexpr int digits = 128;
-    /// @brief Decimal digits that survive a round trip: floor(128 * log10(2)).
+    /// @brief Value bits. One of the 128 is the sign, so 127 of them carry magnitude.
+    static constexpr int digits = 127;
+    /// @brief Decimal digits that survive a round trip: floor(127 * log10(2)).
     static constexpr int digits10 = 38;
     static constexpr int max_digits10 = 39;
     static constexpr int radix = 2;
-    /// @brief The last place is 2^(I-128), and the leading one is at 2^(I-1).
-    static constexpr int min_exponent = I - 128;
+    /// @brief The last place is 2^(I-127), and the largest magnitude is just under 2^I.
+    static constexpr int min_exponent = I - 127;
     static constexpr int max_exponent = I;
-    static constexpr int min_exponent10 = static_cast<int>((I - 128) * 0.30102999566398119521);
+    static constexpr int min_exponent10 = static_cast<int>((I - 127) * 0.30102999566398119521);
     static constexpr int max_exponent10 = static_cast<int>(I * 0.30102999566398119521);
 
     /// @brief Smallest positive value, which is one unit in the last place.
     [[nodiscard]] static value_type min() noexcept { return value_type::epsilon(); }
-    /// @brief Largest value, every magnitude bit set.
-    [[nodiscard]] static value_type max() noexcept { return value_type(UINT64_MAX, UINT64_MAX, 0); }
-    /// @brief Most negative value. The sign is a separate field, so the range is symmetric.
-    [[nodiscard]] static value_type lowest() noexcept { return value_type(UINT64_MAX, UINT64_MAX, 1); }
+    /// @brief Largest value, every bit below the sign set: 2^I - epsilon().
+    [[nodiscard]] static value_type max() noexcept { return value_type(UINT64_MAX, 0x7FFFFFFFFFFFFFFFull); }
+    /// @brief Most negative value, exactly -2^I. Two's complement makes the range asymmetric, so
+    ///        this one has no positive counterpart and negating it wraps back to itself.
+    [[nodiscard]] static value_type lowest() noexcept { return value_type(0, 1ull << 63); }
     /// @brief Spacing of the grid, the same at every magnitude.
     [[nodiscard]] static value_type epsilon() noexcept { return value_type::epsilon(); }
     [[nodiscard]] static value_type round_error() noexcept { return value_type::half(); }
@@ -3274,17 +3385,14 @@ template <int32_t I> struct hash<fp128::fixed_point128<I>>
 {
     [[nodiscard]] size_t operator()(const fp128::fixed_point128<I>& value) const noexcept
     {
+        // every value has exactly one representation, so the two QWORDs are all there is to mix
         uint64_t low = 0, high = 0;
-        uint32_t sign = 0;
-        value.get_components(low, high, sign);
-        // The two zeros compare equal, so they have to hash equal.
-        if (low == 0 && high == 0)
-            sign = 0;
+        value.get_components(low, high);
 
         uint64_t state = low + 0x9E3779B97F4A7C15ull;
         state = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9ull;
         state = (state ^ (state >> 27)) * 0x94D049BB133111EBull;
-        state ^= high + sign + 0x9E3779B97F4A7C15ull + (state << 6) + (state >> 2);
+        state ^= high + 0x9E3779B97F4A7C15ull + (state << 6) + (state >> 2);
         state = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9ull;
         return static_cast<size_t>(state ^ (state >> 31));
     }

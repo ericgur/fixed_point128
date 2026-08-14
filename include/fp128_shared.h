@@ -1046,6 +1046,65 @@ FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe(uint64_t& l, uint6
     }
 }
 /**
+ * @brief Arithmetic right shift of a 128 bit two's complement value (inplace) with rounding.
+ *
+ * The signed counterpart of shift_right128_inplace_safe: the vacated top bits are filled with
+ * copies of the sign bit instead of zeros, so the shift divides by a power of two for negative
+ * values as well as positive ones. Rounding is half to even and is applied to the two's complement
+ * bits, which means a tie moves towards the even neighbour rather than away from zero.
+ *
+ * Handles any positive shift value. A shift of 128 or more leaves zero whatever the sign: rounding
+ * to nearest is what this function does, and every value shifted that far is nearer to zero than to
+ * the last place below it.
+ *
+ * @param l Low QWORD
+ * @param h High QWORD, holding the sign in its MSB
+ * @param shift Bits to shift, between 0-inf
+ */
+FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe_signed(uint64_t& l, uint64_t& h, int shift) noexcept
+{
+    FP128_ASSERT(shift >= 0);
+    if (shift == 0)
+        return;
+
+    const int64_t value = static_cast<int64_t>(h);
+    const uint64_t sign_bits = static_cast<uint64_t>(value >> 63);  // all zeros or all ones
+    uint64_t lsb = 0;
+    switch (shift >> 6) {
+    case 0:  // 1-63 bit
+        lsb = (shift == 1) ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
+        l = (l >> shift) | (h << (64 - shift));
+        h = static_cast<uint64_t>(value >> shift);
+        break;
+    case 1:  // 64-127 bit
+        shift -= 64;
+        switch (shift) {
+        case 0:
+            // the last clause is the sticky bit: it distinguishes an exact tie from a remainder
+            // above half, exactly as in the unsigned version
+            lsb = ((h & 1) << 2) | ((l >> 63) << 1) | ((l & 0x7FFFFFFFFFFFFFFFull) != 0 ? 1 : 0);
+            break;
+        case 1:
+            lsb = ((h & 3) << 1) | (l != 0 ? 1 : 0);
+            break;
+        default:
+            lsb = (h >> (shift - 2)) & 7;
+        }
+
+        l = static_cast<uint64_t>(value >> shift);
+        h = sign_bits;
+        break;
+    default:  // >127 bit
+        h = l = 0;
+    }
+
+    // Use rounding half to even, see shift_right128_inplace_safe for what the three bits mean.
+    if (lsb >= 6 || lsb == 3) {
+        ++l;  // low will wrap around to zero if overflowed
+        h += l == 0;
+    }
+}
+/**
  * @brief Left shift a 128 bit integer (inplace).
  * Handles any positive shift value.
  * @param l Low QWORD
@@ -1617,16 +1676,27 @@ inline constexpr uint64_t log2_value_table[][2] = {
 };
 
 /**
- * @brief 1/(n*ln2) for n = 1 upwards, already in fixed_point128<1> form; entry [i] holds 1/((i+1)*ln2).
+ * @brief 1/(n*ln2) for n = 1 upwards, as a raw 128 bit value with 127 fraction bits; entry [i] holds
+ *        1/((i+1)*ln2).
  *
- * Stored pre-scaled because the series loop reads one entry per iteration, and shifting a raw
- * fraction into place every time would cost more than the multiply the entry is used for.
+ * Stored pre-scaled because the series loop reads one entry per iteration, and bringing a value
+ * into place from a decimal string every time is out of the question.
  *
  * The division by ln(2) that turns the natural logarithm into a base two one is folded into these
  * constants rather than applied once at the end. That removes a multiply from every call and, more
  * importantly, the rounding that came with it - which mattered for the instantiations whose own
- * precision is close to the 127 bits the series runs at. Entry zero is 1/ln2 = 1.4427, still inside
- * the range of fixed_point128<1>, and the accumulator peaks around 1.47.
+ * precision is close to the 127 bits the series runs at.
+ *
+ * Two readings of the same bits, one per consumer:
+ * <UL>
+ * <LI>float128 takes an entry as a plain 128 bit fraction, which makes it 1/(2n*ln2) - half the
+ *     mathematical value, so that every one of them stays below one. It doubles the series once at
+ *     the end.</LI>
+ * <LI>fixed_point128 takes it as a fixed_point128<1>, whose 126 fraction bits are one short of what
+ *     the entry carries, so it shifts each one down by a bit as it reads it. That gives 1/(n*ln2)
+ *     itself; entry zero is 1.4427 and the accumulator peaks around 1.47, both inside the range of
+ *     that instantiation, which reaches just under 2.</LI>
+ * </UL>
  */
 inline constexpr uint64_t log2_inv_n_table[][2] = {
     {0xB8AA3B295C17F0BBull, 0xBE87FED0691D3E89ull},

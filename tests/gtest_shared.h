@@ -40,11 +40,10 @@ namespace fp128
 {
 class fp128_gtest
 {
-    template <int32_t I> inline static void get_fixed_point128_members(const fixed_point128<I>& obj, uint64_t& l, uint64_t& h, uint32_t& s)
+    template <int32_t I> inline static void get_fixed_point128_members(const fixed_point128<I>& obj, uint64_t& l, uint64_t& h)
     {
         l = obj.low;
         h = obj.high;
-        s = obj.sign;
     }
     inline static void get_uint128_t_members(const uint128_t& obj, uint64_t& l, uint64_t& h)
     {

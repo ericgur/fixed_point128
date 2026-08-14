@@ -7,6 +7,56 @@ and this project adheres to a four-part `MAJOR.MINOR.PATCH.BUILD` version scheme
 exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants in
 [`include/fp128_shared.h`](include/fp128_shared.h).
 
+## [0.11.0.0] - unreleased
+
+### Changed
+
+- **`fixed_point128` is now 128 bits wide, not 129.** The separate `uint32_t sign` member is
+  gone; the object is the QWORD pair `high:low` read as a two's complement integer, with the
+  sign in the MSB of `high`, and the value it stands for is that integer divided by
+  2<sup>F</sup>:
+
+  ```
+  value = (int128)(high:low) / 2^F,  where F = 127 - I
+  ```
+
+  The template parameter **I** keeps its meaning - the integer bits, not counting the sign -
+  and its range narrows from `[1, 64]` to `[1, 63]`. The fraction gives up the bit the sign
+  now occupies, so `F` is one smaller for every instantiation and results carry one bit less
+  precision. The value range becomes `[-2^I, 2^I - 2^-F]`, asymmetric like every two's
+  complement type: the most negative value has no positive counterpart, so negating it - or
+  taking `fabs` of it - wraps back to itself, exactly as `-INT64_MIN` does.
+
+  Consequences worth knowing:
+  - **A signed zero no longer exists.** It used to be representable and compared unequal to
+    plain zero; every operation now produces the one zero there is.
+  - **`operator>>` shifts arithmetically**, replicating the sign bit, and keeps rounding to
+    nearest as before.
+  - **The bitwise operators cover all 128 bits**, the sign included. `~x` is now `-x - epsilon()`.
+  - **`operator uint64_t` and `operator uint32_t` wrap** a negative value modulo 2^64 or 2^32,
+    the way a builtin signed to unsigned conversion does, rather than returning the magnitude.
+    The signed conversions still truncate towards zero.
+  - Multiplication and division work on magnitudes internally, so `(-a) * b` stays bit
+    identical to `-(a * b)`, as it was before.
+
+- **Breaking API change** — the raw component accessors drop their sign parameter:
+  `get_components(low, high)` and the constructor `fixed_point128(low, high)` take the two
+  QWORDs of the value, sign included. The three argument forms are gone rather than adapted,
+  so existing calls fail to compile instead of silently meaning something else.
+
+- **`std::numeric_limits`** — `digits` is 127 rather than 128, `min_exponent` is `I - 127`,
+  and `lowest()` is `-2^I`, one step below `-max()`.
+
+- **Performance** — measured against the previous representation with `bench -t fixed_point128`
+  on MSVC: the comparisons run at 1.6x, addition and subtraction at 1.5x, multiplication by a
+  32-bit integer at 1.5x, division by a power of two at 1.6x, and `log`/`log2`/`log10` at
+  1.1x, none of which need to look at a sign field any more. Multiplication by a 128-bit value
+  is unchanged and the Mandelbrot composite is at 0.95x; what pays for the rest is `exp` and
+  its family at 0.82x-0.87x and the trigonometric functions at 0.85x-0.91x, which multiply
+  values of alternating sign and so take the magnitude round trip on every term.
+
+- The debugger visualizer in `fixed_point128.natvis` decodes the new layout.
+
 ## [0.10.0.0] - 2026-08-10
 
 ### Added
