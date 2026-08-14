@@ -287,15 +287,15 @@ public:
     FP128_FORCE_INLINE constexpr float128() noexcept : low(0), high(0) {}
     /**
      * @brief Copy constructor
-     * @param other Object to copy from
+     * @param rhs Object to copy from
      */
-    FP128_FORCE_INLINE constexpr float128(const float128& other) noexcept : low(other.low), high(other.high) {}
+    FP128_FORCE_INLINE constexpr float128(const float128& rhs) noexcept : low(rhs.low), high(rhs.high) {}
     /**
      * @brief Move constructor
      * Doesn't modify the right hand side object. Acts like a copy constructor.
-     * @param other Object to copy from
+     * @param rhs Object to copy from
      */
-    FP128_FORCE_INLINE constexpr float128(float128&& other) noexcept : low(other.low), high(other.high) {}
+    FP128_FORCE_INLINE constexpr float128(float128&& rhs) noexcept : low(rhs.low), high(rhs.high) {}
     /**
      * @brief Low level constructor
      * @param l Low QWORD
@@ -724,24 +724,24 @@ public:
 
     /**
      * @brief Assignment operator
-     * @param other Object to copy from
+     * @param rhs Object to copy from
      * @return This object.
      */
-    constexpr FP128_FORCE_INLINE float128& operator=(const float128& other) noexcept
+    constexpr FP128_FORCE_INLINE float128& operator=(const float128& rhs) noexcept
     {
-        high = other.high;
-        low = other.low;
+        high = rhs.high;
+        low = rhs.low;
         return *this;
     }
     /**
      * @brief Move assignment operator
-     * @param other Object to copy from
+     * @param rhs Object to copy from
      * @return This object.
      */
-    constexpr FP128_FORCE_INLINE float128& operator=(float128&& other) noexcept
+    constexpr FP128_FORCE_INLINE float128& operator=(float128&& rhs) noexcept
     {
-        high = other.high;
-        low = other.low;
+        high = rhs.high;
+        low = rhs.low;
         return *this;
     }
 
@@ -1003,36 +1003,36 @@ public:
 
     /**
      * @brief Add a value to this object
-     * @param other Right hand side operand
+     * @param rhs Right hand side operand
      * @return This object.
      */
-    FP128_INLINE constexpr float128& operator+=(const float128& other) noexcept
+    FP128_INLINE constexpr float128& operator+=(const float128& rhs) noexcept
     {
         // check trivial cases
-        if (is_special() || other.is_special()) {
+        if (is_special() || rhs.is_special()) {
             // A NaN operand propagates. Adding infinities of opposite signs is the invalid
             // operation and produces a NaN as well.
-            if (is_nan() || other.is_nan() || (is_inf() && other.is_inf() && get_sign() != other.get_sign())) {
+            if (is_nan() || rhs.is_nan() || (is_inf() && rhs.is_inf() && get_sign() != rhs.get_sign())) {
                 *this = nan();
                 return *this;
             }
 
             // Either a single operand is infinite, or both are infinite with the same sign.
             // In both cases the result is that infinity, keeping its own sign.
-            if (other.is_inf())
-                *this = other;
+            if (rhs.is_inf())
+                *this = rhs;
             return *this;
         }
 
-        uint32_t sign, other_sign;
-        int32_t expo, other_expo;
+        uint32_t sign, rhs_sign;
+        int32_t expo, rhs_expo;
         uint64_t l1, h1, l2, h2;
         get_components(l1, h1, expo, sign);
-        other.get_components(l2, h2, other_expo, other_sign);
+        rhs.get_components(l2, h2, rhs_expo, rhs_sign);
         constexpr int32_t shift_left_bits = 127 - 2 - FRAC_BITS;  // move bit 112 left, keep 1 bit for additional exponent and one for the sign
 
-        if (expo > other_expo) {
-            int32_t shift = expo - other_expo - shift_left_bits;  // how many bits to shift right
+        if (expo > rhs_expo) {
+            int32_t shift = expo - rhs_expo - shift_left_bits;  // how many bits to shift right
             // exponents are too far apart, result will stay the same
             if (shift > FRAC_BITS)
                 return *this;
@@ -1045,11 +1045,11 @@ public:
 
             // fix the exponent
             expo -= shift_left_bits;
-        } else if (expo < other_expo) {
-            int32_t shift = other_expo - expo - shift_left_bits;  // how many bits to shift right
+        } else if (expo < rhs_expo) {
+            int32_t shift = rhs_expo - expo - shift_left_bits;  // how many bits to shift right
             // exponents are too far apart, use the other value
             if (shift > FRAC_BITS) {
-                *this = other;
+                *this = rhs;
                 return *this;
             }
             shift_left128_inplace_safe(l2, h2, shift_left_bits);
@@ -1060,21 +1060,21 @@ public:
                 shift_left128_inplace_safe(l1, h1, -shift);
 
             // result base exponent comes from the other value
-            expo = other_expo - shift_left_bits;
+            expo = rhs_expo - shift_left_bits;
         }
 
         // same sign: the simple case
-        if (other.get_sign() == get_sign()) {
+        if (rhs.get_sign() == get_sign()) {
             // add the other value
             const uint8_t carry = addcarryx_u64(0, l1, l2, &l1);
             addcarryx_u64(carry, h1, h2, &h1);
         }
-        // different sign: invert the sign for other and subtract
+        // different sign: invert the sign for rhs and subtract
         else {
             // this value is negative
             if (is_negative())
                 twos_complement128(l1, h1);
-            // other value is negative
+            // rhs value is negative
             else
                 twos_complement128(l2, h2);
 
@@ -1096,76 +1096,76 @@ public:
     }
     /**
      * @brief Add a value to this object
-     * @param other Right hand side operand
+     * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_FORCE_INLINE constexpr float128& operator+=(const T& other) { return operator+=(float128(other)); }
+    template <typename T> FP128_FORCE_INLINE constexpr float128& operator+=(const T& rhs) { return operator+=(float128(rhs)); }
     /**
      * @brief Subtract a value from this object
-     * @param other Right hand side operand
+     * @param rhs Right hand side operand
      * @return This object.
      */
-    FP128_FORCE_INLINE constexpr float128& operator-=(const float128& other) noexcept { return *this += (-other); }
+    FP128_FORCE_INLINE constexpr float128& operator-=(const float128& rhs) noexcept { return *this += (-rhs); }
     /**
      * @brief Subtract a value from this object
-     * @param other Right hand side operand
+     * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_FORCE_INLINE constexpr float128& operator-=(const T& other) { return operator+=(-float128(other)); }
+    template <typename T> FP128_FORCE_INLINE constexpr float128& operator-=(const T& rhs) { return operator+=(-float128(rhs)); }
     /**
      * @brief Multiply a value to this object
-     * @param other Right hand side operand
+     * @param rhs Right hand side operand
      * @return This object.
      */
-    FP128_INLINE constexpr float128& operator*=(const float128& other) noexcept
+    FP128_INLINE constexpr float128& operator*=(const float128& rhs) noexcept
     {
         // check trivial cases
-        if (is_special() || other.is_special()) {
+        if (is_special() || rhs.is_special()) {
             // A NaN operand propagates, and so does the invalid operation inf * zero.
             // Note the zero tests are only reachable for the operand that is not special.
-            if (is_nan() || other.is_nan() || (is_inf() && other.is_zero()) || (is_zero() && other.is_inf())) {
+            if (is_nan() || rhs.is_nan() || (is_inf() && rhs.is_zero()) || (is_zero() && rhs.is_inf())) {
                 *this = nan();
                 return *this;
             }
 
             // at least one operand is infinite, the result is infinite with the combined sign
-            const uint32_t res_sign = get_sign() ^ other.get_sign();
+            const uint32_t res_sign = get_sign() ^ rhs.get_sign();
             *this = inf();
             set_sign(res_sign);
             return *this;
-        } else if (is_zero() || other.is_zero()) {
+        } else if (is_zero() || rhs.is_zero()) {
             // the sign of a zero product is the combination of both operand signs
-            const uint32_t res_sign = get_sign() ^ other.get_sign();
+            const uint32_t res_sign = get_sign() ^ rhs.get_sign();
             *this = 0;
             set_sign(res_sign);
             return *this;
         }
         // extract fractions and exponents
-        uint32_t sign, other_sign;
-        int32_t expo, other_expo;
+        uint32_t sign, rhs_sign;
+        int32_t expo, rhs_expo;
         uint64_t l1, h1, l2, h2;
         get_components(l1, h1, expo, sign);
-        other.get_components(l2, h2, other_expo, other_sign);
+        rhs.get_components(l2, h2, rhs_expo, rhs_sign);
         // Deliberately asked of the objects rather than derived from the mantissas above, even
         // though get_components() has just produced the bits this needs. Testing the raw value
         // leaves the question independent of the extraction, so it can be answered alongside it;
         // phrasing it as (h1 == FRAC_UNITY && l1 == 0) chains it behind instead and costs Clang
         // 15% of the multiply benchmark, against no gain on MSVC.
         bool is_exp2 = is_exponent_of_2();
-        bool other_is_exp2 = other.is_exponent_of_2();
+        bool rhs_is_exp2 = rhs.is_exponent_of_2();
 
         // add the exponents
-        expo += other_expo;
+        expo += rhs_expo;
 
         // optimize for exponents of 2
-        if (is_exp2 || other_is_exp2) {
+        if (is_exp2 || rhs_is_exp2) {
             // copy the fraction as needed
             if (is_exp2) {
                 l1 = l2;
                 h1 = h2;
             }
 
-            set_components(l1, h1, expo, sign ^ other_sign);
+            set_components(l1, h1, expo, sign ^ rhs_sign);
             return *this;
         }
 
@@ -1181,12 +1181,12 @@ public:
         // multiply high QWORDs (overflow can happen)
         res[2] = mulx_u64(h1, h2, &res[3]);
 
-        // multiply low this and high other
+        // multiply low this and high rhs
         temp1[0] = mulx_u64(l1, h2, &temp1[1]);
         uint8_t carry = addcarryx_u64(0, res[1], temp1[0], &res[1]);
         res[3] += addcarryx_u64(carry, res[2], temp1[1], &res[2]);
 
-        // multiply high this and low other
+        // multiply high this and low rhs
         temp2[0] = mulx_u64(h1, l2, &temp2[1]);
         carry = addcarryx_u64(0, res[1], temp2[0], &res[1]);
         res[3] += addcarryx_u64(carry, res[2], temp2[1], &res[2]);
@@ -1210,7 +1210,7 @@ public:
         // }
 
         norm_product(l1, h1, expo, sticky_bits != 0);
-        set_components(l1, h1, expo, sign ^ other_sign);
+        set_components(l1, h1, expo, sign ^ rhs_sign);
         return *this;
     }
     /**
@@ -1290,53 +1290,53 @@ public:
     }
     /**
      * @brief Multiply a value to this object
-     * @param other Right hand side operand
+     * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_FORCE_INLINE constexpr float128& operator*=(const T& other) { return operator*=(float128(other)); }
+    template <typename T> FP128_FORCE_INLINE constexpr float128& operator*=(const T& rhs) { return operator*=(float128(rhs)); }
     /**
      * @brief Divide this object by a value
-     * @param other Right hand side operand
+     * @param rhs Right hand side operand
      * @return This object.
      */
-    FP128_INLINE float128& operator/=(const float128& other)
+    FP128_INLINE float128& operator/=(const float128& rhs)
     {
         // check trivial cases
         // A NaN operand propagates, and so do the invalid operations zero / zero and inf / inf.
-        if (is_nan() || other.is_nan() || (is_zero() && other.is_zero()) || (is_inf() && other.is_inf())) {
+        if (is_nan() || rhs.is_nan() || (is_zero() && rhs.is_zero()) || (is_inf() && rhs.is_inf())) {
             *this = nan();
             return *this;
         }
 
         // the sign of any of the results below is the combination of both operand signs
-        const uint32_t res_sign = get_sign() ^ other.get_sign();
+        const uint32_t res_sign = get_sign() ^ rhs.get_sign();
 
         // An infinite dividend or a zero divisor produce an infinity, a zero dividend or an
         // infinite divisor produce a zero. The combinations where both apply, which are the
         // two invalid operations, were already handled above.
-        if (is_inf() || other.is_zero()) {
+        if (is_inf() || rhs.is_zero()) {
             *this = inf();
             set_sign(res_sign);
             return *this;
-        } else if (is_zero() || other.is_inf()) {
+        } else if (is_zero() || rhs.is_inf()) {
             *this = 0;
             set_sign(res_sign);
             return *this;
         }
 
         // extract fractions and exponents
-        uint32_t sign, other_sign;
-        int32_t expo, other_expo;
+        uint32_t sign, rhs_sign;
+        int32_t expo, rhs_expo;
         uint64_t l1, h1, l2, h2;
         get_components(l1, h1, expo, sign);
-        other.get_components(l2, h2, other_expo, other_sign);
+        rhs.get_components(l2, h2, rhs_expo, rhs_sign);
 
         // subtract the exponents
-        expo -= other_expo;
+        expo -= rhs_expo;
 
-        // optimize for other value is an exponent of 2
-        if (other.is_exponent_of_2()) {
-            set_components(l1, h1, expo, sign ^ other_sign);
+        // optimize for rhs value is an exponent of 2
+        if (rhs.is_exponent_of_2()) {
+            set_components(l1, h1, expo, sign ^ rhs_sign);
             return *this;
         }
 
@@ -1363,15 +1363,15 @@ public:
             return *this;
         }
 
-        set_components(l1, h1, expo, sign ^ other_sign);
+        set_components(l1, h1, expo, sign ^ rhs_sign);
         return *this;
     }
     /**
      * @brief Divide this object by a value
-     * @param other Right hand side operand
+     * @param rhs Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_FORCE_INLINE float128& operator/=(const T& other) { return operator/=(float128(other)); }
+    template <typename T> FP128_FORCE_INLINE float128& operator/=(const T& rhs) { return operator/=(float128(rhs)); }
 
     //
     // unary operations
@@ -2484,7 +2484,7 @@ public:
      * @brief Compare logical/bitwise equal.
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
-     * @return True if this and other are equal.
+     * @return True if lhs and rhs are equal.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const float128& lhs, const float128& rhs) noexcept
     {
