@@ -32,6 +32,12 @@
     <ClInclude Include="$(FP128Root)include\int128_shared.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="$(FP128Root)include\fp128_decimal.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(FP128Root)include\p128_decimal.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(FP128Root)bench\Bench.cpp">
@@ -40,9 +46,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="$(FP128Root)cpp.hint" />
-    <None Include="$(FP128Root)README.md" />
     <None Include="$(FP128Root).gitignore" />
-    <None Include="$(FP128Root)CLAUDE.md" />
     <None Include="$(FP128Root)CMakeLists.txt">
       <Filter>Build</Filter>
     </None>

@@ -6,6 +6,13 @@
     <BuildType Name="Release_clang" />
     <Platform Name="x64" />
   </Configurations>
+  <Folder Name="/Solution Items/">
+    <File Path="CHANGELOG.md" />
+    <File Path="CLAUDE.md" />
+    <File Path="CMakeLists.txt" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
   <Project Path="msvc/bench.vcxproj" Id="16ba4eff-3569-418b-82bf-f2b5deb3d612" />
   <Project Path="msvc/fixed_point128_tests.vcxproj" Id="6468231d-bbb6-4478-a65c-2a26d1e667c3" />
   <Project Path="msvc/googletest.vcxproj" Id="2c43c518-cd01-49ee-8385-1e85a0da3e97" />
