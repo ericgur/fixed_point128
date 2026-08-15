@@ -37,6 +37,26 @@ exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants 
 
 ### Changed
 
+- **`uint128_t` and `int128_t` are no longer trivially copyable**, and are measurably faster for
+  it. Their copy and move members were `= default`; they now assign the two QWORDs individually.
+  MSVC implements a *trivial* 16-byte copy as a single `vmovups` once `/arch:AVX2` is on, and
+  every operator in the class produces its result as two QWORD stores — so that one wide load
+  overlaps both stores, fails store-to-load forwarding, and stalls for roughly 15 cycles. It fires
+  on any expression whose 128-bit result reaches memory, `*out = *a * *b` included.
+
+  Measured on MSVC with plain array code (`out[i] = in[i] op x`, 64K elements), interleaving the
+  two builds so drift and throttling hit both equally: `sqrt` 1.7x, division by a 128-bit value
+  1.4x, `std::vector` growth 1.35x, addition 1.05x, and no measurable change to multiplication,
+  `log10`, `pow` or division by a 64-bit integer. Nothing measured slower. The `vector` result is
+  the surprising one — losing `memmove` relocation costs less than the member-wise copy saves, at
+  this size.
+
+  What this breaks: `std::is_trivially_copyable_v` is now `false` for both types, so `std::bit_cast`
+  no longer accepts them and a container of them relocates with a copy loop instead of a
+  `memmove`. Both remain standard layout, and `tests/{u,}int128_t_gtest.cpp` now assert the
+  absence of trivial copyability so the members cannot drift back to `= default`.
+  `fixed_point128` and `float128` have always been written this way.
+
 - **`fixed_point128` is now 128 bits wide, not 129.** The separate `uint32_t sign` member is
   gone; the object is the QWORD pair `high:low` read as a two's complement integer, with the
   sign in the MSB of `high`, and the value it stands for is that integer divided by
@@ -82,6 +102,67 @@ exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants 
   values of alternating sign and so take the magnitude round trip on every term.
 
 - The debugger visualizer in `fixed_point128.natvis` decodes the new layout.
+
+### Fixed
+
+- **The benchmark understated `uint128_t` and `int128_t` by up to 6x on MSVC.** `BenchBinary()`
+  timed `result = lhs op rhs` into an escaped result. MSVC builds the operator's return value in a
+  stack temporary with two QWORD stores and then copies it out with a single 16-byte load; that
+  load overlaps both stores, cannot be store-forwarded, and waits for them to reach L1 — roughly
+  15 cycles on every iteration. Only the two integer types were charged for it, because the copy
+  MSVC is free to widen is the compiler-generated one, and `fixed_point128` and `float128` assign
+  their two QWORDs individually. The result was a table in which `fixed_point128<10>` multiplied
+  two 128-bit values faster than `uint128_t` did — 491M/s against 258M/s, for four multiplies plus
+  a shift and a rounding step against three multiplies.
+
+  `BenchBinary()` now applies the operation in place, as `BenchAccumulate()` already did for the
+  same reason. The 128-bit multiplication reads 1.56G/s for `uint128_t` and 490M/s for
+  `fixed_point128<10>`, and clang-cl — which never emitted the wide copy, and so was measuring the
+  multiply all along — agrees with both. The division measurements gain between 1.15x and 1.7x,
+  the stall being a smaller share of an operation that is dominated by a `div`. `BenchUnary()` was
+  checked and is not affected, since every unary function the integer types have returns a
+  `uint64_t`.
+
+- **`udiv128()` was a `__udivti3` library call on Clang and GCC, not a divide instruction.** The
+  portable body divides a `__uint128_t` by a `uint64_t`; neither compiler can prove the quotient
+  fits in 64 bits, so both lower it to the compiler-rt/libgcc helper — a full software 128÷128
+  division — where MSVC reaches the `DIV` instruction through its `_udiv128` intrinsic. This is
+  what made MSVC look ~2.8x faster than clang-cl at 128-bit division; the gap was Clang's, not an
+  MSVC measurement artifact.
+
+  x86-64 under a GCC-style frontend now issues the instruction directly as inline assembly, behind
+  the new `FP128_X64` detection macro and the `std::is_constant_evaluated()` guard the other
+  assembly helpers already use. AArch64 keeps the portable path — it has no 128/64 divide
+  instruction. Interleaved measurements with clang-cl over 64K-element arrays: division by a
+  64-bit integer 2.7x (92 → 250 M/s), by a 128-bit value 2.5x (70 → 178 M/s), `sqrt` 1.9x
+  (16.5 → 31 M/s). clang-cl now edges out MSVC on division by a 64-bit integer.
+
+  The precondition is `hi_dividend < divisor` — `DIV` raises #DE rather than truncating when the
+  quotient overflows — which is the contract `_udiv128` already carried, and which both call sites
+  satisfy: `div_32bit()` passes a zero high half, `div_64bit()` passes the remainder of a previous
+  division by the same divisor. `tests/uint128_t_gtest.cpp` now checks the division identity over
+  edge cases and 65536 random ones, on whichever spelling the toolchain selected.
+
+  Side effect: an x86-64 clang-cl build no longer references `__udivti3` at all, so it no longer
+  needs `clang_rt.builtins` on the link line. `cmake/FP128ClangRuntime.cmake` stays, since the
+  portable path is still what ARM64 uses.
+
+- **`uint128_t::operator/=(T)` copied its numerator and quotient through stack arrays**, and paid
+  for both. `div_64bit()` was handed a `{low, high}` copy as the numerator and wrote the quotient
+  into the members, or — while this was being tracked down — a local quotient copied back over
+  them. MSVC vectorizes either copy into a 16-byte access that overlaps the QWORD stores on the
+  other side of it and cannot forward from them, putting a stall immediately in front of the two
+  divisions and another behind them.
+
+  Numerator and quotient are now the members themselves, which are adjacent QWORDs in a standard
+  layout class. `div_64bit()` reads `u[j]` into a local before writing `q[j]` and walks `j`
+  downwards, so the two may alias; every early return that would leave the quotient unwritten is
+  already excluded by the trivial-case checks in the caller.
+
+  This is what keeps the copy-member change above from costing anything here. With the numerator
+  copy still in place that change made `out[i] = in[i] / 5` run 3.4x *slower*, because the stall
+  simply moved from the assignment into the copy; removing both copies restores the operation to
+  its previous rate.
 
 ## [0.10.0.0] - 2026-08-10
 

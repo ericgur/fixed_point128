@@ -3099,6 +3099,7 @@ private:
      *                 1!      2!      3!
      *
      * The Maclaurin series will quickly overflow as x's power increases rapidly.
+     *
      *                     x   ix   fx
      * Using the equality e = e  * e
      * Where ix is the integer part of x and fx is the fraction part.
@@ -3131,9 +3132,8 @@ private:
         }
 
         // compute e^fx (fraction part of x)
-        // first and second elements of the series
         if (fx) {
-            fixed_point128 exp_fx = fixed_point128::one() + fx;
+            fixed_point128 exp_fx = fixed_point128::one() + fx;  // first and second elements of the series
             fixed_point128 elem_denom, elem_nom = fx;
 
             for (int i = 2;; ++i) {

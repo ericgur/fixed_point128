@@ -737,6 +737,51 @@ TEST(uint128_t, pow)
  * operand ranges the original tests never reached.
  ***********************************************************************/
 
+// udiv128() is the 128/64 division primitive underneath every integer divide in the library, and on
+// x86-64 with a GCC style frontend it is now hand written assembly: Clang cannot prove the quotient
+// fits in 64 bits, so it lowered the portable __uint128_t expression to a __udivti3 call - a full
+// software 128/128 division that measured 2.7x slower than the DIV instruction. MSVC reaches the
+// same instruction through the _udiv128 intrinsic, and the macro makes this test cover both.
+//
+// The division identity is checked rather than a second implementation, so the test says the same
+// thing on every toolchain. Every case keeps hi < divisor, which is the precondition both spellings
+// carry: DIV raises #DE instead of truncating when the quotient overflows 64 bits.
+TEST(uint128_t, UDiv128SatisfiesTheDivisionIdentity)
+{
+    const auto check = [](uint64_t hi, uint64_t lo, uint64_t divisor) {
+        ASSERT_NE(divisor, 0ull);
+        ASSERT_LT(hi, divisor) << "the quotient has to fit in 64 bits";
+
+        uint64_t remainder = ~0ull;
+        const uint64_t quotient = udiv128(hi, lo, divisor, &remainder);
+
+        EXPECT_LT(remainder, divisor) << "hi=" << hi << ", lo=" << lo << ", divisor=" << divisor;
+        // quotient * divisor + remainder reconstructs the dividend exactly, and cannot itself
+        // overflow 128 bits because it is equal to one
+        EXPECT_TRUE(uint128_t(quotient) * uint128_t(divisor) + uint128_t(remainder) == uint128_t(lo, hi))
+            << "hi=" << hi << ", lo=" << lo << ", divisor=" << divisor << ", q=" << quotient << ", r=" << remainder;
+        // the remainder pointer is optional, and dropping it must not change the quotient
+        EXPECT_EQ(udiv128(hi, lo, divisor, nullptr), quotient);
+    };
+
+    // The interesting divisors are the extremes and the small values the library actually divides
+    // by; the interesting high halves sit just below the divisor, where the quotient barely fits.
+    const uint64_t divisors[] = {1ull, 2ull, 3ull, 5ull, 10ull, 0xFFFFFFFFull, 0x8000000000000000ull, ~0ull};
+    const uint64_t lows[] = {0ull, 1ull, 0x123456789ABCDEFull, 0x8000000000000000ull, ~0ull};
+    for (const uint64_t divisor : divisors) {
+        for (const uint64_t lo : lows) {
+            check(0ull, lo, divisor);
+            check(divisor - 1, lo, divisor);
+            check(divisor / 2, lo, divisor);
+        }
+    }
+
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const uint64_t divisor = get_uint64_random() | 1ull;  // never zero
+        check(get_uint64_random() % divisor, get_uint64_random(), divisor);
+    }
+}
 // operator%= used to hand div_32bit this object's own QWORDs as the remainder buffer. div_32bit
 // shrinks the denominator past its leading zero words and fills only that many words, so a divisor
 // whose high QWORD fits in 32 bits left the top 32 bits of the numerator untouched in the result.
@@ -1157,8 +1202,14 @@ TEST(uint128_t, LogBoundaries)
 }
 // uint128_t and int128_t are now aliases of a single class template. Nothing but this test pins the
 // properties the merge had to preserve: the storage is unchanged, the 16 byte alignment survived the
-// template, and the two types still refuse to convert into one another. Trivial copyability is new,
-// a consequence of defaulting the copy and move members.
+// template, and the two types still refuse to convert into one another.
+//
+// The type is deliberately *not* trivially copyable. The copy and move members were defaulted until
+// the 128 bit multiplication benchmark showed what that costs: MSVC implements a trivial 16 byte
+// copy as one `vmovups`, which overlaps the two QWORD stores every operator uses to build its
+// result, fails store to load forwarding, and stalls. Writing the members out one at a time removes
+// the stack temporary altogether and multiplies six times faster. The assertion below is what keeps
+// the members from drifting back to `= default`.
 TEST(uint128_t, LayoutAndTraits)
 {
     static_assert(std::is_same_v<uint128_t, int128_base<false>>, "uint128_t is the unsigned instantiation");
@@ -1166,7 +1217,7 @@ TEST(uint128_t, LayoutAndTraits)
     static_assert(sizeof(uint128_t) == 16, "the object holds exactly two QWORDs");
     static_assert(alignof(uint128_t) == 16, "FP128_ALIGN16 has to survive the template");
     static_assert(std::is_standard_layout_v<uint128_t>, "the division helpers alias the members as an array");
-    static_assert(std::is_trivially_copyable_v<uint128_t>, "the copy and move members are defaulted");
+    static_assert(!std::is_trivially_copyable_v<uint128_t>, "the copy and move members are written out, not defaulted");
     // getting from one signedness to the other needs two user defined conversions, which the
     // language never performs implicitly, and leaves the explicit form ambiguous
     static_assert(!std::is_convertible_v<int128_t, uint128_t>, "no silent signed to unsigned conversion");

@@ -358,6 +358,14 @@ template <typename T> void BuildArgs(T* args, const T& base)
  *
  * See BuildArgs() for why the loop cycles through a set of arguments rather than reusing one.
  *
+ * Assigning the returned result is what BenchBinary() had to stop doing, because MSVC widens the
+ * copy of a trivially copyable 128 bit return value to 16 bytes and then stalls on the store
+ * forwarding. Nothing measured here reaches that: every unary function the two integer types have -
+ * sqrt() and the log() family - returns a uint64_t, which is copied with a single store, and the
+ * two fractional types assign their QWORDs one at a time and so never see the wide copy. A unary
+ * function returning uint128_t or int128_t would reintroduce it, and would need the treatment
+ * BenchBinary() documents.
+ *
  * @tparam T Operand type.
  * @tparam Func Callable invoked as func(const T&).
  * @param name Name to print the measurement under.
@@ -395,28 +403,48 @@ template <typename T, typename Func> void BenchUnary(const char* name, double ti
  * from repeating - see BuildArgs() - and it leaves the right hand side free to be a type that has
  * no arithmetic of its own, such as the uint32_t exponent of the integer pow().
  *
+ * @p op has to apply the operation to the left hand operand in place rather than return the result,
+ * for the reason spelled out on BenchAccumulate(): written as `result = lhs op rhs`, MSVC builds the
+ * operator's return value in a stack temporary with two QWORD stores and then copies it into the
+ * escaped result with a single 16 byte load. That load overlaps both stores and cannot be forwarded,
+ * so it waits for them to reach L1 - about 15 cycles, on every iteration.
+ *
+ * The stall only lands on the types whose copy assignment is the compiler generated one, because
+ * that is the copy MSVC is free to widen to 16 bytes; fixed_point128 and float128 assign their two
+ * QWORDs individually and never see it. Timing `lhs op rhs` therefore charged uint128_t and int128_t
+ * for a stall the fractional types were not paying, which put fixed_point128 ahead of uint128_t on
+ * the 128 bit multiplication - 491M/s against 258M/s, for an operation that is three multiplies
+ * against four plus a shift and a rounding step. In place, the two come out at 494M/s and 1.73G/s,
+ * and clang-cl - which never emitted the wide copy and so always measured the multiply itself -
+ * agrees with both figures.
+ *
+ * Nothing is lost by measuring the compound assignment: the binary operator is defined as `lhs op=
+ * rhs` on a copy of the left operand, and the copy is exactly what the loop makes when it reloads
+ * the next operand into the result.
+ *
  * @tparam T Type of the left hand operand.
  * @tparam U Type of the right hand operand.
- * @tparam Func Callable invoked as func(const T&, const U&).
+ * @tparam Op Callable invoked as op(T& lhs, const U& rhs), which must update lhs in place.
  * @param name Name to print the measurement under.
  * @param time_per_function Time to spend measuring, in seconds.
  * @param left Left hand operand, and the base the rest of the rotating set is derived from.
  * @param right Right hand operand, the same on every iteration.
- * @param func Operation to measure.
+ * @param op Operation to measure.
  */
-template <typename T, typename U, typename Func> void BenchBinary(const char* name, double time_per_function, T left, U right, Func func)
+template <typename T, typename U, typename Op> void BenchBinary(const char* name, double time_per_function, T left, U right, Op op)
 {
-    const int64_t ips = MeasureRate(time_per_function, [left, right, func](uint64_t count) {
+    const int64_t ips = MeasureRate(time_per_function, [left, right, op](uint64_t count) {
         T args[BENCH_ARG_COUNT];
         BuildArgs(args, left);
         U rhs = right;
-        auto result = func(args[0], rhs);
+        T result = args[0];
         Escape(args[0]);
         Escape(rhs);
         Escape(result);
         for (uint64_t i = count; i != 0; --i) {
             Barrier();
-            result = func(args[i & (BENCH_ARG_COUNT - 1)], rhs);
+            result = args[i & (BENCH_ARG_COUNT - 1)];
+            op(result, rhs);
         }
         DoNotOptimize(result);
     });
@@ -637,7 +665,7 @@ template <typename T> void bench_multiplication(double time_per_function = 1.0)
     using IntMulType = typename Traits::IntMulType;
 
     BenchBinary<MulType, MulType>("Multiplication by 128-bit value", time_per_function, Traits::mulA(), Traits::mulB(),
-                                  [](const MulType& lhs, const MulType& rhs) { return lhs * rhs; });
+                                  [](MulType& lhs, const MulType& rhs) { lhs *= rhs; });
 
     // The result is escaped rather than accumulated. The accumulating form (f10 = f10 * int_val) was
     // degenerate: the low QWORD of the product does not depend on the high QWORD, so with nothing
@@ -645,7 +673,7 @@ template <typename T> void bench_multiplication(double time_per_function = 1.0)
     // operation into a single 64 bit mulx and Clang went further, vectorizing the remaining chain
     // 4 wide - neither was timing a 128 bit multiply.
     BenchBinary<IntMulType, uint32_t>("Multiplication by int32_t", time_per_function, Traits::intMulA(), 123456789u,
-                                      [](const IntMulType& lhs, const uint32_t& rhs) { return lhs * rhs; });
+                                      [](IntMulType& lhs, const uint32_t& rhs) { lhs *= rhs; });
 }
 
 template <typename T> void bench_division(double time_per_function = 1.0)
@@ -653,17 +681,17 @@ template <typename T> void bench_division(double time_per_function = 1.0)
     using Traits = BenchTraits<T>;
 
     BenchBinary<T, double>("Division by double (exponent of 2)", time_per_function, Traits::operandA(), 64.0,
-                           [](const T& lhs, const double& rhs) { return lhs / rhs; });
+                           [](T& lhs, const double& rhs) { lhs /= rhs; });
 
-    BenchBinary<T, int64_t>("Division by int64", time_per_function, Traits::operandA(), 5ll, [](const T& lhs, const int64_t& rhs) { return lhs / rhs; });
+    BenchBinary<T, int64_t>("Division by int64", time_per_function, Traits::operandA(), 5ll, [](T& lhs, const int64_t& rhs) { lhs /= rhs; });
 
-    BenchBinary<T, T>("Division by 128-bit integer value", time_per_function, Traits::operandA(), T(5), [](const T& lhs, const T& rhs) { return lhs / rhs; });
+    BenchBinary<T, T>("Division by 128-bit integer value", time_per_function, Traits::operandA(), T(5), [](T& lhs, const T& rhs) { lhs /= rhs; });
 
     // Only meaningful where the divisor can hold a fraction. For the integer types this loop would
     // be the previous one with a different divisor.
     if constexpr (Traits::isFractional) {
         BenchBinary<T, T>("Division by 128-bit fractional value", time_per_function, Traits::operandA(), Traits::operandB(),
-                          [](const T& lhs, const T& rhs) { return lhs / rhs; });
+                          [](T& lhs, const T& rhs) { lhs /= rhs; });
     }
 }
 
@@ -712,12 +740,12 @@ template <typename T> void bench_pow(double time_per_function = 1.0)
 
     if constexpr (Traits::hasTranscendental) {
         BenchBinary<T, T>("pow", time_per_function, Traits::operandB(), Traits::operandC(),
-                          [](const T& base, const T& exponent) { return pow(base, exponent); });
+                          [](T& base, const T& exponent) { base = pow(base, exponent); });
     } else {
         // A small base keeps the result inside 128 bits; the cost of the binary exponentiation
         // depends on the exponent, not on the base.
         BenchBinary<T, uint32_t>("pow (integer exponent)", time_per_function, T(7), 5u,
-                                 [](const T& base, const uint32_t& exponent) { return pow(base, exponent); });
+                                 [](T& base, const uint32_t& exponent) { base = pow(base, exponent); });
     }
 }
 

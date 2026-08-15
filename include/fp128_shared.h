@@ -108,6 +108,14 @@
 #define FP128_ARM64
 #endif
 
+// Detect x86-64 under a GCC style frontend. Most of the x86 intrinsics MSVC provides have a
+// __builtin equivalent there, so this is only needed where the operation exists as an instruction
+// but neither as an intrinsic nor as something the compiler will produce on its own - which today
+// means udiv128() and the DIV instruction. MSVC never takes these paths; it has the intrinsic.
+#if defined(FP128_CLANG) && (defined(__x86_64__) || defined(_M_X64))
+#define FP128_X64
+#endif
+
 // Set to TRUE to disable function inlining - useful for profiling a specific function. Default 0
 #ifndef FP128_DISABLE_INLINE
 #define FP128_DISABLE_INLINE 0
@@ -498,15 +506,27 @@ FP128_FORCE_INLINE constexpr uint32_t udiv64(uint64_t dividend, uint32_t divisor
 }
 
 /**
- * @brief Portable 128-bit by 64-bit unsigned division (GCC/Clang fallback).
+ * @brief 128-bit by 64-bit unsigned division (GCC/Clang counterpart of the _udiv128 intrinsic).
  *
- * @note AArch64 has no 128/64 bit divide instruction (UDIV is at most 64/64), so there is no
- *       assembly variant of this function. The __uint128_t expression below lowers to a call to
- *       the compiler runtime helper (__udivti3 / __umodti3) which is faster than any short
- *       hand written long division. Callers on ARM64 should prefer the reciprocal based
- *       division path (see FP128_USE_RECIPROCAL_FOR_DIVISION) built on mulx_u64.
+ * @warning The quotient must fit in 64 bits, which means @p hi_dividend must be smaller than
+ *          @p divisor. This is the same precondition the MSVC _udiv128 intrinsic carries, and
+ *          for the same reason: both compile to the x86 DIV instruction, which raises #DE rather
+ *          than truncating. Both callers satisfy it - div_32bit() passes a zero high half, and
+ *          div_64bit() passes the remainder of a previous division by the same divisor.
  *
- * @param hi_dividend Upper 64 bits of the 128-bit dividend.
+ * @note On x86-64 this is one DIV instruction, written as assembly because there is no builtin
+ *       for it and the portable expression below does not produce it: Clang cannot prove the
+ *       quotient fits, so it lowers `__uint128_t / uint64_t` to a __udivti3 call - a full software
+ *       128/128 division. That call cost 2.8x on `uint128_t` division against MSVC, which has the
+ *       intrinsic.
+ *
+ * @note AArch64 has no 128/64 bit divide instruction (UDIV is at most 64/64), so it keeps the
+ *       portable path, where the __uint128_t expression lowers to the compiler runtime helper
+ *       (__udivti3 / __umodti3) - still faster than any short hand written long division. Callers
+ *       on ARM64 should prefer the reciprocal based division path
+ *       (see FP128_USE_RECIPROCAL_FOR_DIVISION) built on mulx_u64.
+ *
+ * @param hi_dividend Upper 64 bits of the 128-bit dividend. Must be smaller than @p divisor.
  * @param lo_dividend Lower 64 bits of the 128-bit dividend.
  * @param divisor 64-bit divisor.
  * @param remainder Pointer to receive the 64-bit remainder (may be nullptr).
@@ -514,6 +534,23 @@ FP128_FORCE_INLINE constexpr uint32_t udiv64(uint64_t dividend, uint32_t divisor
  */
 FP128_FORCE_INLINE constexpr uint64_t udiv128(uint64_t hi_dividend, uint64_t lo_dividend, uint64_t divisor, uint64_t* remainder)
 {
+#if defined(FP128_X64)
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        uint64_t quot = 0, rem = 0;
+        // DIV divides RDX:RAX by its operand, leaving the quotient in RAX and the remainder in
+        // RDX. The divisor is constrained to a register rather than "rm" for two reasons: it
+        // cannot then land in either of those - the two tied operands already hold RAX and RDX,
+        // so the allocator has to pick a third register - and a register operand carries its own
+        // width, which lets the mnemonic go without the "q" suffix and so assemble under either
+        // inline assembly dialect. DIV leaves the flags undefined, hence the "cc" clobber.
+        __asm__("div %[d]" : "=a"(quot), "=d"(rem) : [d] "r"(divisor), "a"(lo_dividend), "d"(hi_dividend) : "cc");
+        if (remainder) {
+            *remainder = rem;
+        }
+        return quot;
+    }
+#endif
     __uint128_t dividend = (static_cast<__uint128_t>(hi_dividend) << 64) | lo_dividend;
     uint64_t quot = static_cast<uint64_t>(dividend / divisor);
     if (remainder) {

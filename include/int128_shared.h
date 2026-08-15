@@ -224,14 +224,34 @@ public:
     FP128_FORCE_INLINE constexpr int128_base() noexcept : low(0), high(0) {}
     /**
      * @brief Copy constructor
-     * Defaulted, which is what makes the type trivially copyable.
+     *
+     * Copies the two QWORDs individually instead of being defaulted. The difference is not
+     * stylistic: a defaulted copy is trivial, and MSVC implements a trivial 16 byte copy with a
+     * single `vmovups` once `/arch:AVX2` is on. Every operator here produces its result as two
+     * QWORD stores into a stack temporary, so that one wide load overlaps both of them, fails
+     * store to load forwarding, and stalls for roughly 15 cycles waiting for them to reach L1.
+     * It lands on any expression whose 128 bit result goes to memory - `*out = *a * *b` is enough.
+     *
+     * Spelling the copy out member by member keeps every store and load 8 bytes wide, which
+     * forwards. Measured on MSVC over 64K element arrays, interleaving the two builds so that
+     * drift hits both equally: 1.7x on sqrt(), 1.4x on division by a 128 bit value, 1.05x on
+     * addition, and no measurable change to multiplication, log10(), pow() or division by a
+     * 64 bit integer. Nothing measured slower.
+     *
+     * The type stops being trivially copyable, so `std::bit_cast` no longer accepts it and a
+     * container of these relocates with a copy loop rather than a `memmove` - which at this size
+     * is not a loss either: growing a std::vector of them measured 1.35x faster.
+     * `fixed_point128` and `float128` have always been written this way, for the same reason.
+     *
+     * @param rhs Object to copy from.
      */
-    constexpr int128_base(const int128_base&) noexcept = default;
+    FP128_FORCE_INLINE constexpr int128_base(const int128_base& rhs) noexcept : low(rhs.low), high(rhs.high) {}
     /**
      * @brief Move constructor
      * Doesn't modify the right hand side object. Acts like a copy constructor.
+     * @param rhs Object to copy from.
      */
-    constexpr int128_base(int128_base&&) noexcept = default;
+    FP128_FORCE_INLINE constexpr int128_base(int128_base&& rhs) noexcept : low(rhs.low), high(rhs.high) {}
     /**
      * @brief Constructor from the double type
      * Underflow goes to zero. Overflow, NaN and +-INF go to the largest supported magnitude of
@@ -427,14 +447,29 @@ public:
     constexpr ~int128_base() noexcept = default;
     /**
      * @brief Assignment operator
-     * Defaulted, which is what makes the type trivially copyable.
+     * Assigns the two QWORDs individually rather than being defaulted; see the copy constructor
+     * for why the width of the copy matters.
+     * @param rhs Value to copy from
+     * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator=(const int128_base&) noexcept = default;
+    FP128_FORCE_INLINE constexpr int128_base& operator=(const int128_base& rhs) noexcept
+    {
+        low = rhs.low;
+        high = rhs.high;
+        return *this;
+    }
     /**
      * @brief Move assignment operator
-     * Defaulted, which is what makes the type trivially copyable.
+     * Doesn't modify the right hand side object. Acts like a copy assignment operator.
+     * @param rhs Value to copy from
+     * @return This object.
      */
-    FP128_INLINE constexpr int128_base& operator=(int128_base&&) noexcept = default;
+    FP128_FORCE_INLINE constexpr int128_base& operator=(int128_base&& rhs) noexcept
+    {
+        low = rhs.low;
+        high = rhs.high;
+        return *this;
+    }
     /**
      * @brief Assignment operator
      * @param rhs Value to copy from
@@ -913,9 +948,19 @@ public:
                 return *this >>= (int32_t)log2(uval);
             }
 
-            uint64_t nom[2] = {low, high};
-            uint64_t* words = &low;
-            if (div_64bit(words, nullptr, (uint64_t*)nom, uval, 2)) {
+            // Numerator and quotient are both the members themselves, which are adjacent QWORDs in
+            // a standard layout class. div_64bit() reads u[j] into a local before it writes q[j] and
+            // never looks at u[j] again, and it walks j downwards, so letting the two alias is safe.
+            //
+            // Neither array is a copy for a reason. A `{low, high}` numerator, or a local quotient
+            // copied back over the members, is a 16 byte load to MSVC, and it overlaps the QWORD
+            // stores on the other side of it without being able to forward from them. One such copy
+            // in front of the two divisions and one behind them cost 3.2x on `out[i] = in[i] / 5`.
+            //
+            // Every early return in div_64bit() that leaves the quotient unwritten is unreachable
+            // from here: a numerator below or equal to the divisor is what the two trivial cases
+            // above already returned for, and a zero numerator is the `is_zero()` check.
+            if (div_64bit(&low, nullptr, &low, uval, 2)) {
                 FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
             }
             return *this;
