@@ -163,6 +163,22 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  * two's complement type: the most negative value has no positive counterpart, so negating it (and
  * fabs of it) wraps back to itself.
  *
+ * <B>Minimum integer bits:</B><BR>
+ * Some of the constants and functions cannot work in the narrowest instantiations, and each one
+ * says so with a static_assert in its body rather than by overflowing quietly or failing to link.
+ * The bound is the smallest <B>I</B> that works, not a safe margin:
+ * <UL>
+ * <LI><B>I >= 2</B>: pi(), e(), and the exponential family exp(), exp2(), expm1(), pow() and
+ *     tanh(), which reach e() or - for tanh - form e^x + e^-x, never below 2.</LI>
+ * <LI><B>I >= 3</B>: pi2(), which is 6.28.</LI>
+ * <LI><B>I >= 4</B>: the trigonometric group sin1(), cos1(), sin(), cos(), tan(), asin(), acos(),
+ *     atan(), atan2(), and the hyperbolic sinh() and cosh().</LI>
+ * </UL>
+ * Everything else works for every <B>I</B>, including half_pi(), sqrt_2() and golden_ratio(), which
+ * are all below two. A function whose <I>result</I> leaves the range - exp() of a large argument,
+ * log() of a tiny one - is a matter of the argument rather than of the type, and overflows silently
+ * like any other operation.
+ *
  * <B>Implementation notes:</B>
  * <UL>
  * <LI>Overflow is handled silently, similar to builtin integer operations.</LI>
@@ -1547,19 +1563,23 @@ public:
     }
     /**
      * @brief Returns an instance of fixed_point128 with the value of pi
+     * Needs <B>I</B> to be 2 or more.
      * @return pi
      */
     [[nodiscard]] FP128_INLINE static const fixed_point128& pi() noexcept
     {
+        static_assert(I >= 2, "pi() needs template parameter <I> to be at least 2: 3.14159... does not fit in one integer bit!");
         static const fixed_point128 pi = "3.14159265358979323846264338327950288419716939937510";  // 50 first digits of pi
         return pi;
     }
     /**
      * @brief Returns an instance of fixed_point128 with the value of pi * 2
+     * Needs <B>I</B> to be 3 or more.
      * @return pi * 2
      */
     [[nodiscard]] FP128_INLINE static const fixed_point128& pi2() noexcept
     {
+        static_assert(I >= 3, "pi2() needs template parameter <I> to be at least 3: 6.28318... does not fit in fewer integer bits!");
         static const fixed_point128 pi2 = "6.28318530717958647692528676655900576839433879875021";  // 50 first digits of pi * 2
         return pi2;
     }
@@ -1583,10 +1603,12 @@ public:
     }
     /**
      * @brief Returns an instance of fixed_point128 with the value of e
+     * Needs <B>I</B> to be 2 or more.
      * @return e
      */
     [[nodiscard]] FP128_INLINE static const fixed_point128& e() noexcept
     {
+        static_assert(I >= 2, "e() needs template parameter <I> to be at least 2: 2.71828... does not fit in one integer bit!");
         static const fixed_point128 e = "2.71828182845904523536028747135266249775724709369";  // 50 first digits of e
         return e;
     }
@@ -2600,8 +2622,9 @@ private:
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept requires (I >= 4)
+    [[nodiscard]] friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept
     {
+        static_assert(I >= 4, "sin1() needs template parameter <I> to be at least 4: the series it evaluates carries powers of the argument!");
         assert(fabs(x) <= fixed_point128::half_pi());
 
         // first part of the series is just 'x'
@@ -2627,8 +2650,9 @@ private:
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Cosine of x
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 cos1(const fixed_point128& x) noexcept requires (I >= 4)
+    [[nodiscard]] friend FP128_INLINE fixed_point128 cos1(const fixed_point128& x) noexcept
     {
+        static_assert(I >= 4, "cos1() needs template parameter <I> to be at least 4: it evaluates sin1()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi();
         assert(fabs(x) <= half_pi);
         return (x.is_positive()) ? sin1(half_pi - x) : -sin1(-half_pi - x);
@@ -2639,8 +2663,9 @@ private:
      * @param x value in Radians
      * @return Sine of x
      */
-    [[nodiscard]] friend fixed_point128 sin(fixed_point128 x) noexcept requires (I >= 4)
+    [[nodiscard]] friend fixed_point128 sin(fixed_point128 x) noexcept
     {
+        static_assert(I >= 4, "sin() needs template parameter <I> to be at least 4: it evaluates sin1() and cos1()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi();  // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
@@ -2667,6 +2692,7 @@ private:
      */
     [[nodiscard]] friend fixed_point128 asin(fixed_point128 x) noexcept
     {
+        static_assert(I >= 4, "asin() needs template parameter <I> to be at least 4: it evaluates sin() and cos()!");
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         constexpr int max_iterations = 6;
         if (x < -1 || x > 1)
@@ -2728,8 +2754,9 @@ private:
      * @param x value in Radians
      * @return Cosine of x
      */
-    [[nodiscard]] friend fixed_point128 cos(fixed_point128 x) noexcept requires (I >= 4)
+    [[nodiscard]] friend fixed_point128 cos(fixed_point128 x) noexcept
     {
+        static_assert(I >= 4, "cos() needs template parameter <I> to be at least 4: it evaluates sin1() and cos1()!");
         static const fixed_point128& half_pi = fixed_point128::half_pi();  // pi / 2
         double round = (x.is_positive()) ? 0.5 : -0.5;
 
@@ -2756,6 +2783,7 @@ private:
      */
     [[nodiscard]] friend fixed_point128 acos(fixed_point128 x) noexcept
     {
+        static_assert(I >= 4, "acos() needs template parameter <I> to be at least 4: it evaluates sin() and cos()!");
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
         constexpr int max_iterations = 6;
         if (x < -1 || x > 1)
@@ -2807,8 +2835,9 @@ private:
      * @return Tangent of x. Zero at the poles (odd multiples of pi/2), where the true value is
      *         unbounded and the cosine comes out exactly zero.
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 tan(fixed_point128 x) noexcept requires (I >= 4)
+    [[nodiscard]] friend FP128_INLINE fixed_point128 tan(fixed_point128 x) noexcept
     {
+        static_assert(I >= 4, "tan() needs template parameter <I> to be at least 4: it evaluates sin() and cos()!");
         constexpr bool use_cordic = false;  // CORDIC is currently slower and less accurate
         if constexpr (use_cordic) {
             fixed_point128 sin_x, cos_x;
@@ -2833,6 +2862,7 @@ private:
      */
     [[nodiscard]] friend fixed_point128 atan(fixed_point128 x) noexcept
     {
+        static_assert(I >= 4, "atan() needs template parameter <I> to be at least 4: it evaluates sin() and cos()!");
         // constants for segmentation
         static const fixed_point128& half_pi = fixed_point128::half_pi();  // pi / 2
         static const fixed_point128 eps = fixed_point128::epsilon() << 1;
@@ -2880,6 +2910,7 @@ private:
      */
     [[nodiscard]] friend fixed_point128 atan2(fixed_point128 y, fixed_point128 x) noexcept
     {
+        static_assert(I >= 4, "atan2() needs template parameter <I> to be at least 4: it evaluates atan()!");
         // constants for segmentation
         static const fixed_point128& pi = fixed_point128::pi();
         static const fixed_point128& half_pi = fixed_point128::half_pi();          // pi / 2
@@ -2922,8 +2953,9 @@ private:
      * @param x value
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept requires (I >= 4)
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 sinh(const fixed_point128& x) noexcept
     {
+        static_assert(I >= 4, "sinh() needs template parameter <I> to be at least 4!");
         return (exp(x) - exp(-x)) >> 1;
         // the below code while faster, produces lower precision results
         //    if (fabs(x) > 1) {
@@ -2976,8 +3008,9 @@ private:
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Cosine of x
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept requires (I >= 4)
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept
     {
+        static_assert(I >= 4, "cosh() needs template parameter <I> to be at least 4!");
         return (exp(x) + exp(-x)) >> 1;
 
         // Using the Maclaurin series expansion, the formula is:
@@ -3029,6 +3062,8 @@ private:
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 tanh(const fixed_point128& x) noexcept
     {
+        // e^x + e^-x never goes below 2, so one integer bit cannot hold the denominator for any argument
+        static_assert(I >= 2, "tanh() needs template parameter <I> to be at least 2: e^x + e^-x is never below 2!");
         fixed_point128 ex = exp(x);     // e^x
         fixed_point128 exm1 = exp(-x);  // e^(-x)
         //
@@ -3074,6 +3109,7 @@ private:
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 exp(const fixed_point128& x) noexcept
     {
+        static_assert(I >= 2, "exp() needs template parameter <I> to be at least 2: it multiplies by e(), which needs 2 integer bits!");
         static const fixed_point128 e = fixed_point128::e();
         fixed_point128 _ix, exp_ix;  // integer part of x
         fixed_point128 fx = modf(fabs(x), &_ix);
@@ -3121,7 +3157,11 @@ private:
      * @param x A number specifying a power.
      * @return Exponent of x
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 expm1(const fixed_point128& x) noexcept { return exp(x) - fixed_point128::one(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 expm1(const fixed_point128& x) noexcept
+    {
+        static_assert(I >= 2, "expm1() needs template parameter <I> to be at least 2: it evaluates exp()!");
+        return exp(x) - fixed_point128::one();
+    }
     /**
      * @brief Computes 2 to the power of x
      * @param x Exponent value
@@ -3129,6 +3169,7 @@ private:
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 exp2(const fixed_point128& x) noexcept
     {
+        static_assert(I >= 2, "exp2() needs template parameter <I> to be at least 2: it evaluates exp()!");
         //
         // Based on exponent law: (x^n)^m = x^(m*n)
         // Convert the exponent x (function parameter) to produce an exponent that will work with exp()
@@ -3146,6 +3187,7 @@ private:
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 pow(const fixed_point128& x, const fixed_point128& y) noexcept
     {
+        static_assert(I >= 2, "pow() needs template parameter <I> to be at least 2: it evaluates exp()!");
         //
         // Based on exponent law: (x^n)^m = x^(m * n)
         // Convert the exponent y (function parameter) to produce an exponent that will work with exp()

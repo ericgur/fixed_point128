@@ -2046,6 +2046,54 @@ TEST(fixed_point128, ArithmeticShiftRight)
     }
 }
 
+/**
+ * @brief The instantiations that are too narrow for a constant or a function reject it at compile
+ *        time, through a static_assert in the body of each one.
+ *
+ * A violation is a compile error, so it cannot be exercised from here. What this pins down is the
+ * other half of the claim - that at exactly the documented minimum the value is representable and
+ * the function works - which is what makes the bound the right one rather than merely a safe one.
+ */
+TEST(fixed_point128, MinimumIntegerBitsAreTight)
+{
+    // pi and e need 2 integer bits, pi2 needs 3, and each is exact at its minimum
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<2>::pi()), 3.14159265358979323846);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<2>::e()), 2.71828182845904523536);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<3>::pi2()), 6.28318530717958647692);
+
+    // the constants below two are usable in the narrowest instantiation there is
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::half_pi()), 1.57079632679489661923);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::sqrt_2()), 1.41421356237309504880);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::golden_ratio()), 1.61803398874989484820);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::one()), 1.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::half()), 0.5);
+
+    // the exponential family at its minimum of 2 integer bits
+    EXPECT_NEAR(static_cast<double>(exp(fixed_point128<2>("0.5"))), 1.6487212707001281, 1e-15);
+    EXPECT_NEAR(static_cast<double>(exp2(fixed_point128<2>("0.5"))), 1.4142135623730951, 1e-15);
+    EXPECT_NEAR(static_cast<double>(expm1(fixed_point128<2>("0.5"))), 0.6487212707001281, 1e-15);
+    EXPECT_NEAR(static_cast<double>(pow(fixed_point128<2>("1.5"), fixed_point128<2>("0.5"))), 1.2247448713915890, 1e-15);
+    EXPECT_NEAR(static_cast<double>(tanh(fixed_point128<2>("0.5"))), 0.4621171572600098, 1e-15);
+
+    // The trigonometric group at its minimum of 4. The tolerance is wide because the bound only
+    // claims the functions work there, not that they are accurate: the Maclaurin series carries
+    // powers of its argument, which leave the range of a narrow instantiation long before the
+    // series has converged, so fixed_point128<4> is good to about three decimal digits. That
+    // predates the two's complement layout and is why the bound is 4 rather than 2.
+    EXPECT_NEAR(static_cast<double>(sin(fixed_point128<4>("0.5"))), 0.4794255386042030, 1e-3);
+    EXPECT_NEAR(static_cast<double>(cos(fixed_point128<4>("0.5"))), 0.8775825618903728, 1e-3);
+    EXPECT_NEAR(static_cast<double>(atan(fixed_point128<4>("0.5"))), 0.4636476090008061, 1e-3);
+    EXPECT_NEAR(static_cast<double>(asin(fixed_point128<4>("0.5"))), 0.5235987755982989, 1e-3);
+    EXPECT_NEAR(static_cast<double>(acos(fixed_point128<4>("0.5"))), 1.0471975511965976, 1e-3);
+
+    // and the functions that carry no bound still work in the narrowest one
+    const fixed_point128<1> x("0.5");
+    EXPECT_NEAR(static_cast<double>(sqrt(x)), 0.7071067811865476, 1e-15);
+    EXPECT_NEAR(static_cast<double>(log(x)), -0.6931471805599453, 1e-15);
+    EXPECT_NEAR(static_cast<double>(reciprocal(fixed_point128<1>("0.75"))), 1.3333333333333333, 1e-15);
+    EXPECT_NEAR(static_cast<double>(asinh(x)), 0.4812118250596035, 1e-15);
+}
+
 // A scalar on the left used to be ambiguous: converting it to fixed_point128 and converting the
 // fixed_point128 to a builtin type are both a single user defined conversion. The scalar is the one
 // that gets widened, so the fraction of the object survives instead of being truncated away.

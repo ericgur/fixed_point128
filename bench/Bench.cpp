@@ -1381,11 +1381,16 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)a.get_exponent();
 
     // --- Static constant accessors ---
-    (void)fp::pi();
-    (void)fp::pi2();
+    // pi, pi2 and e do not fit in the smallest instantiations and say so with a static_assert
+    if constexpr (I >= 2) {
+        (void)fp::pi();
+        (void)fp::e();
+    }
+    if constexpr (I >= 3) {
+        (void)fp::pi2();
+    }
     (void)fp::half_pi();
     (void)fp::golden_ratio();
-    (void)fp::e();
     (void)fp::sqrt_2();
     (void)fp::one();
     (void)fp::half();
@@ -1412,10 +1417,13 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)hypot(val, val);
     (void)sqr(val);
     (void)sqrt(val);
-    (void)exp(val);
-    (void)exp2(val);
-    (void)expm1(val);
-    (void)pow(val, val);
+    // the exponential family multiplies by e(), which needs 2 integer bits
+    if constexpr (I >= 2) {
+        (void)exp(val);
+        (void)exp2(val);
+        (void)expm1(val);
+        (void)pow(val, val);
+    }
     (void)log(val);
     (void)log2(val);
     (void)log10(val);

@@ -9,6 +9,32 @@ exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants 
 
 ## [0.11.0.0] - unreleased
 
+### Added
+
+- **Minimum integer bits are checked at compile time.** A constant or function that cannot work in
+  a narrow instantiation now rejects it with a `static_assert` naming itself and the bound, instead
+  of overflowing quietly or failing to link:
+
+  | Needs | Constants and functions |
+  |---|---|
+  | `I >= 2` | `pi()`, `e()`, `exp()`, `exp2()`, `expm1()`, `pow()`, `tanh()` |
+  | `I >= 3` | `pi2()` |
+  | `I >= 4` | `sin1()`, `cos1()`, `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2()`, `sinh()`, `cosh()` |
+
+  Each bound is the smallest `I` that works rather than a safe margin, and `tests/fixed_point128_gtest.cpp`
+  pins that down by evaluating each one at exactly its minimum.
+
+  The seven functions that already carried `requires (I >= 4)` keep the same bound but now diagnose
+  properly. The constraint never reached the caller: the namespace scope forward declarations that
+  shadow the CRT are unconstrained, so a violation bound to one of those and surfaced as
+  `error LNK2019: unresolved external symbol "fp128::sin<3>"` at link time. Constraining those
+  declarations as well would have been worse - `fixed_point128` converts implicitly to `double`, so
+  the call would have silently reached `::sin(double)`. A `static_assert` in the body leaves the
+  friend the best match, so it is selected, instantiated, and rejected at the call site.
+
+- `asin()`, `acos()`, `atan()` and `atan2()` had no bound at all despite evaluating `sin()` and
+  `cos()`; below `I` of 4 they were the same link error.
+
 ### Changed
 
 - **`fixed_point128` is now 128 bits wide, not 129.** The separate `uint32_t sign` member is

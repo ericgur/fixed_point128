@@ -244,6 +244,16 @@ The representable range is therefore `[-2^I, 2^I - 2^-F]`, asymmetric like every
   - **Trigonometric:** `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`.
   - **Hyperbolic:** `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`.
 - Built-in constants: `pi()`, `pi2()`, `half_pi()`, `e()`, `sqrt_2()`, `golden_ratio()`, `one()`, `half()`, `epsilon()`.
+
+**Minimum integer bits:** a few of these cannot work in the narrowest instantiations, and each one says so with a `static_assert` naming itself and the bound, rather than overflowing quietly or failing to link:
+
+| Needs | Constants and functions |
+|---|---|
+| `I >= 2` | `pi()`, `e()`, `exp()`, `exp2()`, `expm1()`, `pow()`, `tanh()` |
+| `I >= 3` | `pi2()` |
+| `I >= 4` | `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2()`, `sinh()`, `cosh()` |
+
+Everything else works for every `I`, `half_pi()`, `sqrt_2()` and `golden_ratio()` included. A result that leaves the range - `exp()` of a large argument, `log()` of a tiny one - depends on the argument rather than on the type and overflows silently, as any other operation does.
 - Standard library integration: `std::numeric_limits`, `std::formatter`, `std::hash`, `operator<<`, `operator>>`.
 
 ### float128.h
