@@ -149,10 +149,15 @@
  * forwarded to. Forcing the wrapper open does not force the callee open with it, so the code that
  * does the actual work still gets outlined when the optimizer thinks that is better.
  *
- * The by value shift operators of float128 and fixed_point128 are the exception, and say why at
- * their definitions: what they forward to is large enough that expanding the wrapper crowds out the
- * arithmetic around it. Treat any addition to the forced set the same way - measure it, and record
- * the number if the answer is surprising.
+ * Two places depart from that rule, and both say why at their definitions. The by value shift
+ * operators of float128 and fixed_point128 are forwarders that are nonetheless *not* forced: what
+ * they forward to is large enough that expanding the wrapper crowds out the arithmetic around it.
+ * float128::get_components() and float128::norm_fraction_sticky() go the other way - they have
+ * bodies of their own and are forced anyway, because the callers' exponent arithmetic only folds
+ * once they are open, and Clang would not open them on its own.
+ *
+ * Treat any addition to the forced set the same way - measure it, and record the number if the
+ * answer is surprising.
  */
 #if FP128_DISABLE_INLINE != 0
 #define FP128_INLINE       FP128_NO_INLINE
@@ -1180,6 +1185,12 @@ template <int shift> [[nodiscard]] FP128_INLINE constexpr uint64_t shift_right12
     if constexpr (shift == 0) {
         return l;
     } else if constexpr (shift < 64) {
+        // Left as the portable spelling on purpose. MSVC does not recognize it as a funnel shift
+        // and expands it into SHR, SHL and OR where SHRD would be one instruction, and forcing
+        // __shiftright128 here is 6% faster on a Golden Cove P-core - but 47% slower on a
+        // Gracemont E-core, where SHRD is microcoded. On a hybrid part the OpenMP render spreads
+        // over both core types, so the E-core penalty swamps the P-core gain and the whole frame
+        // gets slower. Clang matches this pattern into SHRD on its own where it pays.
         return (l >> shift) | (h << (64 - shift));
     } else if constexpr (shift < 128) {
         return h >> (shift - 64);

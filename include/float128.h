@@ -1630,12 +1630,23 @@ public:
     /**
      * @brief break the float into its components.
      * Normalizes subnormal values
+     *
+     * Forced open rather than merely offered for inlining, which is an exception to the rule stated
+     * on FP128_FORCE_INLINE: this has a body of its own, so it would otherwise be FP128_INLINE. The
+     * body is a handful of shifts and masks off the object's own bits, and every arithmetic operator
+     * and math function opens with two of these calls, so what the caller gains is not the call
+     * itself but the constant folding across it - the exponent and sign arithmetic that follows
+     * collapses only once the components are visible. Clang declined the invitation where MSVC
+     * accepted it, which is what made this measurable rather than academic: on 2026-08-15 clang-cl
+     * left this and norm_fraction_sticky() out of line in operator/=, and float128 division measured
+     * 13.0 M/s against MSVC's 20.9 M/s. See norm_fraction_sticky() for the other half.
+     *
      * @param l Reference to receive the low fraction
      * @param h Reference to receive the high fraction
      * @param e Reference to receive the unbiased exponent
      * @param s Reference to receive the sign
      */
-    FP128_INLINE constexpr void get_components(uint64_t& l, uint64_t& h, int32_t& e, uint32_t& s) const noexcept
+    FP128_FORCE_INLINE constexpr void get_components(uint64_t& l, uint64_t& h, int32_t& e, uint32_t& s) const noexcept
     {
         l = low;
         h = get_fraction_bits();
@@ -2058,12 +2069,16 @@ public:
      * norm_fraction() below rounds from a three bit window instead, which cannot see the discarded
      * low words at all, so its ties resolve arbitrarily.
      *
+     * Forced open for the same reason as get_components(), and measured with it: it closes the
+     * multiply and the divide, its shift counts come from the caller's exponent arithmetic, and
+     * leaving it outlined costs the caller the chance to fold the two together.
+     *
      * @param l Low part of the fraction
      * @param h High part of the fraction
      * @param e Unbiased exponent, adjusted to match the normalized fraction
      * @param sticky True when the caller already dropped one or more set bits below l
      */
-    FP128_INLINE constexpr void norm_fraction_sticky(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) const noexcept
+    FP128_FORCE_INLINE constexpr void norm_fraction_sticky(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) const noexcept
     {
         if (l == 0 && h == 0) {
             e = ZERO_EXP_BIASED;
