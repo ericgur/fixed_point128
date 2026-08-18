@@ -782,6 +782,93 @@ TEST(uint128_t, UDiv128SatisfiesTheDivisionIdentity)
         check(get_uint64_random() % divisor, get_uint64_random(), divisor);
     }
 }
+// div_128bit() is the long division every 128 bit type reaches once the divisor needs more than 64
+// bits, so it is checked directly rather than only through the operators that call it. The identity
+// q * v + r == u with r < v is toolchain neutral and needs no reference implementation to compare
+// against - which matters, because the 32 bit limb div_32bit() it replaced answers an error rather
+// than a quotient for the shapes where the dividend is narrower than the divisor.
+TEST(uint128_t, Div128BitSatisfiesTheDivisionIdentity)
+{
+    const auto check = [](const uint64_t* u, int64_t m, uint64_t vLow, uint64_t vHigh) {
+        ASSERT_NE(vHigh, 0ull) << "div_128bit rejects a divisor that fits in one QWORD";
+
+        const uint64_t v[2] = {vLow, vHigh};
+        uint64_t q[4] {}, r[2] {};
+        ASSERT_EQ(div_128bit(q, r, u, v, m), 0);
+
+        // Back-multiply the quotient by the divisor and add the remainder; the sum has to be the
+        // dividend exactly, in every word.
+        uint64_t product[5] {};
+        for (int64_t i = 0; i < m - 1; ++i) {
+            for (int64_t k = 0; k < 2; ++k) {
+                uint64_t hi = 0;
+                const uint64_t lo = mulx_u64(q[i], v[k], &hi);
+                unsigned char carry = addcarryx_u64(0, product[i + k], lo, &product[i + k]);
+                carry = addcarryx_u64(carry, product[i + k + 1], hi, &product[i + k + 1]);
+                for (int64_t w = i + k + 2; carry != 0 && w < 5; ++w) {
+                    carry = addcarryx_u64(0, product[w], carry, &product[w]);
+                }
+            }
+        }
+        unsigned char carry = addcarryx_u64(0, product[0], r[0], &product[0]);
+        carry = addcarryx_u64(carry, product[1], r[1], &product[1]);
+        for (int64_t w = 2; carry != 0 && w < 5; ++w) {
+            carry = addcarryx_u64(0, product[w], carry, &product[w]);
+        }
+
+        for (int64_t i = 0; i < m; ++i) {
+            EXPECT_EQ(product[i], u[i]) << "word " << i << " of q * v + r, m=" << m;
+        }
+        EXPECT_EQ(product[4], 0ull) << "q * v + r overflowed the dividend, m=" << m;
+        EXPECT_TRUE(uint128_t(r[0], r[1]) < uint128_t(vLow, vHigh)) << "remainder not reduced, m=" << m;
+    };
+
+    // A divisor whose high QWORD equals the dividend's top word is what drives the quotient estimate
+    // to its 2^64 - 1 cap, the one branch random operands almost never reach.
+    const uint64_t edges[] = {0ull, 1ull, 0x123456789ABCDEFull, 0x8000000000000000ull, ~0ull};
+    for (const uint64_t a : edges) {
+        for (const uint64_t b : edges) {
+            for (const uint64_t c : edges) {
+                const uint64_t u4[4] = {a, b, c, a};
+                const uint64_t u2[2] = {a, b};
+                check(u4, 4, c, (b == 0) ? 1ull : b);
+                check(u4, 4, a, (a == 0) ? 0x8000000000000000ull : a);
+                check(u2, 2, c, (a == 0) ? 1ull : a);
+            }
+        }
+    }
+
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        // Sweep the divisor's magnitude so every normalization shift count is exercised.
+        const uint64_t vHigh = (get_uint64_random() >> (i % 64)) | 1ull;
+        const uint64_t u4[4] = {get_uint64_random(), get_uint64_random(), get_uint64_random(), get_uint64_random()};
+        const uint64_t u2[2] = {get_uint64_random(), get_uint64_random()};
+        check(u4, 4, get_uint64_random(), vHigh);
+        check(u2, 2, get_uint64_random(), vHigh);
+        // The shape the fractional types build: the value scaled by 2^128.
+        const uint64_t scaled[4] = {0, 0, get_uint64_random(), get_uint64_random()};
+        check(scaled, 4, get_uint64_random(), vHigh);
+    }
+}
+// div_128bit rejects what it cannot divide rather than answering wrongly: a divisor that fits in one
+// QWORD belongs in div_64bit, and the temporaries are sized for a 256 bit dividend.
+TEST(uint128_t, Div128BitRejectsUnsupportedShapes)
+{
+    const uint64_t u[4] = {1, 2, 3, 4};
+    const uint64_t v[2] = {5, 6};
+    uint64_t q[4] {}, r[2] {};
+
+    EXPECT_EQ(div_128bit(q, r, u, v, 4), 0);
+    EXPECT_EQ(div_128bit(nullptr, r, u, v, 4), 1) << "null quotient";
+    EXPECT_EQ(div_128bit(q, r, nullptr, v, 4), 1) << "null dividend";
+    EXPECT_EQ(div_128bit(q, r, u, nullptr, 4), 1) << "null divisor";
+    EXPECT_EQ(div_128bit(q, r, u, v, 1), 1) << "dividend narrower than the divisor";
+    EXPECT_EQ(div_128bit(q, r, u, v, 5), 1) << "dividend wider than 256 bits";
+
+    const uint64_t narrow[2] = {7, 0};
+    EXPECT_EQ(div_128bit(q, r, u, narrow, 4), 1) << "divisor that fits in one QWORD";
+}
 // operator%= used to hand div_32bit this object's own QWORDs as the remainder buffer. div_32bit
 // shrinks the denominator past its leading zero words and fills only that many words, so a divisor
 // whose high QWORD fits in 32 bits left the top 32 bits of the numerator untouched in the result.

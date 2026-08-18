@@ -179,27 +179,30 @@ static constexpr bool FP128_CPP_STYLE_MODULO = true;  ///< Use C++ modulo semant
  * @def FP128_USE_RECIPROCAL_FOR_DIVISION
  * @brief Selects how fixed_point128 divides by a value that is neither a power of two nor an integer.
  *
- * Non zero (the default) computes <tt>a / b</tt> as <tt>a * reciprocal(b)</tt>, where reciprocal()
- * refines a double precision estimate with Newton iterations. Zero selects the hand written long
+ * Non zero computes <tt>a / b</tt> as <tt>a * reciprocal(b)</tt>, where reciprocal() refines a double
+ * precision estimate with Newton iterations. Zero (the default) selects the hand written long
  * division instead. Only the general case is affected either way: a power of two divisor is still
  * turned into a shift, and an integral divisor that fits in 64 bit still goes through div_64bit().
  *
- * Override it on the command line (<tt>/DFP128_USE_RECIPROCAL_FOR_DIVISION=0</tt> or
- * <tt>-DFP128_USE_RECIPROCAL_FOR_DIVISION=0</tt>) or by defining it before including any header of
+ * Override it on the command line (<tt>/DFP128_USE_RECIPROCAL_FOR_DIVISION=1</tt> or
+ * <tt>-DFP128_USE_RECIPROCAL_FOR_DIVISION=1</tt>) or by defining it before including any header of
  * this library, exactly as with FP128_DISABLE_INLINE.
  *
- * The default is non zero because the reciprocal is the faster of the two. Measured over a table of
- * 256 random divisors, it runs at 1.4x to 1.7x the rate of the long division for fixed_point128<10>
- * and 1.8x for fixed_point128<32>, on both MSVC and clang-cl. What it buys with that is accuracy:
- * the two algorithms disagree on roughly 40% of those divisors, by up to 1.7 ulp, and comparing the
- * residual <tt>|a - q * b|</tt> of each puts the long division closer to the exact quotient every
- * single time it differs. Divide with this off when the last two bits have to be right.
+ * The default used to be non zero, and the reason was speed: against the old 32 bit limb long
+ * division the reciprocal ran 1.4x to 1.7x faster, which was worth its cost in accuracy. div_128bit()
+ * removed that trade. Measured over a table of 256 random divisors on fixed_point128<10>, the long
+ * division now runs at 2.0x (MSVC) and 2.7x (clang-cl) the rate of the reciprocal, so the default is
+ * zero and the accuracy comes for free: the two algorithms disagree on roughly 40% of those divisors,
+ * by up to 1.7 ulp, and comparing the residual <tt>|a - q * b|</tt> of each puts the long division
+ * closer to the exact quotient every single time it differs. Set this to non zero only to reproduce
+ * the older behaviour.
  *
  * The flag is deliberately specific to fixed_point128. The other three types are not built the same
  * way, and measuring them says to leave them alone:
  * <UL>
- * <LI>float128 loses on both counts - multiplying by a reciprocal runs at 0.47x (MSVC) to 0.55x
- *     (clang-cl) of its long division, and is the less accurate of the two by the same residual test.
+ * <LI>float128 loses on both counts - multiplying by a reciprocal ran at 0.47x (MSVC) to 0.55x
+ *     (clang-cl) of its long division before div_128bit, and further behind since, and it is the
+ *     less accurate of the two by the same residual test.
  *     reciprocal() is the slower half: it normalizes its operand and then runs two or three float128
  *     multiplications, each of which renormalizes and rounds, where the fixed_point128 equivalent
  *     multiplies raw 128 bit words. So float128::operator/=() always divides.</LI>
@@ -221,7 +224,7 @@ static constexpr bool FP128_CPP_STYLE_MODULO = true;  ///< Use C++ modulo semant
  *       and produce identical results under either setting of this flag.
  */
 #ifndef FP128_USE_RECIPROCAL_FOR_DIVISION
-#define FP128_USE_RECIPROCAL_FOR_DIVISION 1
+#define FP128_USE_RECIPROCAL_FOR_DIVISION 0
 #endif
 
 /***********************************************************************************
@@ -1467,6 +1470,113 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
 
     // Remainder
     *r = k[1];
+    return 0;
+}
+/**
+ * @brief Divides an unsigned integer of up to 256 bits by a 128 bit one. Knuth algorithm D, 64 bit limbs.
+ *
+ * This is the divide every 128 bit type in this library reaches once the divisor needs more than 64
+ * bits: int128_t and uint128_t divide 128 by 128, fixed_point128 and float128 divide 256 by 128
+ * because they scale the numerator by 2^128 first to keep the fraction bits of the quotient.
+ *
+ * div_32bit() computes the same thing for any operand size, but it works in 32 bit limbs, so it sees
+ * those shapes as m=4,n=4 and m=8,n=4 - up to five main loop passes with a four iteration
+ * multiply-subtract in each. In 64 bit limbs the same divisions are one and three passes of two, and
+ * the quotient estimate costs one DIV instruction either way. Measured on the 256/128 shape, pinned
+ * to a single core, this runs 3.1x faster than div_32bit() under MSVC and 7.9x under clang-cl; the
+ * float128 division benchmarks gain 109% and 382% respectively. The wider gain is that Clang, which
+ * paid a 1.6x penalty on div_32bit's 32 bit limb code, is the faster of the two toolchains here.
+ *
+ * The estimate needs a 128/64 divide, which x86-64 has and AArch64 does not; udiv128() provides it
+ * either way, falling back to the compiler runtime helper where there is no instruction.
+ *
+ * @note Unlike div_32bit(), this does not shrink its operands: leading zero words in @p u cost one
+ *       wasted pass each but no accuracy, and a divisor whose high word is zero is rejected rather
+ *       than handled, because that case belongs in div_64bit() which is cheaper again. Every caller
+ *       here already branches on it.
+ *
+ * @param q (output) Quotient, m - 1 words, q[0] lowest. Only those words are written, so a caller
+ *          wanting a wider zero filled result must zero the rest itself.
+ * @param r (output, optional) Remainder, two words. Can be nullptr.
+ * @param u Numerator, @p m words, u[0] lowest.
+ * @param v Denominator, two words. v[1] must be non zero.
+ * @param m Count of words in @p u. Must be 2, 3 or 4.
+ * @return 0 for success, 1 when a parameter fails one of the conditions above.
+ */
+FP128_INLINE static int32_t div_128bit(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v, int64_t m) noexcept
+{
+    constexpr int64_t MAX_WORDS = 4;  // 256 bit numerator, the widest any type here divides
+    if (q == nullptr || u == nullptr || v == nullptr || m < 2 || m > MAX_WORDS || v[1] == 0)
+        return 1;
+
+    // Normalize so the divisor's high bit is set, which is what bounds the quotient estimate to two
+    // too large. The numerator gains a word for the bits shifted out of its top.
+    const int32_t s = static_cast<int32_t>(lzcnt64(v[1]));
+    const uint64_t vn1 = (s != 0) ? ((v[1] << s) | (v[0] >> (64 - s))) : v[1];
+    const uint64_t vn0 = v[0] << s;
+
+    uint64_t un[MAX_WORDS + 1] {};
+    un[m] = (s != 0) ? (u[m - 1] >> (64 - s)) : 0;
+    for (int64_t i = m - 1; i > 0; --i) {
+        un[i] = (s != 0) ? ((u[i] << s) | (u[i - 1] >> (64 - s))) : u[i];
+    }
+    un[0] = u[0] << s;
+
+    for (int64_t j = m - 2; j >= 0; --j) {
+        uint64_t qhat, rhat;
+        bool correct = true;
+        if (un[j + 2] >= vn1) {
+            // The exact estimate is at least 2^64 here, which DIV cannot return - it raises #DE
+            // instead of truncating. Knuth's cap of b - 1 applies, with the remainder it implies.
+            qhat = UINT64_MAX;
+            rhat = un[j + 1] + vn1;
+            correct = (rhat >= vn1);  // a carry out puts rhat past 2^64, where no correction applies
+        } else {
+            qhat = udiv128(un[j + 2], un[j + 1], vn1, &rhat);
+        }
+
+        // Walk the estimate down while qhat * vn0 exceeds the two words it has to fit under.
+        while (correct) {
+            uint64_t phi;
+            const uint64_t plo = mulx_u64(qhat, vn0, &phi);
+            if (phi < rhat || (phi == rhat && plo <= un[j])) {
+                break;
+            }
+            --qhat;
+            const uint64_t next = rhat + vn1;
+            if (next < rhat) {
+                break;
+            }
+            rhat = next;
+        }
+
+        // Multiply and subtract: un[j..j+2] -= qhat * vn, the product being three words wide.
+        uint64_t p0hi, p1hi, product1;
+        const uint64_t p0 = mulx_u64(qhat, vn0, &p0hi);
+        const uint64_t p1 = mulx_u64(qhat, vn1, &p1hi);
+        const uint64_t product2 = p1hi + addcarryx_u64(0, p1, p0hi, &product1);
+
+        unsigned char borrow = subborrow_u64(0, un[j], p0, &un[j]);
+        borrow = subborrow_u64(borrow, un[j + 1], product1, &un[j + 1]);
+        borrow = subborrow_u64(borrow, un[j + 2], product2, &un[j + 2]);
+
+        q[j] = qhat;
+        if (borrow != 0) {
+            // The estimate was one too large after all, which the correction above cannot always
+            // catch. Undo the overshoot by adding the divisor back; Knuth puts this at about two
+            // divisors in 2^64, so the branch is essentially never taken.
+            --q[j];
+            unsigned char carry = addcarryx_u64(0, un[j], vn0, &un[j]);
+            carry = addcarryx_u64(carry, un[j + 1], vn1, &un[j + 1]);
+            un[j + 2] += carry;
+        }
+    }
+
+    if (r != nullptr) {
+        r[0] = (s != 0) ? ((un[0] >> s) | (un[1] << (64 - s))) : un[0];
+        r[1] = un[1] >> s;
+    }
+
     return 0;
 }
 /**

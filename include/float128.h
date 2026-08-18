@@ -216,8 +216,10 @@ float128 double_factorial(int x) noexcept;
  *
  * The rest cannot be constexpr, for one of two reasons:
  * <UL>
- * <LI>Division and modulo, and everything built on them: div_32bit needs alloca and a goto,
- *     neither of which C++20 permits in a constexpr function.</LI>
+ * <LI>Division and modulo, and everything built on them. This used to be div_32bit's alloca and
+ *     goto, neither of which C++20 permits in a constexpr function; operator/=() now divides
+ *     through div_128bit, which has neither, so what remains is the surrounding code rather than
+ *     the long division itself.</LI>
  * <LI>The string conversions allocate, and the transcendental functions parse their constants
  *     from strings held in function local statics, which a constexpr function may not declare.</LI>
  * </UL>
@@ -1346,7 +1348,11 @@ public:
         const uint64_t denom[2] = {l2, h2};
 
         uint64_t rem[2] {};
-        if (0 == div_32bit((uint32_t*)q, (uint32_t*)rem, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+        // get_components() normalizes even a subnormal, so the divisor's fraction always carries the
+        // unity bit at bit 112 and its high QWORD is never zero. div_128bit's precondition therefore
+        // holds unconditionally here, unlike in fixed_point128 where a tiny divisor has to be routed
+        // to div_64bit instead.
+        if (0 == div_128bit(q, rem, nom, denom, array_length(nom))) {
             // 128 bit were added to the dividend, 112 were lost:
             // need to shift right 16 bit (128 - 112) but we don't go all the way so norm_fraction()
             //  can produce accurate rounding
@@ -3429,7 +3435,9 @@ public:
             }
         }
 
-        return (y >= 0) ? res : reciprocal(res);
+        // A negative exponent inverts the result. Unlike fixed_point128 this type has infinities, and
+        // operator/= gives the same answer reciprocal() does for a zero, a NaN or an infinity.
+        return (y >= 0) ? res : (one() / res);
     }
     /**
      * @brief Computes x to the power of y
@@ -4000,10 +4008,10 @@ public:
         auto sign = x.get_sign();
         x.set_sign(0);
 
-        // limit argument to 0..1
+        // limit argument to 0..1. x is greater than one here, so the division cannot be by zero.
         if (x > 1) {
             comp = true;
-            x = reciprocal(x);
+            x = one() / x;
         }
 
         // initial step uses the CRT function.

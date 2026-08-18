@@ -211,8 +211,10 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  *
  * The rest cannot be constexpr, for one of two reasons:
  * <UL>
- * <LI>Division and modulo: div_32bit needs alloca and a goto, neither of which C++20 permits in
- *     a constexpr function, and div_64bit rests on the _udiv128 intrinsic.</LI>
+ * <LI>Division and modulo: div_64bit rests on the _udiv128 intrinsic. The 128 bit divisor path no
+ *     longer shares that limitation - div_128bit replaced div_32bit there and has neither the alloca
+ *     nor the goto that kept the older routine out of a constant expression - but the function that
+ *     calls it is still bound by the rest of this list.</LI>
  * <LI>Function local statics, which a constexpr function may not declare. The transcendental
  *     constants (pi, e, sqrt_2, ...) and the factorial reciprocal table are parsed from strings
  *     into them, and reciprocal holds its bounds the same way. sqrt is doubly out, it calls the
@@ -1836,7 +1838,11 @@ private:
         const uint64_t nom[4] = {0, 0, low, high};
         const uint64_t denom[2] = {denom_low, denom_high};
 
-        if (0 != div_32bit((uint32_t*)q, nullptr, (uint32_t*)nom, (uint32_t*)denom, 2ll * array_length(nom), 2ll * array_length(denom))) {
+        // A divisor small enough to fit in one QWORD is div_64bit's job; div_128bit rejects it
+        // rather than handle a case that has a cheaper route. Both fill the same first words of q.
+        const int32_t status = (denom_high != 0) ? div_128bit(q, nullptr, nom, denom, array_length(nom))
+                                                 : div_64bit(q, nullptr, nom, denom_low, array_length(nom));
+        if (0 != status) {
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
         }
 
@@ -2387,8 +2393,11 @@ private:
         //                  X
         //   Xn+1 = 0.5 * (---- + Xn )
         //                  Xn
+        // Dividing beats multiplying by a reciprocal here, and did not before div_128bit: the
+        // reciprocal is a Newton loop of its own, so the old spelling ran an inner iteration per
+        // outer one. float128::sqrt() has always been written this way.
         for (auto i = iterations; i != 0; --i) {
-            root = (norm_x * reciprocal(root) + root) >> 1;
+            root = (norm_x / root + root) >> 1;
         }
 
         if (expo & 1) {
@@ -2902,10 +2911,10 @@ private:
         const bool negative = x.is_negative();
         x = fabs(x);
 
-        // limit argument to 0..1
+        // limit argument to 0..1. x is greater than one here, so the division cannot be by zero.
         if (x > 1) {
             comp = true;
-            x = reciprocal(x);
+            x = one() / x;
         }
 
         // initial step uses the CRT function.
@@ -3179,7 +3188,12 @@ private:
             res = exp_ix;
         }
 
-        return (x.is_positive()) ? res : reciprocal(res);
+        // A negative exponent inverts the result. The zero is guarded rather than divided: this type
+        // has no infinity, so reciprocal() answers zero there and operator/= throws instead.
+        if (x.is_positive() || !res)
+            return res;
+
+        return one() / res;
     }
     /**
      * @brief Calculates the exponent of x and reduces 1 from the result: (e^x) - 1

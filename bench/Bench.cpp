@@ -693,6 +693,14 @@ template <typename T> void bench_division(double time_per_function = 1.0)
         BenchBinary<T, T>("Division by 128-bit fractional value", time_per_function, Traits::operandA(), Traits::operandB(),
                           [](T& lhs, const T& rhs) { lhs /= rhs; });
     }
+    // The divisor above is small enough to fit in one QWORD, which sends every type down the 64 bit
+    // path. Only a divisor past 2^64 reaches div_128bit, and for the integer types nothing else
+    // measured here does - so without this row their long division had no coverage at all. The
+    // fractional types reach it through the fractional divisor above.
+    else {
+        BenchBinary<T, T>("Division by 128-bit value above 2^64", time_per_function, Traits::operandA(), Traits::operandB(),
+                          [](T& lhs, const T& rhs) { lhs /= rhs; });
+    }
 }
 
 template <typename T> void bench_reciprocal(double time_per_function = 1.0)

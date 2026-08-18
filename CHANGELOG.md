@@ -35,7 +35,61 @@ exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants 
 - `asin()`, `acos()`, `atan()` and `atan2()` had no bound at all despite evaluating `sin()` and
   `cos()`; below `I` of 4 they were the same link error.
 
+- **`div_128bit()`, a 64 bit limb long division**, and with it a benchmark row that finally covers
+  the integer types' 128 bit divisor path — `Division by 128-bit value above 2^64`. Every row that
+  existed before divided by a value that fits in one QWORD, so nothing measured the long division
+  the integer types actually run.
+
+  Every 128 bit type reaches long division once the divisor needs more than 64 bits: `int128_t` and
+  `uint128_t` divide 128 by 128, `fixed_point128` and `float128` divide 256 by 128 because they
+  scale the numerator by 2^128 first. `div_32bit()` answers all of those in 32 bit limbs, which
+  makes them m=4,n=4 and m=8,n=4 — up to five main loop passes with a four iteration
+  multiply-subtract in each. In 64 bit limbs the same divisions are one and three passes of two.
+
+  Measured on the 256/128 shape, pinned to one core, across three divisor magnitudes:
+
+  | | MSVC 19.51 | clang-cl 22.1.3 |
+  |---|---|---|
+  | `div_32bit`, 32 bit limbs | 217-227 cycles | 353-375 cycles |
+  | `div_128bit`, 64 bit limbs | 68-73 cycles | 44-46 cycles |
+  | | **3.1x** | **7.9x** |
+
+  Clang used to pay a 1.6x penalty against MSVC on `div_32bit`, which four measurements had failed
+  to explain — it is not the DIV instruction (16.0 against 16.3 cycles), not the `alloca`, not
+  auto-vectorization, and not branch prediction. It was the 32 bit limb code itself: on
+  `div_128bit` clang is the faster of the two toolchains.
+
+  End to end over the whole benchmark suite, against the previous commit, best of three interleaved
+  runs pinned to one core — **+8.2% geometric mean on MSVC and +10.9% on clang-cl over all 92 rows**,
+  with no row outside the noise moving backwards:
+
+  | Benchmark | MSVC | clang-cl |
+  |---|---|---|
+  | `float128` division by a 128 bit value | +137% | +307% |
+  | `uint128_t` / `int128_t` division by a value above 2^64 | +97% / +99% | +195% / +175% |
+  | `fixed_point128` division by a 128 bit fractional value | +124% | +110% |
+  | `float128` / `fixed_point128` `sqrt` | +56% / +46% | +95% / +33% |
+  | `asinh`, `acosh`, `atanh` | +9% to +27% | +8% to +54% |
+
+  `div_32bit()` is left in place but no longer has a caller inside the library.
+
 ### Changed
+
+- **`FP128_USE_RECIPROCAL_FOR_DIVISION` now defaults to `0`**, so `fixed_point128` divides by long
+  division rather than by multiplying by a reciprocal. The default was `1` because the reciprocal
+  was 1.4x-1.8x faster, and it cost up to 1.7 ulp to get that. `div_128bit()` inverts the trade:
+  the long division now runs at **2.0x** (MSVC) and **2.7x** (clang-cl) the rate of the reciprocal
+  over a table of 256 random divisors, and it was already the more accurate of the two — the
+  residual `|a - q * b|` puts it closer to the exact quotient every single time the two disagree.
+  Set the macro to `1` to get the old behaviour back.
+
+- **Five call sites that multiplied by a reciprocal now divide.** `fixed_point128::sqrt()` ran a
+  Newton loop whose every iteration called `reciprocal()`, itself a Newton loop —
+  `float128::sqrt()` had always divided instead. `atan()` and `pow()` in both types inverted their
+  argument or result the same way. All five are faster and none are less accurate, since the
+  division is the more accurate operation. The two `pow()` sites keep their old answer for a zero:
+  `fixed_point128` has no infinity, so `reciprocal()` answers zero there where `operator/=` throws,
+  and that case is now guarded rather than divided.
 
 - **`uint128_t` and `int128_t` are no longer trivially copyable**, and are measurably faster for
   it. Their copy and move members were `= default`; they now assign the two QWORDs individually.
