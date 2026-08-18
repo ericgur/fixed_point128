@@ -519,8 +519,9 @@ FP128_FORCE_INLINE constexpr uint32_t udiv64(uint64_t dividend, uint32_t divisor
  * @warning The quotient must fit in 64 bits, which means @p hi_dividend must be smaller than
  *          @p divisor. This is the same precondition the MSVC _udiv128 intrinsic carries, and
  *          for the same reason: both compile to the x86 DIV instruction, which raises #DE rather
- *          than truncating. Both callers satisfy it - div_32bit() passes a zero high half, and
- *          div_64bit() passes the remainder of a previous division by the same divisor.
+ *          than truncating. Both callers satisfy it - div_128bit() normalizes its divisor so the
+ *          high word it passes is always the smaller, and div_64bit() passes the remainder of a
+ *          previous division by the same divisor.
  *
  * @note On x86-64 this is one DIV instruction, written as assembly because there is no builtin
  *       for it and the portable expression below does not produce it: Clang cannot prove the
@@ -1282,150 +1283,6 @@ FP128_INLINE constexpr void twos_complement128(uint64_t& l, uint64_t& h) noexcep
     h = ~h + (l == 0);
 }
 /**
- * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
- * @param q (output) Pointer to receive the quotient
- * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
- * @param u Pointer Numerator, an array of uint32_t
- * @param v denominator (uint32_t)
- * @param m Count of elements in u
- * @return 0 for success
- */
-FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, uint32_t v, int64_t m) noexcept
-{
-    if (u == nullptr || q == nullptr || v == 0)
-        return 1;
-
-    while (m > 0 && u[m - 1] == 0)
-        --m;
-
-    uint32_t k = 0;
-    for (auto j = m - 1; j >= 0; --j) {
-        q[j] = udiv64((((uint64_t)k) << 32) + u[j], v, &k);
-    }
-
-    if (r != nullptr)
-        *r = k;
-    return 0;
-}
-/**
- * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
- * @param q (output) Pointer to receive the quotient
- * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
- * @param u Pointer numerator, an array of uint32_t
- * @param v Pointer denominator, an array of uint32_t
- * @param m Count of elements in u
- * @param n Count of elements in v
- * @return 0 for success
- */
-inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
-{
-    if (q == nullptr || u == nullptr || v == nullptr)
-        return 1;
-
-    constexpr uint64_t WORD_WIDTH = 32ull;         // bit width of a word
-    constexpr uint64_t BASE = 1ull << WORD_WIDTH;  // Number base (32 bits).
-    constexpr uint64_t MASK = BASE - 1;            // 32 bit mask
-    uint32_t *un, *vn;                             // Normalized form of u, v.
-    uint64_t qhat;                                 // Estimated quotient digit.
-    uint64_t rhat;                                 // A remainder.
-    uint64_t p;                                    // Product of two digits.
-    int64_t t, k;                                  // Temporary variables
-    int32_t i, j;                                  // Indexes
-    // disable various warnings, some are bogus in VS2022.
-    // the below code relies on the implied truncation (to 32 bit) of several expressions.
-#if defined(FP128_MSVC)
-#pragma warning(push)
-#pragma warning(disable : 6255)
-#pragma warning(disable : 4244)
-#pragma warning(disable : 6297)
-#pragma warning(disable : 6385)
-#pragma warning(disable : 6386)
-#pragma warning(disable : 26451)
-#pragma warning(disable : 26493)
-#pragma warning(disable : 26438)
-#endif
-
-    // shrink the arrays to avoid extra work on small numbers
-    while (m > 0 && u[m - 1] == 0)
-        --m;
-    while (n > 0 && v[n - 1] == 0)
-        --n;
-
-    if (m < n || n <= 0 || v[n - 1] == 0)
-        return 1;  // Return if invalid param.
-
-    // Take care of the case of a single-digit divisor here.
-    if (n == 1)
-        return div_32bit(q, r, u, v[0], m);
-
-    /* Normalize by shifting v left just enough so that its high-order
-    bit is on, and shift u left the same amount. We may have to append a
-    high-order digit on the dividend; we do that unconditionally. */
-
-    const int32_t s = lzcnt32(v[n - 1]);  // 0 <= s <= WORD_WIDTH-1.
-    const int32_t s_comp = WORD_WIDTH - s;
-    vn = (uint32_t*)alloca(sizeof(uint32_t) * n);
-    for (i = n - 1; i > 0; --i) {
-        vn[i] = (v[i] << s) | ((uint64_t)v[i - 1] >> s_comp);
-    }
-    vn[0] = v[0] << s;
-
-    un = (uint32_t*)alloca(sizeof(uint32_t) * (m + 1));
-    un[m] = (uint64_t)u[m - 1] >> s_comp;
-    for (i = m - 1; i > 0; --i)
-        un[i] = (u[i] << s) | ((uint64_t)u[i - 1] >> s_comp);
-    un[0] = u[0] << s;
-
-    for (j = m - n; j >= 0; --j) {  // Main loop.
-        // Compute estimate qhat of q[j].
-        qhat = udiv128(0, ((uint64_t)un[j + n] << WORD_WIDTH) | un[j + n - 1], vn[n - 1], &rhat);
-        // qhat = (un[j + n] * BASE + un[j + n - 1]) / vn[n - 1];
-        // rhat = (un[j + n] * BASE + un[j + n - 1]) - qhat * vn[n - 1];
-again:
-        if (qhat >= BASE || qhat * vn[n - 2] > ((rhat << WORD_WIDTH) | un[j + n - 2])) {
-            --qhat;
-            rhat += vn[n - 1];
-            if (rhat < BASE)
-                goto again;
-        }
-
-        // Multiply and subtract.
-        k = 0;
-        for (i = 0; i < n; ++i) {
-            p = qhat * vn[i];
-            t = un[i + j] - k - (p & MASK);
-            un[i + j] = t;
-            k = (p >> WORD_WIDTH) - (t >> WORD_WIDTH);
-        }
-        t = un[j + n] - k;
-        un[j + n] = t;
-
-        q[j] = qhat;          // Store quotient digit.
-        if (t < 0) {          // If we subtracted too
-            q[j] = q[j] - 1;  // much, add back.
-            k = 0;
-            for (i = 0; i < n; ++i) {
-                t = (uint64_t)un[i + j] + vn[i] + k;
-                un[i + j] = t;
-                k = t >> WORD_WIDTH;
-            }
-            un[j + n] = un[j + n] + k;
-        }
-    }  // End j.
-    // If the caller wants the remainder, unnormalize
-    // it and pass it back.
-    if (r != nullptr) {
-        for (i = 0; i < n - 1; ++i)
-            r[i] = (un[i] >> s) | ((uint64_t)un[i + 1] << s_comp);
-
-        r[n - 1] = un[n - 1] >> s;
-    }
-    return 0;
-#if defined(FP128_MSVC)
-#pragma warning(pop)
-#endif
-}
-/**
  * @brief 64 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
  * @param q (output) Pointer to receive the quotient. Expected to be initialized to zero
  * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
@@ -1479,21 +1336,21 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * bits: int128_t and uint128_t divide 128 by 128, fixed_point128 and float128 divide 256 by 128
  * because they scale the numerator by 2^128 first to keep the fraction bits of the quotient.
  *
- * div_32bit() computes the same thing for any operand size, but it works in 32 bit limbs, so it sees
- * those shapes as m=4,n=4 and m=8,n=4 - up to five main loop passes with a four iteration
- * multiply-subtract in each. In 64 bit limbs the same divisions are one and three passes of two, and
- * the quotient estimate costs one DIV instruction either way. Measured on the 256/128 shape, pinned
- * to a single core, this runs 3.1x faster than div_32bit() under MSVC and 7.9x under clang-cl; the
- * float128 division benchmarks gain 109% and 382% respectively. The wider gain is that Clang, which
- * paid a 1.6x penalty on div_32bit's 32 bit limb code, is the faster of the two toolchains here.
+ * The limb width is the whole point. The same algorithm over 32 bit limbs sees those shapes as
+ * m=4,n=4 and m=8,n=4 - up to five main loop passes with a four iteration multiply-subtract in each,
+ * where 64 bit limbs need one and three passes of two. The quotient estimate costs one DIV
+ * instruction either way. Measured on the 256/128 shape, pinned to a single core, the wider limbs
+ * are worth 3.1x under MSVC and 7.9x under clang-cl, and the float128 division benchmarks gain 109%
+ * and 382% respectively. Narrow limbs also cost Clang more than they cost MSVC: it used to trail by
+ * 1.6x on this division and is the faster of the two toolchains here.
  *
  * The estimate needs a 128/64 divide, which x86-64 has and AArch64 does not; udiv128() provides it
  * either way, falling back to the compiler runtime helper where there is no instruction.
  *
- * @note Unlike div_32bit(), this does not shrink its operands: leading zero words in @p u cost one
- *       wasted pass each but no accuracy, and a divisor whose high word is zero is rejected rather
- *       than handled, because that case belongs in div_64bit() which is cheaper again. Every caller
- *       here already branches on it.
+ * @note This does not shrink its operands: leading zero words in @p u cost one wasted pass each but
+ *       no accuracy, and a divisor whose high word is zero is rejected rather than handled, because
+ *       that case belongs in div_64bit() which is cheaper again. Every caller here already branches
+ *       on it.
  *
  * @param q (output) Quotient, m - 1 words, q[0] lowest. Only those words are written, so a caller
  *          wanting a wider zero filled result must zero the rest itself.

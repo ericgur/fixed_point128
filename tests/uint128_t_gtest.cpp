@@ -785,8 +785,8 @@ TEST(uint128_t, UDiv128SatisfiesTheDivisionIdentity)
 // div_128bit() is the long division every 128 bit type reaches once the divisor needs more than 64
 // bits, so it is checked directly rather than only through the operators that call it. The identity
 // q * v + r == u with r < v is toolchain neutral and needs no reference implementation to compare
-// against - which matters, because the 32 bit limb div_32bit() it replaced answers an error rather
-// than a quotient for the shapes where the dividend is narrower than the divisor.
+// against, which matters here: the routine answers an error rather than a quotient for the shapes
+// it does not support, and a reference that made the same choices would hide that.
 TEST(uint128_t, Div128BitSatisfiesTheDivisionIdentity)
 {
     const auto check = [](const uint64_t* u, int64_t m, uint64_t vLow, uint64_t vHigh) {
@@ -869,10 +869,10 @@ TEST(uint128_t, Div128BitRejectsUnsupportedShapes)
     const uint64_t narrow[2] = {7, 0};
     EXPECT_EQ(div_128bit(q, r, u, narrow, 4), 1) << "divisor that fits in one QWORD";
 }
-// operator%= used to hand div_32bit this object's own QWORDs as the remainder buffer. div_32bit
-// shrinks the denominator past its leading zero words and fills only that many words, so a divisor
-// whose high QWORD fits in 32 bits left the top 32 bits of the numerator untouched in the result.
-// ModuloByUint128 misses this: it only uses a 64 bit numerator and a 32 bit divisor.
+// operator%= used to hand the long division this object's own QWORDs as the remainder buffer. The
+// routine of the day shrank the denominator past its leading zero words and filled only that many,
+// so a divisor whose high QWORD fit in 32 bits left the top 32 bits of the numerator untouched in
+// the result. ModuloByUint128 misses this: it only uses a 64 bit numerator and a 32 bit divisor.
 TEST(uint128_t, ModuloByWideUint128)
 {
     srand(RANDOM_SEED);

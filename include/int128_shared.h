@@ -107,8 +107,7 @@ class fp128_gtest;  // Google test class
  * <LI>Division and modulo, and sqrt which is built on them. The paths for a divisor that fits in
  *     64 bit rest on the _udiv128 intrinsic, and one of them writes both QWORDs through a pointer
  *     to the first, which is out of bounds as far as constant evaluation is concerned. A 128 bit
- *     divisor used to be the worse case, going through div_32bit and its alloca and goto; it now
- *     goes through div_128bit, which needs neither, so that half of the obstacle is gone.</LI>
+ *     divisor goes through div_128bit, which has no such obstacle of its own.</LI>
  * <LI>The string conversions allocate, and log/log10 look their result up in a function local
  *     static table, which a constexpr function may not declare.</LI>
  * </UL>

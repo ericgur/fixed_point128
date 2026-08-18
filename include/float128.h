@@ -24,8 +24,9 @@
 
 /***********************************************************************************
                                 Acknologements
-    The function div_32bit is derived from the book "Hacker's Delight" 2nd Edition
-    by Henry S. Warren Jr. It was converted to 32 bit operations + a bugfix.
+    The function div_128bit is derived from the book "Hacker's Delight" 2nd Edition
+    by Henry S. Warren Jr. It implements Knuth's "Algorithm D", specialized to a 128 bit
+    divisor and written in 64 bit limbs.
 
     The functions log, log2, log10 are derived from Dan Moulding's code:
     https://github.com/dmoulding/log2fix
@@ -216,10 +217,9 @@ float128 double_factorial(int x) noexcept;
  *
  * The rest cannot be constexpr, for one of two reasons:
  * <UL>
- * <LI>Division and modulo, and everything built on them. This used to be div_32bit's alloca and
- *     goto, neither of which C++20 permits in a constexpr function; operator/=() now divides
- *     through div_128bit, which has neither, so what remains is the surrounding code rather than
- *     the long division itself.</LI>
+ * <LI>Division and modulo, and everything built on them. Nothing in div_128bit itself is barred
+ *     from a constant expression, so what keeps operator/=() out of one is the surrounding code
+ *     rather than the long division.</LI>
  * <LI>The string conversions allocate, and the transcendental functions parse their constants
  *     from strings held in function local statics, which a constexpr function may not declare.</LI>
  * </UL>

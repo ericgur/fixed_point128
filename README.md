@@ -373,7 +373,7 @@ Foundation header providing platform-specific intrinsic wrappers and common help
 - **Build configuration macros** - Compiler detection (`FP128_MSVC`, `FP128_CLANG`), inline control (`FP128_INLINE`, `FP128_FORCE_INLINE`), and feature flags (`FP128_CPP_STYLE_MODULO`, `FP128_USE_RECIPROCAL_FOR_DIVISION`).
 - **Intrinsic wrappers** - Portable wrappers for `lzcnt`, `popcnt`, `mulx`, `addcarryx`, and `udiv128` covering both MSVC and GCC/Clang.
 - **128-bit shift functions** - `shift_right128`, `shift_left128`, and rounding variants.
-- **Multi-word division** - `div_32bit`, `div_64bit` and `div_128bit`, derived from *Hacker's Delight* by Henry S. Warren Jr. `div_128bit` is the one every type reaches for a divisor wider than 64 bits.
+- **Multi-word division** - `div_64bit` for a divisor that fits in one QWORD and `div_128bit` for anything wider, both derived from *Hacker's Delight* by Henry S. Warren Jr.
 - **Bit manipulation** - `lzcnt128`, `popcnt128`, `log2`, and `twos_complement128`.
 - **IEEE 754 unions** - `Double` and `Float` structs for accessing bit fields of native floating-point values.
 
@@ -431,9 +431,8 @@ while (modulus_sq < radius_sq && ++iter < MAX_ITERATION) {
 ```
 
 ## Acknowledgements
-- `div_32bit` (multi-precision integer division) is derived from the book *"Hacker's Delight"* 2nd Edition by Henry S. Warren Jr. 
-It was converted to 32 bit operations and modified a bit. The algorithm is an implementation of Knuth's "Algorithm D" from the book *"The Art of Computer Programming"*.
-`div_128bit` is the same algorithm specialized to a 128 bit divisor and rewritten in 64 bit limbs.
+- `div_128bit` (multi-precision integer division) is derived from the book *"Hacker's Delight"* 2nd Edition by Henry S. Warren Jr. 
+The algorithm is an implementation of Knuth's "Algorithm D" from the book *"The Art of Computer Programming"*, specialized to a 128 bit divisor and written in 64 bit limbs.
 - Logarithm functions are derived from [Dan Moulding's log2fix](https://github.com/dmoulding/log2fix).
 - Square root uses Newton-Raphson iteration based on *Math Toolkit for Real Time Programming* by Jack W. Crenshaw.
 

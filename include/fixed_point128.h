@@ -24,8 +24,9 @@
 
 /***********************************************************************************
                                 Acknologements
-    The function div_32bit is derived from the book "Hacker's Delight" 2nd Edition
-    by Henry S. Warren Jr. It was converted to 32 bit operations + a bugfix.
+    The function div_128bit is derived from the book "Hacker's Delight" 2nd Edition
+    by Henry S. Warren Jr. It implements Knuth's "Algorithm D", specialized to a 128 bit
+    divisor and written in 64 bit limbs.
 
     The functions log, log2, log10 are derived from Dan Moulding's code:
     https://github.com/dmoulding/log2fix
@@ -211,10 +212,9 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  *
  * The rest cannot be constexpr, for one of two reasons:
  * <UL>
- * <LI>Division and modulo: div_64bit rests on the _udiv128 intrinsic. The 128 bit divisor path no
- *     longer shares that limitation - div_128bit replaced div_32bit there and has neither the alloca
- *     nor the goto that kept the older routine out of a constant expression - but the function that
- *     calls it is still bound by the rest of this list.</LI>
+ * <LI>Division and modulo: div_64bit rests on the _udiv128 intrinsic. div_128bit does not, and
+ *     nothing in it is barred from a constant expression, but the function that calls it is still
+ *     bound by the rest of this list.</LI>
  * <LI>Function local statics, which a constexpr function may not declare. The transcendental
  *     constants (pi, e, sqrt_2, ...) and the factorial reciprocal table are parsed from strings
  *     into them, and reciprocal holds its bounds the same way. sqrt is doubly out, it calls the
