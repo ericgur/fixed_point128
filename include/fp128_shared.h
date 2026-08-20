@@ -1289,19 +1289,19 @@ FP128_INLINE constexpr void twos_complement128(uint64_t& l, uint64_t& h) noexcep
  * @param u Pointer to Numerator, an array of uint64_t
  * @param v denominator (uint64_t)
  * @param m Count of elements in u
- * @return 0 for success
+ * @return true on success, false when a pointer is null or the divisor is zero.
  */
-FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* u, uint64_t v, int64_t m) noexcept
+FP128_INLINE static bool div_64bit(uint64_t* q, uint64_t* r, const uint64_t* u, uint64_t v, int64_t m) noexcept
 {
     if (u == nullptr || q == nullptr)
-        return 1;
+        return false;
     uint64_t dummy_reminder {};
     if (r == nullptr) {
         r = &dummy_reminder;
     }
 
     if (v == 0)  // error case
-        return 1;
+        return false;
 
     while (m > 0 && u[m - 1] == 0)
         --m;
@@ -1310,12 +1310,12 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
     if (m < 2) {
         if (m == 0 || u[0] < v) {
             *r = (m == 0) ? 0 : u[0];
-            return 0;
+            return true;
         }
         if (u[0] == v) {
             *q = 1;
             *r = 0;
-            return 0;
+            return true;
         }
     }
 
@@ -1327,7 +1327,7 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
 
     // Remainder
     *r = k[1];
-    return 0;
+    return true;
 }
 /**
  * @brief Divides an unsigned integer of up to 256 bits by a 128 bit one. Knuth algorithm D, 64 bit limbs.
@@ -1358,13 +1358,13 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
  * @param u Numerator, @p m words, u[0] lowest.
  * @param v Denominator, two words. v[1] must be non zero.
  * @param m Count of words in @p u. Must be 2, 3 or 4.
- * @return 0 for success, 1 when a parameter fails one of the conditions above.
+ * @return true on success, false when a parameter fails one of the conditions above.
  */
-FP128_INLINE static int32_t div_128bit(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v, int64_t m) noexcept
+FP128_INLINE static bool div_128bit(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v, int64_t m) noexcept
 {
     constexpr int64_t MAX_WORDS = 4;  // 256 bit numerator, the widest any type here divides
     if (q == nullptr || u == nullptr || v == nullptr || m < 2 || m > MAX_WORDS || v[1] == 0)
-        return 1;
+        return false;
 
     // Normalize so the divisor's high bit is set, which is what bounds the quotient estimate to two
     // too large. The numerator gains a word for the bits shifted out of its top.
@@ -1434,7 +1434,7 @@ FP128_INLINE static int32_t div_128bit(uint64_t* q, uint64_t* r, const uint64_t*
         r[1] = un[1] >> s;
     }
 
-    return 0;
+    return true;
 }
 /**
  * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.

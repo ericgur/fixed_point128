@@ -872,7 +872,7 @@ public:
 
             // optimization for when dividing by a small (<= 64 bit) integer
             if (rhs.high == 0) {
-                if (div_64bit((uint64_t*)q, nullptr, (uint64_t*)nom, rhs.low, 2)) {
+                if (!div_64bit((uint64_t*)q, nullptr, (uint64_t*)nom, rhs.low, 2)) {
                     FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
                 }
             }
@@ -880,7 +880,7 @@ public:
             // large fits in a single QWORD, so div_128bit fills q[0] and leaves q[1] at zero.
             else {
                 const uint64_t denom[2] = {rhs.low, rhs.high};
-                if (div_128bit(q, nullptr, nom, denom, array_length(nom))) {
+                if (!div_128bit(q, nullptr, nom, denom, array_length(nom))) {
                     FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
                 }
             }
@@ -960,7 +960,7 @@ public:
             // Every early return in div_64bit() that leaves the quotient unwritten is unreachable
             // from here: a numerator below or equal to the divisor is what the two trivial cases
             // above already returned for, and a zero numerator is the `is_zero()` check.
-            if (div_64bit(&low, nullptr, &low, uval, 2)) {
+            if (!div_64bit(&low, nullptr, &low, uval, 2)) {
                 FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
             }
             return *this;
@@ -1003,7 +1003,7 @@ public:
 
             // optimization for when dividing by a small integer
             if (rhs.high == 0) {
-                if (div_64bit((uint64_t*)q, &low, (uint64_t*)nom, rhs.low, 2)) {
+                if (!div_64bit((uint64_t*)q, &low, (uint64_t*)nom, rhs.low, 2)) {
                     FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
                 }
                 high = 0;
@@ -1012,7 +1012,7 @@ public:
                 // Written into a separate buffer rather than into low and high directly: the
                 // numerator is still being read out of them while the division runs.
                 uint64_t r[2] {};
-                if (div_128bit(q, r, nom, denom, array_length(nom))) {
+                if (!div_128bit(q, r, nom, denom, array_length(nom))) {
                     FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
                 }
                 low = r[0];

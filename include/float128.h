@@ -1352,7 +1352,7 @@ public:
         // unity bit at bit 112 and its high QWORD is never zero. div_128bit's precondition therefore
         // holds unconditionally here, unlike in fixed_point128 where a tiny divisor has to be routed
         // to div_64bit instead.
-        if (0 == div_128bit(q, rem, nom, denom, array_length(nom))) {
+        if (div_128bit(q, rem, nom, denom, array_length(nom))) {
             // 128 bit were added to the dividend, 112 were lost:
             // need to shift right 16 bit (128 - 112) but we don't go all the way so norm_fraction()
             //  can produce accurate rounding

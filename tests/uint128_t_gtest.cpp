@@ -794,7 +794,7 @@ TEST(uint128_t, Div128BitSatisfiesTheDivisionIdentity)
 
         const uint64_t v[2] = {vLow, vHigh};
         uint64_t q[4] {}, r[2] {};
-        ASSERT_EQ(div_128bit(q, r, u, v, m), 0);
+        ASSERT_TRUE(div_128bit(q, r, u, v, m));
 
         // Back-multiply the quotient by the divisor and add the remainder; the sum has to be the
         // dividend exactly, in every word.
@@ -859,15 +859,15 @@ TEST(uint128_t, Div128BitRejectsUnsupportedShapes)
     const uint64_t v[2] = {5, 6};
     uint64_t q[4] {}, r[2] {};
 
-    EXPECT_EQ(div_128bit(q, r, u, v, 4), 0);
-    EXPECT_EQ(div_128bit(nullptr, r, u, v, 4), 1) << "null quotient";
-    EXPECT_EQ(div_128bit(q, r, nullptr, v, 4), 1) << "null dividend";
-    EXPECT_EQ(div_128bit(q, r, u, nullptr, 4), 1) << "null divisor";
-    EXPECT_EQ(div_128bit(q, r, u, v, 1), 1) << "dividend narrower than the divisor";
-    EXPECT_EQ(div_128bit(q, r, u, v, 5), 1) << "dividend wider than 256 bits";
+    EXPECT_TRUE(div_128bit(q, r, u, v, 4));
+    EXPECT_FALSE(div_128bit(nullptr, r, u, v, 4)) << "null quotient";
+    EXPECT_FALSE(div_128bit(q, r, nullptr, v, 4)) << "null dividend";
+    EXPECT_FALSE(div_128bit(q, r, u, nullptr, 4)) << "null divisor";
+    EXPECT_FALSE(div_128bit(q, r, u, v, 1)) << "dividend narrower than the divisor";
+    EXPECT_FALSE(div_128bit(q, r, u, v, 5)) << "dividend wider than 256 bits";
 
     const uint64_t narrow[2] = {7, 0};
-    EXPECT_EQ(div_128bit(q, r, u, narrow, 4), 1) << "divisor that fits in one QWORD";
+    EXPECT_FALSE(div_128bit(q, r, u, narrow, 4)) << "divisor that fits in one QWORD";
 }
 // operator%= used to hand the long division this object's own QWORDs as the remainder buffer. The
 // routine of the day shrank the denominator past its leading zero words and filled only that many,

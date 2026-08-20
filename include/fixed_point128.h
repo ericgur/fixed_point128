@@ -1226,7 +1226,7 @@ public:
             const uint64_t nom[2] = {low, high};
             const uint64_t denom = denom_high >> upper_frac_bits;
             uint64_t r;
-            if (0 == div_64bit((uint64_t*)q, &r, (uint64_t*)nom, denom, 2)) {
+            if (div_64bit((uint64_t*)q, &r, (uint64_t*)nom, denom, 2)) {
                 need_rounding = r > (denom >> 1);
                 high = q[1];
                 low = q[0];
@@ -1332,8 +1332,8 @@ public:
         // writing the quotient at all, so the destination has to start at zero. Otherwise a value
         // whose raw 128 bit form is below the divisor would be left completely unchanged.
         low = high = 0;
-        // the results is stored in low and high, the function returns non zero if error (divide by zero or overflow)
-        if (0 != div_64bit(&low, nullptr, (uint64_t*)nom, x, 2)) {
+        // the results is stored in low and high, the function fails on a divide by zero or overflow
+        if (!div_64bit(&low, nullptr, (uint64_t*)nom, x, 2)) {
             low = high = 0;
         } else {
             NegateIf(sign_bits);
@@ -1840,9 +1840,9 @@ private:
 
         // A divisor small enough to fit in one QWORD is div_64bit's job; div_128bit rejects it
         // rather than handle a case that has a cheaper route. Both fill the same first words of q.
-        const int32_t status = (denom_high != 0) ? div_128bit(q, nullptr, nom, denom, array_length(nom))
-                                                 : div_64bit(q, nullptr, nom, denom_low, array_length(nom));
-        if (0 != status) {
+        const bool ok = (denom_high != 0) ? div_128bit(q, nullptr, nom, denom, array_length(nom))
+                                          : div_64bit(q, nullptr, nom, denom_low, array_length(nom));
+        if (!ok) {
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
         }
 
