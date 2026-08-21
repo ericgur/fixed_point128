@@ -311,10 +311,38 @@ template <typename Body> [[nodiscard]] int64_t MeasureRate(double time_budget, B
 /**
  * @brief Number of distinct arguments a timed loop cycles through. Must be a power of two.
  *
- * Sixty four arguments of at most 24 bytes stay inside L1, so cycling through them costs an L1 load
- * per iteration and nothing else.
+ * A timed loop replays this set for the whole of its budget, so the set length is also the period of
+ * every data dependent branch inside the measured code. A branch predictor that can hold a pattern
+ * that long stops mispredicting, and the benchmark then reports the cost of code without the
+ * mispredictions its callers actually pay.
+ *
+ * Sixty four was too short to survive that. Simulated against the rounding branch in operator*=(), a
+ * gshare predictor with eight bits of history learns a 64 argument sequence perfectly; at 1024 it
+ * reaches 64%, which is close enough to the 50% floor that the branch still costs what it should.
+ * 1024 arguments of 16 bytes are 16 KB, comfortably inside a 48 KB L1 data cache, and the loop walks
+ * them sequentially so the hardware prefetcher covers the rest.
  */
-constexpr uint64_t BENCH_ARG_COUNT = 64;
+constexpr uint64_t BENCH_ARG_COUNT = 1024;
+
+/** @brief Seed for the argument perturbations. Fixed, so every run measures the same operands. */
+constexpr uint64_t BENCH_ARG_SEED = 0x243F6A8885A308D3ull;
+
+/**
+ * @brief splitmix64. Deterministic, and well enough distributed for choosing argument perturbations.
+ *
+ * Used only to build the argument sets, never inside a timed loop.
+ *
+ * @param state Generator state, advanced by the call.
+ * @return The next 64 bit value.
+ */
+[[nodiscard]] constexpr uint64_t NextRandom(uint64_t& state) noexcept
+{
+    state += 0x9E3779B97F4A7C15ull;
+    uint64_t z = state;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
 
 /**
  * @brief Fills @p args with values that differ in their low order bits but not in their magnitude.
@@ -335,16 +363,45 @@ constexpr uint64_t BENCH_ARG_COUNT = 64;
  * number of times that depends on it and the results would otherwise stop being comparable with
  * earlier runs.
  *
+ * The perturbation is random rather than an arithmetic progression, which matters more than it
+ * sounds. The rounding step in operator*=() and square() branches on bit F-1 of the product, and for
+ * an evenly spaced set of arguments that bit follows the carry pattern of a linear sequence - a short
+ * repeating shape the predictor gets right every time. With `base + (base >> 16) * i` it was not even
+ * a shape: measured over the 64 argument set this function used to build, the rounding bit of the
+ * multiplication benchmark was **1 for every argument**, so the branch never changed direction at
+ * all. A change that removes that branch could only ever look like a regression.
+ *
+ * The same bound is reached here from a step 2^10 times finer multiplied by a random 16 bit value, so
+ * the arguments span the same range while their low order bits carry no pattern. The rounding bit
+ * then comes out at 50.7% ones with 96% of the transition density of a fair coin.
+ *
  * @tparam T Argument type.
  * @param args Array of BENCH_ARG_COUNT elements to fill.
- * @param base Argument the benchmark would otherwise have used on its own. Becomes args[0].
+ * @param base Argument the benchmark would otherwise have used on its own.
  */
 template <typename T> void BuildArgs(T* args, const T& base)
 {
-    const T step = base >> 16;
+    const T step = base >> 26;
+    uint64_t state = BENCH_ARG_SEED;
     for (uint64_t i = 0; i < BENCH_ARG_COUNT; ++i) {
-        args[i] = base + step * static_cast<uint32_t>(i);
+        args[i] = base + step * static_cast<uint32_t>(NextRandom(state) >> 48);
     }
+}
+
+/**
+ * @brief The centre of the set BuildArgs() produces, for benchmarks that need to split it in half.
+ *
+ * The midpoint of the random multiplier's range, so about half the set compares above it and half
+ * below, without the outcome being a function of the loop counter the way the median of an evenly
+ * spaced set was.
+ *
+ * @tparam T Argument type.
+ * @param base The same base passed to BuildArgs().
+ * @return A value in the middle of the perturbation range.
+ */
+template <typename T> [[nodiscard]] T ArgsMidpoint(const T& base)
+{
+    return base + (base >> 26) * static_cast<uint32_t>(0x8000);
 }
 
 /**
@@ -570,11 +627,21 @@ template <int32_t I> struct BenchTraits<fixed_point128<I>> {
     [[nodiscard]] static T operandB() noexcept { return T::e(); }
     [[nodiscard]] static T operandC() noexcept { return T::golden_ratio(); }
     [[nodiscard]] static MulType mulA() noexcept { return MulType(fabs(T::pi())); }
-    [[nodiscard]] static MulType mulB() noexcept
-    {
-        srand(0x12345678);
-        return MulType((double)rand() / 1.0101010101010101);
-    }
+
+    /**
+     * @brief Right hand side of the 128 bit multiplication benchmark.
+     *
+     * This used to be `(double)rand() / 1.0101010101010101` after `srand(0x12345678)`, which was
+     * wrong twice over. rand() is not the same sequence on every implementation, so MSVC and Clang
+     * were multiplying by different numbers and their results were not comparable. And whatever the
+     * draw, dividing a value up to RAND_MAX by 1.01 lands far outside the +-256 that
+     * fixed_point128<8> can hold, so the operand saturated to the type maximum: the benchmark was
+     * timing a multiply by 256, and the rounding bit of every product came out 1.
+     *
+     * e has the full 128 bits of the type and sits well inside its range.
+     */
+    [[nodiscard]] static MulType mulB() noexcept { return MulType::e(); }
+
     [[nodiscard]] static IntMulType intMulA() noexcept { return IntMulType::pi(); }
 };
 
@@ -597,11 +664,11 @@ template <> struct BenchTraits<float128> {
     [[nodiscard]] static T operandB() noexcept { return T::e(); }
     [[nodiscard]] static T operandC() noexcept { return T::sqrt_2(); }
     [[nodiscard]] static MulType mulA() noexcept { return fabs(T::pi()); }
-    [[nodiscard]] static MulType mulB() noexcept
-    {
-        srand(0x12345678);
-        return MulType((double)rand() / 1.0101010101010101);
-    }
+
+    /** @brief Right hand side of the multiplication benchmark. See the fixed_point128 mulB() for
+     *         why this is a constant and not a draw from rand(). */
+    [[nodiscard]] static MulType mulB() noexcept { return MulType::e(); }
+
     [[nodiscard]] static IntMulType intMulA() noexcept { return T::pi(); }
 };
 
@@ -627,7 +694,7 @@ template <typename T> void bench_comparison_operators(double time_per_function =
     const int64_t ips = MeasureRate(time_per_function, [](uint64_t count) {
         T args[BENCH_ARG_COUNT];
         BuildArgs(args, Traits::operandB());
-        T f2 = args[BENCH_ARG_COUNT / 2];
+        T f2 = ArgsMidpoint(Traits::operandB());
         int64_t matches = 0;
         Escape(args[0]);
         Escape(f2);

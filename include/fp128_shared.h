@@ -1017,29 +1017,48 @@ FP128_INLINE constexpr void shift_left128_inplace(uint64_t& l, uint64_t& h, int 
  * for the whole of the surrounding routine even with __forceinline, which costs more than this
  * whole operation is worth: written as a function it made fixed_point128<10>::log2() 40% slower.
  *
- * The two expansions compute the same thing and differ only in how they compile. Clang turns the
- * carry propagating form into four instructions and the branch into nine, and is 40% faster on
- * log2() with it - that function reaches this code once for every bit of its result, so a third of
- * its inner loop was the rounding. MSVC is the other way round by about 10%: it compiles the branch
- * into a conditional move and schedules that better than an unconditional add sitting on the
- * dependency chain.
+ * The rounding bit is bit F-1 of a product, which is as good as random for every caller that
+ * multiplies data rather than constants. A branch on it therefore mispredicts about half the time,
+ * and this macro sits in operator*=() and square(), the two hottest routines in the library. The
+ * carry propagating form has no branch to mispredict: BT sets the carry flag and two ADCs consume
+ * it, four instructions of fixed latency.
  *
- * Both figures come from the benchmark cycling through a set of arguments, so neither is an
- * artifact of a branch the predictor had memorized. Timed on a single repeated argument the two
- * spellings compare the other way round on both compilers, which is what the rotating arguments in
- * bench/Bench.cpp are there to avoid.
+ * Both compilers want that form, and MSVC wants it far more than Clang does. MSVC used to be given
+ * the branch instead, on the strength of a log2() measurement in which it if converted the branch
+ * into a conditional move; that if conversion is not something it does reliably, and in the
+ * Mandelbrot escape-time loop of a real renderer it emits a real branch, three per iteration on three
+ * unpredictable bits. There the change is worth 1.9x - a 640x360 frame at 2048 iterations goes from
+ * 625ms to 324ms, taking MSVC from roughly half of clang-cl's speed to level with it.
+ *
+ * Measured on an i9-12900K, one core, fastest of three runs, over the 32 fixed_point128<10>
+ * benchmarks in bench/Bench.cpp. Ratios are the carry propagating form against the branch:
+ *
+ * |                            | MSVC P-core | MSVC E-core | Clang P-core |
+ * | -------------------------- | ----------- | ----------- | ------------ |
+ * | median over all 32         | +52%        | +43%        | +6.7%        |
+ * | exp2 / exp / pow / expm1   | 1.87-1.81x  | 1.77-1.74x  | 1.17-1.11x   |
+ * | atan / asin / acos         | 1.78-1.67x  | 1.61-1.40x  | 1.09-1.00x   |
+ * | tan / sin / cos            | 1.63-1.56x  | 1.50-1.43x  | 1.03-1.01x   |
+ * | log2 / log                 | 1.54-1.55x  | 1.62-1.63x  | 1.15-1.14x   |
+ * | sqrt, reciprocal           | -2%, -3%    | 0%, +20%    | +1%, +3%     |
+ * | isolated operator*=() loop | -7%         | 2.01x       | -4%          |
+ *
+ * The transcendentals gain most because they reach this code once per bit of their result, so the
+ * rounding was a large part of their inner loop. The isolated multiplication loop is the one case
+ * that regresses on a P-core: accumulating a single product per iteration leaves the core enough
+ * slack to hide the branch, which no caller that chains multiplications gives it. The same loop is
+ * twice as fast on an E-core, whose narrower recovery pays more for a misprediction than it saves.
+ *
+ * A warning for anyone re-measuring this. Until 2026-08-21 bench/Bench.cpp built its operands as an
+ * arithmetic progression and multiplied them by an operand that silently saturated to the type
+ * maximum, which made the rounding bit **1 for every argument in the set** - a branch that never
+ * changes direction is free, and the benchmark reported this change as a 6% regression. Randomising
+ * the operands costs the branch build 45-48% on the transcendentals and the carry build 1-3%; that
+ * asymmetry is the check that the benchmark can see a misprediction at all. bench_mandelbrot() still
+ * shows a small loss because it iterates one bounded orbit with no escape test, the shape MSVC does
+ * if convert - it is not a substitute for measuring a real render.
  */
-#if defined(FP128_CLANG)
 #define FP128_ADD_ROUND_BIT(l, h, round_up) ((h) += addcarryx_u64(0, (l), static_cast<uint64_t>(round_up), &(l)))
-#else
-#define FP128_ADD_ROUND_BIT(l, h, round_up)      \
-    do {                                         \
-        if (round_up) {                          \
-            ++(l); /* wraps around to zero */    \
-            (h) += (l) == 0;                     \
-        }                                        \
-    } while (0)
-#endif
 /**
  * @brief Right shift a 128 bit integer (inplace) with rounding.
  * Handles any positive shift value.

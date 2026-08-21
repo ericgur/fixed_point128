@@ -5,6 +5,10 @@ out/
 __pycache__/
 /Testing
 
+# Benchmark results and the baseline the /benchmark skill compares against. Machine specific:
+# rates measured on one box say nothing about another, so they are never committed.
+bench/results/
+
 # Visual Studio
 **/.vs
 *.user
