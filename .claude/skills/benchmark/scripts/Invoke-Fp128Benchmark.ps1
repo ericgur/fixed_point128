@@ -15,16 +15,18 @@
     The rest of the protocol is not incidental either. Each part of it exists because of a specific way
     this machine has previously produced wrong numbers:
 
-    - Every binary is run once and that run is thrown away. The first execution of a freshly linked
-      binary is malware scanned on Windows and the scan lands inside the measurement, which invents
-      regressions of well over 100%.
+    - Every configuration is run five times and each benchmark's fastest and slowest result is thrown
+      away; the score is the mean of the three that remain. Discarding the slowest is also what makes
+      a separate warm-up unnecessary: the first execution of a freshly linked binary is malware
+      scanned on Windows, and that run is the slow one the trim removes.
     - Every run is pinned. An unpinned thread migrates between core types mid-run and measures the
       same binary 2.6x apart; pinning takes the run to run spread from a 27% median to 0.4%.
-    - Each benchmark is the fastest of -Rounds runs. Interference can only ever make a measurement
-      slower, so the maximum is the least contaminated estimate.
+    - Nothing waits between runs. The benchmark is single threaded, which will not drive a desktop
+      part into thermal throttling, so a cool down would only add wall clock time.
 
 .PARAMETER Rounds
-    Measured runs per configuration, on top of the discarded warm-up. Default 3.
+    Runs per configuration. Default 5: the fastest and slowest are discarded and the score is the mean
+    of the rest, so this must be at least 3 and is only meaningful from 5 upwards.
 
 .PARAMETER CoreType
     Which core types to measure on. Auto (the default) measures every type the CPU has: both P and E
@@ -47,6 +49,11 @@
     Skip building and measuring entirely and re-render the report from the JSON already in the results
     directory. Useful after editing the report, and for reporting on results collected some other way.
 
+.PARAMETER Label
+    Free text recorded with the run and shown in the report's build stamp. Use it when the two sides of
+    a comparison come from the same commit - measuring a variant binary with -NoBuild, say - because
+    the commit alone then cannot tell the reader which side is which.
+
 .PARAMETER ResultsDir
     Where results and the report live. Default <repo>/bench/results, which is git ignored.
 
@@ -59,13 +66,13 @@
     Same, and then adopt this run as the new baseline.
 
 .EXAMPLE
-    .\Invoke-Fp128Benchmark.ps1 -CoreType P -Toolchain msvc -Rounds 1
-    A quick single configuration check on a performance core.
+    .\Invoke-Fp128Benchmark.ps1 -CoreType P -Toolchain msvc -Rounds 3
+    A quick single configuration check on a performance core, at the lowest useful run count.
 #>
 [CmdletBinding()]
 param(
-    [ValidateRange(1, 20)]
-    [int]$Rounds = 3,
+    [ValidateRange(3, 20)]
+    [int]$Rounds = 5,
 
     [ValidateSet('Auto', 'P', 'E')]
     [string[]]$CoreType = @('Auto'),
@@ -81,6 +88,8 @@ param(
     [switch]$NoBuild,
 
     [switch]$ReportOnly,
+
+    [string]$Label,
 
     [string]$ResultsDir
 )
@@ -461,9 +470,14 @@ function Get-GitDescription {
 ##
 # @brief Measures one configuration on one core and returns the fastest result per benchmark.
 #
-# Performs one discarded warm-up run followed by $Rounds measured runs, keeping the maximum rate per
-# benchmark. Every individual rate is retained alongside it as the run to run spread, which is what
-# tells a reader of the report whether a given difference is larger than this machine's noise.
+# Runs the binary $Rounds times with nothing discarded up front, then scores each benchmark as the
+# mean of its results with the fastest and the slowest removed. The trim is doing two jobs: it drops
+# the one run that interference made slow, and it drops the malware scan that lands inside the first
+# execution of a freshly linked binary, which is why there is no separate warm-up.
+#
+# The spread across the runs that survive the trim is kept alongside the score. That is the run to run
+# variation of the number being reported, and it is what tells a reader of the report whether a
+# difference is larger than this machine's noise.
 #
 # @param Config One entry of $configs.
 # @param Target One entry from Get-CoreTargets.
@@ -475,8 +489,7 @@ function Measure-Configuration {
         [Parameter(Mandatory)][hashtable]$Target
     )
 
-    Write-Host ('Warm-up run ({0} on {1}, discarded)...' -f $Config.DisplayName, $Target.Description)
-    Invoke-PinnedBench -ExeDir $Config.ExeDir -BenchArgs @('-t', 'all') -TargetCpu $Target.Cpu
+    Write-Host ('Measuring {0} on {1}, {2} runs...' -f $Config.DisplayName, $Target.Description, $Rounds)
 
     $runs = @()
     for ($round = 1; $round -le $Rounds; $round++) {
@@ -510,18 +523,27 @@ function Measure-Configuration {
 
     $results = @()
     foreach ($entry in $byKey.Values) {
-        $best  = ($entry.rates | Measure-Object -Maximum).Maximum
-        $worst = ($entry.rates | Measure-Object -Minimum).Minimum
+        # Sort, drop one from each end, and average what is left. With five runs that keeps three:
+        # the slowest is whatever the machine interfered with, the fastest is the one measurement most
+        # likely to have caught an unrepresentatively quiet moment.
+        $sorted = @($entry.rates | Sort-Object)
+        $kept = @($sorted[1..($sorted.Count - 2)])
+
+        $score = ($kept | Measure-Object -Average).Average
         $spread = 0.0
-        if ($best -gt 0) {
-            $spread = 100.0 * ($best - $worst) / $best
+        if ($score -gt 0) {
+            $high = ($kept | Measure-Object -Maximum).Maximum
+            $low = ($kept | Measure-Object -Minimum).Minimum
+            $spread = 100.0 * ($high - $low) / $score
         }
+
         $results += [ordered]@{
             type                = $entry.type
             group               = $entry.group
             name                = $entry.name
-            iterationsPerSecond = $best
+            iterationsPerSecond = $score
             rates               = $entry.rates
+            keptRates           = $kept
             spreadPercent       = $spread
         }
     }
@@ -545,7 +567,8 @@ function Measure-Configuration {
         timestamp       = $first.timestamp
         rounds          = $Rounds
         cpu             = $Target.Cpu
-        sampling        = "fastest of $Rounds pinned runs"
+        sampling        = "mean of $($Rounds - 2) of $Rounds pinned runs, fastest and slowest discarded"
+        label           = $Label
         git             = Get-GitDescription
         results         = $results
     }
@@ -755,6 +778,9 @@ function Format-BuildStamp {
         if ($Report.git.dirty) {
             $stamp += ' + uncommitted changes'
         }
+    }
+    if ($Report.PSObject.Properties.Name -contains 'label' -and $Report.label) {
+        $stamp = '{0} - {1}' -f $Report.label, $stamp
     }
     if ($Report.PSObject.Properties.Name -contains 'libraryVersion') {
         $stamp += ' - ' + $Report.libraryVersion
@@ -1149,8 +1175,9 @@ function New-ComparisonReport {
 
     [void]$html.AppendLine(('<p class="sub legend">Rates are millions of iterations per second; higher is better. ' +
                             'Changes smaller than {0}% are shown as unchanged - that is this machine''s run to run ' +
-                            'noise, not a measured result. The noise column is the spread across the runs behind the ' +
-                            'current figure; treat any change that is not several times larger than it as unproven. ' +
+                            'noise, not a measured result. The noise column is the run to run variation of the ' +
+                            'current figure, measured across the runs that survive the trim; treat any change that ' +
+                            'is not several times larger than it as unproven. ' +
                             'Noise is not the only trap: any edit moves every function''s address, and a hot loop ' +
                             'landing on a different alignment can shift 20% with byte-identical instructions. A ' +
                             'benchmark that moves in code the change could not reach is layout, not a result.</p>') -f `
@@ -1278,9 +1305,14 @@ foreach ($target in $coreTargets) {
         $description = $first.coreDescription
     }
 
+    $sampling = 'Pinned to CPU {0}.' -f $first.cpu
+    if ($first.PSObject.Properties.Name -contains 'sampling' -and $first.sampling) {
+        $sampling = '{0}, on CPU {1}.' -f $first.sampling, $first.cpu
+    }
+
     $cores[$target.Label] = @{
         Description = $description
-        Sampling    = 'Fastest of {0} runs, pinned to CPU {1}.' -f $first.rounds, $first.cpu
+        Sampling    = $sampling
         Comparisons = $comparisons
         Diff        = $diff
     }

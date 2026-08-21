@@ -24,7 +24,7 @@ run noise, so measuring it costs a third of the wall clock time and adds nothing
 
 Builds both configurations and measures each of them on **every core type the CPU has** - on a hybrid
 part that means one run pinned to a P-core and one to an E-core, reported separately. Writes
-`bench/results/report.html`. Roughly 3 minutes per configuration per core type at the default 3 rounds.
+`bench/results/report.html`. Roughly 4 minutes per configuration per core type at the default 5 runs.
 
 A P-core and an E-core are different machines for this purpose (2.6x apart on this benchmark), so
 their numbers are never mixed. On a uniform CPU there is a single set of runs and a single section.
@@ -34,7 +34,7 @@ their numbers are never mixed. On a uniform CPU there is a single set of runs an
 | `-SaveBaseline`           | adopt this run as the new baseline                                   |
 | `-Toolchain msvc`         | measure one configuration only                                       |
 | `-CoreType P` / `E`       | measure one core type only; default `Auto` measures every type        |
-| `-Rounds <n>`             | measured runs per configuration, default 3                           |
+| `-Rounds <n>`             | runs per configuration, default 5 (minimum 3)                        |
 | `-Cpu <n>`                | pin to one exact logical CPU, overriding `-CoreType`                 |
 | `-NoBuild`                | measure what is already built, skipping the build step               |
 | `-ReportOnly`             | re-render the report from the JSON already in `bench/results/`       |
@@ -48,7 +48,7 @@ Everything lives under `bench/results/`, which `.gitignore` excludes:
 ```
 bench/results/baseline/bench_{msvc,clang}_{pcore,ecore}_release.json   the baseline
 bench/results/current/bench_{msvc,clang}_{pcore,ecore}_release.json    the run just measured
-bench/results/runs/{msvc,clang}_{pcore,ecore}_round<n>.json            the individual runs behind it
+bench/results/runs/{msvc,clang}_{pcore,ecore}_round<n>.json            all 5 runs behind it
 bench/results/report.html                                              the report
 ```
 
@@ -76,7 +76,7 @@ instead of letting it accumulate on the second one measured.
 ## Reading the result
 
 - Changes under 2% are reported as unchanged. That is this machine's run to run noise, not a result.
-- The `noise` column is the spread across the runs behind the current figure. A change that is not
+- The `noise` column is the spread across the three runs that survive the trim. A change that is not
   several times larger than it is unproven, whatever its sign.
 - A benchmark that appears or disappears is shown as `new` or `removed`, never silently dropped.
 - **Check that the change could have reached the benchmark before believing it.** Any edit shifts
@@ -86,13 +86,23 @@ instead of letting it accumulate on the second one measured.
   machine code was unchanged - it had simply been pushed 96 bytes down the image. Confirm with an
   asm diff (`cl /FAsc` on both variants, compare PROC bodies) before attributing a number to a change.
 
+## How a score is produced
+
+Each configuration is run **5 times with no warm-up**. Per benchmark the fastest and the slowest
+result are discarded and the score is the **mean of the remaining 3**; the spread across those same 3
+is the reported noise.
+
+The trim replaces the warm-up rather than merely tolerating its absence. Windows malware-scans a
+freshly linked binary on its first execution and the scan lands inside the measurement - historically
+worth over 100% on a single result - so run 1 is the slowest and is exactly what dropping the worst
+removes. If you time something by hand instead, either discard the first run or trim the same way.
+
+Nothing sleeps between runs: the benchmark is single threaded and will not push a desktop part into
+thermal throttling, so a cool down would buy nothing but wall clock time.
+
 ## Rules that keep the numbers honest
 
 These are not style preferences; each is a way this machine has produced a wrong answer before.
-
-- **Never report a number from a binary's first run.** Windows malware-scans a freshly linked binary
-  and the scan lands inside the measurement, inventing regressions of over 100%. The script always
-  discards a warm-up run; if you time a benchmark by hand, do the same.
 - **Never run unpinned.** The dev box is a hybrid i9-12900K (CPUs 0-7 P-cores, 8-15 E-cores). An
   unpinned thread migrates mid-run and measures the same binary 2.6x apart. Pinning takes the run to
   run spread from a 27% median to 0.4%.
