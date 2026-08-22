@@ -309,6 +309,32 @@ template <typename Body> [[nodiscard]] int64_t MeasureRate(double time_budget, B
 }
 
 /**
+ * @brief Multiplier on the time budget of the comparison operator benchmark.
+ *
+ * That benchmark is the only one whose loop is dominated by branch mispredictions: it sums four
+ * comparisons of a rotating operand against the middle of the same set, and since BuildArgs() started
+ * producing unpredictable arguments the outcomes are a coin toss. A misprediction bound loop measures
+ * far less repeatably than a throughput bound one, because what it really depends on is the state the
+ * predictor happens to be in.
+ *
+ * Measured over 15 consecutive runs of one binary, pinned, against 0.4G-5G/s benchmarks that hold
+ * still to 0.05%:
+ *
+ * <UL>
+ * <LI>at the ordinary budget: int128_t 5.36% standard deviation, 17.4% spread; uint128_t 2.54% and
+ *     9.0%</LI>
+ * <LI>at four times the budget: int128_t 3.60% and 11.0%; uint128_t 1.41% and 3.6%</LI>
+ * </UL>
+ *
+ * MeasureRate() reports the fastest batch it saw, so a longer budget gives that minimum more batches
+ * to settle into and cuts the run to run variation by about a third. It does not remove it - the
+ * residue is per process predictor state that no amount of sampling inside one process reaches - so
+ * this benchmark stays the noisiest of the set and its small differences should be read with that in
+ * mind.
+ */
+constexpr double BENCH_COMPARISON_TIME_SCALE = 4.0;
+
+/**
  * @brief Number of distinct arguments a timed loop cycles through. Must be a power of two.
  *
  * A timed loop replays this set for the whole of its budget, so the set length is also the period of
@@ -691,7 +717,7 @@ template <typename T> void bench_comparison_operators(double time_per_function =
     // side of an unrelated constant and every comparison would take the branch it took last time.
     // Sitting the right hand side inside the set splits the outcomes evenly, which is what a
     // comparison in real code does.
-    const int64_t ips = MeasureRate(time_per_function, [](uint64_t count) {
+    const int64_t ips = MeasureRate(time_per_function * BENCH_COMPARISON_TIME_SCALE, [](uint64_t count) {
         T args[BENCH_ARG_COUNT];
         BuildArgs(args, Traits::operandB());
         T f2 = ArgsMidpoint(Traits::operandB());
