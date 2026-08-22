@@ -7,7 +7,7 @@ and this project adheres to a four-part `MAJOR.MINOR.PATCH.BUILD` version scheme
 exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants in
 [`include/fp128_shared.h`](include/fp128_shared.h).
 
-## [0.11.0.0] - unreleased
+## [0.11.0.0] - 2026-08-22
 
 ### Added
 
@@ -305,5 +305,6 @@ up to it.
 - clang compatibility for `fixed_point128` and for the benchmark's add/sub/mul/div
   conditions.
 
+[0.11.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.11.0.0
 [0.10.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.10.0.0
 [0.9.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.9.0.0
