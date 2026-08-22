@@ -13,7 +13,8 @@
  - Most operations are very fast. 1-10x slower than double precision. ~10x faster than MPIR at similar precision.
  - Up to 38 fraction digits (decimal) are supported.
  - Has a superset of integer and floating point functions including all standard C/C++ operators.
- - The single template parameter **\<I\>** allows the user to specify 1-64 bits for the integer part, the rest are allocated to the fraction.
+ - The single template parameter **\<I\>** allows the user to specify 1-63 bits for the integer part, the sign takes one bit and the rest are allocated to the fraction.
+ - Exactly 128 bits wide, held as a two's complement value with the sign in the top bit - so it takes as much space as it uses.
  - An object can be created from all int/float types as well as from strings representing a float.
  - Supports conversions from one template instance to another (2 instances with different **\<I\>** parameter).
 
@@ -221,9 +222,15 @@ a summary of what each header contains; the generated pages are the reference.
 
 ### fixed_point128.h
 
-Template class `fixed_point128<I>` where **I** is the number of integer bits (range `[1, 64]`). The remaining `128 - I` bits store the fractional part. This gives compile-time control over the trade-off between range and precision.
+Template class `fixed_point128<I>` where **I** is the number of integer bits (range `[1, 63]`). One bit holds the sign and the remaining `127 - I` store the fractional part. This gives compile-time control over the trade-off between range and precision.
 
-**Data layout:** `uint64_t low` + `uint64_t high` + `uint32_t sign` (separate sign bit).
+**Data layout:** `uint64_t low` + `uint64_t high`, exactly 128 bits and nothing else. The pair is a two's complement integer with the sign in the MSB of `high`, and the value it stands for is that integer divided by 2<sup>F</sup>, where `F = 127 - I`:
+
+```
+value = (int128)(high:low) / 2^F
+```
+
+The representable range is therefore `[-2^I, 2^I - 2^-F]`, asymmetric like every two's complement type: the most negative value has no positive counterpart, so negating it - or taking `fabs` of it - wraps back to itself, exactly as `-INT64_MIN` does. Overflow is silent throughout.
 
 **Features:**
 - Construction from integer types, `double`, C strings (accurate to 37 decimal digits), and raw components.
@@ -237,6 +244,16 @@ Template class `fixed_point128<I>` where **I** is the number of integer bits (ra
   - **Trigonometric:** `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`.
   - **Hyperbolic:** `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`.
 - Built-in constants: `pi()`, `pi2()`, `half_pi()`, `e()`, `sqrt_2()`, `golden_ratio()`, `one()`, `half()`, `epsilon()`.
+
+**Minimum integer bits:** a few of these cannot work in the narrowest instantiations, and each one says so with a `static_assert` naming itself and the bound, rather than overflowing quietly or failing to link:
+
+| Needs | Constants and functions |
+|---|---|
+| `I >= 2` | `pi()`, `e()`, `exp()`, `exp2()`, `expm1()`, `pow()`, `tanh()` |
+| `I >= 3` | `pi2()` |
+| `I >= 4` | `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2()`, `sinh()`, `cosh()` |
+
+Everything else works for every `I`, `half_pi()`, `sqrt_2()` and `golden_ratio()` included. A result that leaves the range - `exp()` of a large argument, `log()` of a tiny one - depends on the argument rather than on the type and overflows silently, as any other operation does.
 - Standard library integration: `std::numeric_limits`, `std::formatter`, `std::hash`, `operator<<`, `operator>>`.
 
 ### float128.h
@@ -356,7 +373,7 @@ Foundation header providing platform-specific intrinsic wrappers and common help
 - **Build configuration macros** - Compiler detection (`FP128_MSVC`, `FP128_CLANG`), inline control (`FP128_INLINE`, `FP128_FORCE_INLINE`), and feature flags (`FP128_CPP_STYLE_MODULO`, `FP128_USE_RECIPROCAL_FOR_DIVISION`).
 - **Intrinsic wrappers** - Portable wrappers for `lzcnt`, `popcnt`, `mulx`, `addcarryx`, and `udiv128` covering both MSVC and GCC/Clang.
 - **128-bit shift functions** - `shift_right128`, `shift_left128`, and rounding variants.
-- **Multi-word division** - `div_32bit` and `div_64bit`, derived from *Hacker's Delight* by Henry S. Warren Jr.
+- **Multi-word division** - `div_64bit` for a divisor that fits in one QWORD and `div_128bit` for anything wider, both derived from *Hacker's Delight* by Henry S. Warren Jr.
 - **Bit manipulation** - `lzcnt128`, `popcnt128`, `log2`, and `twos_complement128`.
 - **IEEE 754 unions** - `Double` and `Float` structs for accessing bit fields of native floating-point values.
 
@@ -365,7 +382,7 @@ Foundation header providing platform-specific intrinsic wrappers and common help
 | Macro | Default | Effect |
 | --- | --- | --- |
 | `FP128_DISABLE_INLINE` | `0` | Set it to `1` to turn every `FP128_INLINE` and `FP128_FORCE_INLINE` into `noinline`, so that a profile attributes time to the function it was actually spent in. |
-| `FP128_USE_RECIPROCAL_FOR_DIVISION` | `1` | Selects how `fixed_point128` divides by a value that is neither a power of two nor an integer: `a * reciprocal(b)` when non-zero, long division when zero. The reciprocal is 1.4x-1.8x faster and up to 1.7 ulp less accurate. Only `fixed_point128` reads it - for `float128` the reciprocal measures both slower and less accurate, and the integer types have no reciprocal to multiply by. The comment on the macro carries the measurements. |
+| `FP128_USE_RECIPROCAL_FOR_DIVISION` | `0` | Selects how `fixed_point128` divides by a value that is neither a power of two nor an integer: `a * reciprocal(b)` when non-zero, long division when zero. The default was `1` until `div_128bit` made the long division the faster of the two by 2.0x (MSVC) and 2.7x (clang-cl); it is also up to 1.7 ulp more accurate, so there is no longer a trade to make. Only `fixed_point128` reads it - for `float128` the reciprocal measures both slower and less accurate, and the integer types have no reciprocal to multiply by. The comment on the macro carries the measurements. |
 
 ```sh
 cl  /DFP128_USE_RECIPROCAL_FOR_DIVISION=0 ...   # MSVC, clang-cl
@@ -414,8 +431,8 @@ while (modulus_sq < radius_sq && ++iter < MAX_ITERATION) {
 ```
 
 ## Acknowledgements
-- `div_32bit` (multi-precision integer division) is derived from the book *"Hacker's Delight"* 2nd Edition by Henry S. Warren Jr. 
-It was converted to 32 bit operations and modified a bit. The algorithm is an implementation of Knuth's "Algorithm D" from the book *"The Art of Computer Programming"*.
+- `div_128bit` (multi-precision integer division) is derived from the book *"Hacker's Delight"* 2nd Edition by Henry S. Warren Jr. 
+The algorithm is an implementation of Knuth's "Algorithm D" from the book *"The Art of Computer Programming"*, specialized to a 128 bit divisor and written in 64 bit limbs.
 - Logarithm functions are derived from [Dan Moulding's log2fix](https://github.com/dmoulding/log2fix).
 - Square root uses Newton-Raphson iteration based on *Math Toolkit for Real Time Programming* by Jack W. Crenshaw.
 

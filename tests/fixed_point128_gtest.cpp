@@ -166,7 +166,7 @@ TEST(fixed_point128, CopyConstructorOtherType)
 {
     double value = 0;
     bool common_value = false;
-    constexpr int f1_prec = 64, f2_prec= 32; 
+    constexpr int f1_prec = 63, f2_prec = 32;
     constexpr int min_int_precision = std::min(f1_prec, f2_prec);
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
@@ -538,8 +538,14 @@ TEST(fixed_point128, MultiplyByUnsignedInt64)
  *
  * square() accumulates the same 256 bit product as operator*=, it only skips the
  * redundant second cross multiply, so the results must match exactly - including
- * rounding and sign. Raw bit patterns are used to cover the full value range instead
- * of going through double, which cannot represent every fixed_point128 value.
+ * rounding and the two's complement correction the sign needs. Raw bit patterns are used
+ * to cover the full value range instead of going through double, which cannot represent
+ * every fixed_point128 value.
+ *
+ * The product of two arbitrary 128 bit patterns overflows the range far more often than not,
+ * and an overflowed square can land anywhere, sign included. What is being checked here is that
+ * the two spellings agree bit for bit, whatever they produce; SqrOfSmallValuesIsPositive covers
+ * the sign for the arguments whose square actually fits.
  *
  * @tparam I Number of integer bits passed to fixed_point128.
  */
@@ -549,15 +555,13 @@ template <int32_t I> static void CheckSqrMatchesMultiply()
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         const uint64_t low = get_uint64_random();
         const uint64_t high = get_uint64_random();
-        const uint32_t sign = (uint32_t)(rand() & 1);
-        const fixed_point128<I> x(low, high, sign);
+        const fixed_point128<I> x(low, high);
         const fixed_point128<I> viaMultiply = x * x;
         const fixed_point128<I> viaSqr = sqr(x);
 
-        // operator== compares sign, high and low, so this is a bit exact comparison
-        EXPECT_TRUE(viaSqr == viaMultiply) << "I=" << I << ", low=" << low << ", high=" << high << ", sign=" << sign
+        // operator== compares high and low, so this is a bit exact comparison
+        EXPECT_TRUE(viaSqr == viaMultiply) << "I=" << I << ", low=" << low << ", high=" << high
                                            << ", x*x=" << (std::string)viaMultiply << ", sqr(x)=" << (std::string)viaSqr;
-        EXPECT_FALSE(viaSqr.is_negative()) << "I=" << I << ", a square must never be negative";
     }
 }
 TEST(fixed_point128, SqrMatchesMultiply)
@@ -566,19 +570,43 @@ TEST(fixed_point128, SqrMatchesMultiply)
     CheckSqrMatchesMultiply<10>();
     CheckSqrMatchesMultiply<20>();
     CheckSqrMatchesMultiply<40>();
-    CheckSqrMatchesMultiply<64>();
+    CheckSqrMatchesMultiply<63>();
+}
+/**
+ * @brief A square that stays inside the range is never negative, whatever the sign of the argument.
+ *
+ * The arguments are kept below 2^(I/2) so the product cannot overflow, which is the condition the
+ * claim rests on. Both signs are covered, the negative one being the case the two's complement
+ * correction in square() exists for.
+ */
+TEST(fixed_point128, SqrOfSmallValuesIsPositive)
+{
+    using fp = fixed_point128<32>;
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        // |value| < 2^16, so the square stays below 2^32 and inside the range of fixed_point128<32>
+        const double value = get_double_random(-20, 15);
+        const fp x(value);
+        EXPECT_FALSE(sqr(x).is_negative()) << "value=" << value;
+        EXPECT_FALSE(sqr(-x).is_negative()) << "value=" << -value;
+        EXPECT_TRUE(sqr(x) == sqr(-x)) << "value=" << value;
+        EXPECT_NEAR(static_cast<double>(sqr(x)), value * value, fabs(value * value) * 1e-12) << "value=" << value;
+    }
 }
 TEST(fixed_point128, SqrEdgeCases)
 {
     using fp = fixed_point128<20>;
-    const fp values[] = {fp(0), fp::epsilon(), fp::one(), -fp::one(), fp::half(), fp::pi(), -fp::pi(),
-                         fp::e(), fp::golden_ratio(), fp(0ull, ~0ull, 0), fp(~0ull, ~0ull, 0), fp(~0ull, ~0ull, 1)};
+    using lim = std::numeric_limits<fp>;
+    const fp values[] = {fp(0),  fp::epsilon(), -fp::epsilon(), fp::one(),      -fp::one(),   fp::half(),
+                         fp::pi(), -fp::pi(),   fp::e(),        fp::golden_ratio(), lim::max(), lim::lowest(),
+                         fp(0ull, ~0ull), fp(~0ull, ~0ull)};
     for (const auto& x : values) {
         EXPECT_TRUE(sqr(x) == x * x) << "x=" << (std::string)x;
     }
-    // squaring zero stays zero and keeps a positive sign
+    // squaring zero stays zero, and a square that fits in the range is never negative
     EXPECT_TRUE(sqr(fp(0)) == fp(0));
     EXPECT_FALSE(sqr(-fp::one()).is_negative());
+    EXPECT_TRUE(sqr(-fp::one()) == fp::one());
 }
 TEST(fixed_point128, DivideByFP128)
 {
@@ -1199,7 +1227,7 @@ TEST(fixed_point128, OperatorCString)
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         char buf[128];
 
-        // fixed_point128<40>: I=40, F=88, max_frac_digits=26; integer part bounded to 999999
+        // fixed_point128<40>: I=40, F=87, max_frac_digits=26; integer part bounded to 999999
         genStr(buf, sizeof(buf), 999999u, 10);
         {
             fixed_point128<40> f40 = buf;
@@ -1209,7 +1237,7 @@ TEST(fixed_point128, OperatorCString)
                 << "fixed_point128<40>: input=" << buf << " output=" << out;
         }
 
-        // fixed_point128<1>: I=1, F=127, max_frac_digits=38; integer part is 0 or 1
+        // fixed_point128<1>: I=1, F=126, max_frac_digits=38; integer part is 0 or 1
         genStr(buf, sizeof(buf), 1u, 10);
         {
             fixed_point128<1> f1 = buf;
@@ -1219,14 +1247,14 @@ TEST(fixed_point128, OperatorCString)
                 << "fixed_point128<1>: input=" << buf << " output=" << out;
         }
 
-        // fixed_point128<64>: I=64, F=64, max_frac_digits=19; integer part bounded to 999999
+        // fixed_point128<63>: I=63, F=64, max_frac_digits=19; integer part bounded to 999999
         genStr(buf, sizeof(buf), 999999u, 10);
         {
-            fixed_point128<64> f64 = buf;
-            const char* out = static_cast<char*>(f64);
+            fixed_point128<63> f63 = buf;
+            const char* out = static_cast<char*>(f63);
             size_t cmpLen = std::min(strlen(out), (size_t)MAX_TEST_STR_LEN);
             EXPECT_EQ(strncmp(buf, out, cmpLen), 0)
-                << "fixed_point128<64>: input=" << buf << " output=" << out;
+                << "fixed_point128<63>: input=" << buf << " output=" << out;
         }
     }
 }
@@ -1697,10 +1725,10 @@ TEST(fixed_point128, atanh)
  * Each test below pins down a defect that was fixed.
  ***********************************************************************/
 
-// The sign lives in its own field, so a result that lands on zero while carrying a sign is a
-// distinct bit pattern from a plain zero. Every comparison operator tests the sign field first,
-// so such a value compared unequal to zero and smaller than it. trunc, ceil, round, modf and
-// copysign all produced one.
+// The sign used to live in its own field, which made a zero carrying a sign a distinct bit pattern
+// from a plain zero; every comparison tested the sign field first, so such a value compared unequal
+// to zero and smaller than it, and trunc, ceil, round, modf and copysign all produced one. The two's
+// complement representation cannot express a signed zero at all, which is what these now pin down.
 TEST(fixed_point128, NoNegativeZero)
 {
     typedef fixed_point128<32> fp;
@@ -1728,6 +1756,14 @@ TEST(fixed_point128, NoNegativeZero)
     // floor was already correct, keep it covered
     EXPECT_TRUE(floor(fp(-0.5)) == fp(-1));
     EXPECT_TRUE(trunc(fp(-1.5)) == fp(-1));
+
+    // There is one zero and it is its own negation. operator== compares the raw QWORDs, so these
+    // are bit pattern comparisons rather than value ones.
+    EXPECT_TRUE(-zero == zero);
+    EXPECT_TRUE(zero.is_positive() && !zero.is_negative());
+    EXPECT_TRUE((fp(3) - fp(3)) == zero);
+    EXPECT_FALSE((fp(3) - fp(3)).is_negative());
+    EXPECT_TRUE(fp(-0.5) + fp(0.5) == zero);
 }
 // The conversions truncated the bits that did not fit the mantissa, and a value whose surviving
 // fraction bits happened to be all ones was rounded up even when it was exactly representable,
@@ -1739,13 +1775,14 @@ TEST(fixed_point128, ConversionToFloatingPointIsCorrectlyRounded)
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         const uint64_t l = get_uint64_random();
-        const uint64_t h = get_uint64_random() >> (get_uint32_random() % 40);
-        const uint32_t s = get_uint32_random() & 1;
-        const fp v(l, h, s);
+        // shifted by at least one, so the pair is a magnitude with the sign bit clear
+        const uint64_t h = get_uint64_random() >> (1 + get_uint32_random() % 40);
+        const bool negative = (get_uint32_random() & 1) != 0;
+        const fp v = (negative) ? -fp(l, h) : fp(l, h);
         if (!v)
             continue;
         const double mag = static_cast<double>(uint128_t(l, h));
-        const double ref = s ? -ldexp(mag, -fp::F) : ldexp(mag, -fp::F);
+        const double ref = negative ? -ldexp(mag, -fp::F) : ldexp(mag, -fp::F);
         EXPECT_EQ(static_cast<double>(v), ref) << "low=" << l << ", high=" << h;
         EXPECT_EQ(static_cast<float>(v), static_cast<float>(ref)) << "low=" << l << ", high=" << h;
     }
@@ -1759,8 +1796,8 @@ TEST(fixed_point128, ConversionToFloatingPointEdgeCases)
     EXPECT_EQ(static_cast<float>(exact_flt), 16777215.0f / 8388608.0f);
 
     // the same trap one mantissa wider, for double
-    typedef fixed_point128<64> fp64;
-    const fp64 exact_dbl = fp64(0x1FFFFFFFFFFFFFull) / fp64(0x10000000000000ull);
+    typedef fixed_point128<63> fp63;
+    const fp63 exact_dbl = fp63(0x1FFFFFFFFFFFFFull) / fp63(0x10000000000000ull);
     EXPECT_LT(static_cast<double>(exact_dbl), 2.0);
 
     // powers of two convert exactly in both directions
@@ -1773,10 +1810,13 @@ TEST(fixed_point128, ConversionToFloatingPointEdgeCases)
         EXPECT_EQ(static_cast<double>(v), ::pow(2.0, e)) << "e=" << e;
         EXPECT_EQ(static_cast<float>(v), static_cast<float>(::pow(2.0, e))) << "e=" << e;
     }
-    // the smallest value of the widest fraction is a denormal float, it must not become zero
-    const fixed_point128<1> tiny(1, 0, 0);
+    // The widest fraction is 126 bits, so its last place is 2^-126 - exactly the smallest normal
+    // float. Nothing this type can hold goes denormal, and nothing must become zero either.
+    const fixed_point128<1> tiny(1, 0);
     EXPECT_GT(static_cast<double>(tiny), 0.0);
     EXPECT_GT(static_cast<float>(tiny), 0.0f);
+    EXPECT_EQ(static_cast<float>(tiny), ::ldexpf(1.0f, -126));
+    EXPECT_EQ(static_cast<float>(-tiny), -::ldexpf(1.0f, -126));
 }
 // div_64bit shortcuts a numerator smaller than the divisor and returns without writing the
 // quotient, so dividing by a scalar left the value completely unchanged instead of producing zero.
@@ -1845,6 +1885,213 @@ TEST(fixed_point128, ConstructorFromStringEdgeCases)
     EXPECT_TRUE(fp("+2.5") == fp(2.5));
     const char high_byte[] = {'1', '2', static_cast<char>(0xB5), 0};
     EXPECT_TRUE(fp(high_byte) == fp(12));
+}
+
+/**********************************************************************
+ * Two's complement representation
+ *
+ * The value is a 128 bit two's complement integer scaled by 2^-F, with the sign in the MSB of the
+ * upper QWORD. These pin down what that costs and what it guarantees.
+ ***********************************************************************/
+
+/// @brief The raw constructor and get_components read the same 128 bits the object stores.
+template <int32_t I> static void CheckRawRepresentation()
+{
+    using fp = fixed_point128<I>;
+
+    // 1.0 is a single bit at the radix point, and its negation is the two's complement of that
+    const fp one = fp::one();
+    uint64_t low = 0, high = 0;
+    one.get_components(low, high);
+    EXPECT_EQ(low, 0ull) << "I=" << I;
+    EXPECT_EQ(high, 1ull << (fp::F - 64)) << "I=" << I;
+
+    (-one).get_components(low, high);
+    EXPECT_EQ(low, 0ull) << "I=" << I;
+    EXPECT_EQ(high, 0ull - (1ull << (fp::F - 64))) << "I=" << I;
+    EXPECT_TRUE(fp(low, high) == -one) << "I=" << I;
+
+    // a value round trips through its components
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < 100; ++i) {
+        const fp x(get_uint64_random(), get_uint64_random());
+        uint64_t l = 0, h = 0;
+        x.get_components(l, h);
+        EXPECT_TRUE(fp(l, h) == x) << "I=" << I;
+        // the sign of the value is the top bit of the upper QWORD, nothing else
+        EXPECT_EQ(x.is_negative(), (h >> 63) == 1) << "I=" << I;
+        EXPECT_NE(x.is_negative(), x.is_positive()) << "I=" << I;
+    }
+}
+TEST(fixed_point128, RawRepresentation)
+{
+    CheckRawRepresentation<1>();
+    CheckRawRepresentation<20>();
+    CheckRawRepresentation<32>();
+    CheckRawRepresentation<63>();
+}
+/// @brief The range is [-2^I, 2^I - epsilon], and it wraps at both ends.
+template <int32_t I> static void CheckRangeIsAsymmetric()
+{
+    using fp = fixed_point128<I>;
+    using lim = std::numeric_limits<fp>;
+
+    EXPECT_DOUBLE_EQ(static_cast<double>(lim::lowest()), -::ldexp(1.0, I)) << "I=" << I;
+    EXPECT_NEAR(static_cast<double>(lim::max()), ::ldexp(1.0, I), ::ldexp(1.0, I - 40)) << "I=" << I;
+    // max() is one step short of the magnitude of lowest()
+    EXPECT_TRUE(lim::lowest() + lim::max() == -lim::epsilon()) << "I=" << I;
+
+    // lowest() has no positive counterpart, so negating it and taking its magnitude both wrap
+    EXPECT_TRUE(-lim::lowest() == lim::lowest()) << "I=" << I;
+    EXPECT_TRUE(fabs(lim::lowest()) == lim::lowest()) << "I=" << I;
+    EXPECT_TRUE(lim::lowest().is_negative()) << "I=" << I;
+
+    // the ends of the range wrap into each other, the way the builtin integer types do
+    EXPECT_TRUE(lim::max() + lim::epsilon() == lim::lowest()) << "I=" << I;
+    EXPECT_TRUE(lim::lowest() - lim::epsilon() == lim::max()) << "I=" << I;
+
+    // and they compare in the right order
+    EXPECT_TRUE(lim::lowest() < fp(-1) && fp(-1) < fp(0) && fp(0) < fp(1) && fp(1) < lim::max()) << "I=" << I;
+    EXPECT_TRUE(lim::lowest() < lim::max()) << "I=" << I;
+}
+TEST(fixed_point128, RangeIsAsymmetric)
+{
+    CheckRangeIsAsymmetric<1>();
+    CheckRangeIsAsymmetric<16>();
+    CheckRangeIsAsymmetric<32>();
+    CheckRangeIsAsymmetric<63>();
+}
+// The multiply and the divide both work on magnitudes and put the sign back, which is the part of
+// the representation with the most room to get a sign wrong. Every combination is checked against
+// the double reference, and the identity x * -y == -(x * y) has to hold exactly.
+TEST(fixed_point128, SignedMultiplyAndDivide)
+{
+    typedef fixed_point128<32> fp;
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const double a = get_double_random(-20, 10);
+        const double b = get_double_random(-20, 10);
+        if (b == 0)
+            continue;
+
+        const fp fa(a), fb(b);
+        EXPECT_TRUE(fa * -fb == -(fa * fb)) << "a=" << a << ", b=" << b;
+        EXPECT_TRUE(-fa * fb == -(fa * fb)) << "a=" << a << ", b=" << b;
+        EXPECT_TRUE(-fa * -fb == fa * fb) << "a=" << a << ", b=" << b;
+        EXPECT_DOUBLE_EQ(static_cast<double>(-fa * fb), -a * b) << "a=" << a << ", b=" << b;
+
+        EXPECT_TRUE(fa / -fb == -(fa / fb)) << "a=" << a << ", b=" << b;
+        EXPECT_TRUE(-fa / -fb == fa / fb) << "a=" << a << ", b=" << b;
+        const double quotient = a / b;
+        if (fabs(quotient) < 1e6 && fabs(1.0 / b) < 1e6) {
+            EXPECT_NEAR(static_cast<double>(-fa / fb), -quotient, FixedPointDivisionTolerance<32>(quotient))
+                << "a=" << a << ", b=" << b;
+        }
+
+        // the integer overloads take the same path with the sign handled separately
+        const int32_t n = (abs(get_int32_random()) % 1000) + 1;
+        EXPECT_TRUE(fa * -n == -(fa * n)) << "a=" << a << ", n=" << n;
+        EXPECT_TRUE(-fa / n == -(fa / n)) << "a=" << a << ", n=" << n;
+        EXPECT_TRUE(fa / -n == -(fa / n)) << "a=" << a << ", n=" << n;
+    }
+}
+// lowest() is the one numerator whose magnitude is 2^127, which reads as a negative value when it
+// is held in the type. The division has a path for it, and this is what makes sure it is taken.
+TEST(fixed_point128, DivideTheMostNegativeValue)
+{
+    typedef fixed_point128<32> fp;
+    using lim = std::numeric_limits<fp>;
+    const double scale = ::ldexp(1.0, 32);  // 2^I, the magnitude of lowest()
+
+    // a power of two divisor, which is turned into a shift
+    EXPECT_DOUBLE_EQ(static_cast<double>(lim::lowest() / fp(4)), -scale / 4);
+    EXPECT_DOUBLE_EQ(static_cast<double>(lim::lowest() / fp(-4)), scale / 4);
+    // an integer divisor, which goes through div_64bit
+    EXPECT_NEAR(static_cast<double>(lim::lowest() / fp(3)), -scale / 3, 1e-3);
+    EXPECT_NEAR(static_cast<double>(lim::lowest() / fp(-3)), scale / 3, 1e-3);
+    // neither of those, which is the case that cannot use the reciprocal
+    EXPECT_NEAR(static_cast<double>(lim::lowest() / fp(2.5)), -scale / 2.5, 1e-3);
+    EXPECT_NEAR(static_cast<double>(lim::lowest() / fp(-2.5)), scale / 2.5, 1e-3);
+    // and as a divisor, where its magnitude is a power of two
+    EXPECT_DOUBLE_EQ(static_cast<double>(fp(1) / lim::lowest()), -1.0 / scale);
+}
+// Shifting right is arithmetic: the sign bit is replicated, so a negative value stays negative and
+// the shift keeps dividing by a power of two.
+TEST(fixed_point128, ArithmeticShiftRight)
+{
+    typedef fixed_point128<32> fp;
+
+    EXPECT_DOUBLE_EQ(static_cast<double>(fp(-8) >> 1), -4.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fp(-8) >> 3), -1.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fp(-1) >> 1), -0.5);
+    EXPECT_TRUE((fp(-8) >> 2).is_negative());
+
+    // The shift rounds to nearest, so a value shifted past its last place lands on zero rather than
+    // on the sign bits it is filled with. Only a value whose leading one survives the shift can
+    // round to the last place, which is what the second pair below does.
+    EXPECT_TRUE((fp(-8) >> 127) == fp(0));
+    EXPECT_TRUE((fp(8) >> 127) == fp(0));
+    EXPECT_TRUE((std::numeric_limits<fp>::lowest() >> 127) == -std::numeric_limits<fp>::epsilon());
+    EXPECT_TRUE((std::numeric_limits<fp>::max() >> 127) == std::numeric_limits<fp>::epsilon());
+
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const double value = get_double_random(-20, 10);
+        const fp x(value);
+        for (int32_t shift = 1; shift <= 8; ++shift) {
+            EXPECT_NEAR(static_cast<double>(x >> shift), value / ::pow(2.0, shift), fabs(value) * 1e-15)
+                << "value=" << value << ", shift=" << shift;
+            EXPECT_EQ((x >> shift).is_negative(), value < 0 && (x >> shift) != fp(0)) << "value=" << value;
+        }
+    }
+}
+
+/**
+ * @brief The instantiations that are too narrow for a constant or a function reject it at compile
+ *        time, through a static_assert in the body of each one.
+ *
+ * A violation is a compile error, so it cannot be exercised from here. What this pins down is the
+ * other half of the claim - that at exactly the documented minimum the value is representable and
+ * the function works - which is what makes the bound the right one rather than merely a safe one.
+ */
+TEST(fixed_point128, MinimumIntegerBitsAreTight)
+{
+    // pi and e need 2 integer bits, pi2 needs 3, and each is exact at its minimum
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<2>::pi()), 3.14159265358979323846);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<2>::e()), 2.71828182845904523536);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<3>::pi2()), 6.28318530717958647692);
+
+    // the constants below two are usable in the narrowest instantiation there is
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::half_pi()), 1.57079632679489661923);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::sqrt_2()), 1.41421356237309504880);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::golden_ratio()), 1.61803398874989484820);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::one()), 1.0);
+    EXPECT_DOUBLE_EQ(static_cast<double>(fixed_point128<1>::half()), 0.5);
+
+    // the exponential family at its minimum of 2 integer bits
+    EXPECT_NEAR(static_cast<double>(exp(fixed_point128<2>("0.5"))), 1.6487212707001281, 1e-15);
+    EXPECT_NEAR(static_cast<double>(exp2(fixed_point128<2>("0.5"))), 1.4142135623730951, 1e-15);
+    EXPECT_NEAR(static_cast<double>(expm1(fixed_point128<2>("0.5"))), 0.6487212707001281, 1e-15);
+    EXPECT_NEAR(static_cast<double>(pow(fixed_point128<2>("1.5"), fixed_point128<2>("0.5"))), 1.2247448713915890, 1e-15);
+    EXPECT_NEAR(static_cast<double>(tanh(fixed_point128<2>("0.5"))), 0.4621171572600098, 1e-15);
+
+    // The trigonometric group at its minimum of 4. The tolerance is wide because the bound only
+    // claims the functions work there, not that they are accurate: the Maclaurin series carries
+    // powers of its argument, which leave the range of a narrow instantiation long before the
+    // series has converged, so fixed_point128<4> is good to about three decimal digits. That
+    // predates the two's complement layout and is why the bound is 4 rather than 2.
+    EXPECT_NEAR(static_cast<double>(sin(fixed_point128<4>("0.5"))), 0.4794255386042030, 1e-3);
+    EXPECT_NEAR(static_cast<double>(cos(fixed_point128<4>("0.5"))), 0.8775825618903728, 1e-3);
+    EXPECT_NEAR(static_cast<double>(atan(fixed_point128<4>("0.5"))), 0.4636476090008061, 1e-3);
+    EXPECT_NEAR(static_cast<double>(asin(fixed_point128<4>("0.5"))), 0.5235987755982989, 1e-3);
+    EXPECT_NEAR(static_cast<double>(acos(fixed_point128<4>("0.5"))), 1.0471975511965976, 1e-3);
+
+    // and the functions that carry no bound still work in the narrowest one
+    const fixed_point128<1> x("0.5");
+    EXPECT_NEAR(static_cast<double>(sqrt(x)), 0.7071067811865476, 1e-15);
+    EXPECT_NEAR(static_cast<double>(log(x)), -0.6931471805599453, 1e-15);
+    EXPECT_NEAR(static_cast<double>(reciprocal(fixed_point128<1>("0.75"))), 1.3333333333333333, 1e-15);
+    EXPECT_NEAR(static_cast<double>(asinh(x)), 0.4812118250596035, 1e-15);
 }
 
 // A scalar on the left used to be ambiguous: converting it to fixed_point128 and converting the
@@ -1928,7 +2175,7 @@ TEST(fixed_point128, ConstexprConstructionAndConversion)
     constexpr fp from_i64(static_cast<int64_t>(-7));
     constexpr fp from_u32(static_cast<uint32_t>(7));
     constexpr fp from_i32(static_cast<int32_t>(-7));
-    constexpr fp from_bits(1, 0, 0);  // the low/high/sign constructor
+    constexpr fp from_bits(1, 0);  // the raw low/high constructor
     constexpr fp copied(from_i32);
     constexpr fp assigned = [] { fp a; a = fp(5); return a; }();
 
@@ -1951,8 +2198,13 @@ TEST(fixed_point128, ConstexprConstructionAndConversion)
     static_assert(static_cast<int32_t>(fp::one()) == 1);
     static_assert(fp::half() + fp::half() == fp::one());
     static_assert(fp::epsilon() > fp(0));
-    static_assert(fixed_point128<64>::half() < fixed_point128<64>::one());  // 0.5 lands in the low QWORD
+    static_assert(fixed_point128<63>::half() < fixed_point128<63>::one());  // 0.5 lands in the low QWORD
     static_assert(fixed_point128<1>::half() < fixed_point128<1>::one());
+
+    // the raw constructor spells a negative value with the sign bit of the high QWORD
+    constexpr fp minus_one_from_bits(0, 0xFFFFFFFF80000000ull);  // -2^95 scaled by 2^-95
+    static_assert(minus_one_from_bits == fp(-1));
+    static_assert(minus_one_from_bits.is_negative());
 
     EXPECT_TRUE(fp(opaque(-7)) == from_i32);
     EXPECT_TRUE(fixed_point128<16>(fp(opaque(7))) == fewer_int_bits);
@@ -1996,7 +2248,9 @@ TEST(fixed_point128, ConstexprComparisonsAndQueries)
 
     static_assert(fp(3).is_int());
     static_assert(!(fp(1) >> 1).is_int());
-    static_assert(fixed_point128<64>(3).is_int());  // the I == 64 branch, where there are no fraction bits in high
+    static_assert(fixed_point128<63>(3).is_int());  // the I == 63 branch, where the fraction is exactly the low QWORD
+    static_assert(!(fixed_point128<63>(1) >> 1).is_int());
+    static_assert(fp(-3).is_int() && !fp(-2.5).is_int());  // a negative value has its fraction bits in the same place
     static_assert(fp(0).is_zero());
     static_assert(fp(-1).is_negative() && fp(1).is_positive());
     static_assert(fp(1).get_bit(fp::F) == 1);  // 1.0 has its single set bit at the radix point
@@ -2015,7 +2269,7 @@ TEST(fixed_point128, ConstexprArithmetic)
     static_assert(static_cast<int32_t>(fp(3) - fp(4)) == -1);
     static_assert(static_cast<int32_t>(fp(-3) + fp(-4)) == -7);
     static_assert((fp(3) - fp(3)).is_zero());
-    static_assert((fp(3) - fp(3)).is_positive());         // cancelling to zero must drop the sign
+    static_assert((fp(3) - fp(3)).is_positive());         // cancelling leaves the one and only zero
     static_assert(static_cast<int32_t>(fp(3) + 4) == 7);  // the generic right hand side overload
 
     static_assert(static_cast<int32_t>(fp(6) * fp(7)) == 42);
@@ -2023,7 +2277,7 @@ TEST(fixed_point128, ConstexprArithmetic)
     static_assert(fp::half() * fp(8) == fp(4));
     static_assert(static_cast<int32_t>(fp(6) * static_cast<uint64_t>(7)) == 42);  // the uint64_t specialization
     static_assert(static_cast<int32_t>(fp(-6) * -7) == 42);
-    static_assert(static_cast<int32_t>(fixed_point128<64>(6) * fixed_point128<64>(7)) == 42);  // the F == 64 branch
+    static_assert(static_cast<int32_t>(fixed_point128<63>(6) * fixed_point128<63>(7)) == 42);  // the F == 64 branch
     static_assert(fixed_point128<1>::half() * fixed_point128<1>::half() == fixed_point128<1>::half() >> 1);
 
     // sqr is documented to be bit identical to x * x
@@ -2040,7 +2294,7 @@ TEST(fixed_point128, ConstexprArithmetic)
     EXPECT_TRUE(fp(opaque(3)) - fp(opaque(4)) == fp(-1));
     EXPECT_TRUE(fp(opaque(6)) * fp(opaque(7)) == fp(42));
     EXPECT_TRUE(sqr(fp(opaque(-9))) == fp(81));
-    EXPECT_TRUE(fixed_point128<64>(opaque(6)) * fixed_point128<64>(opaque(7)) == fixed_point128<64>(42));
+    EXPECT_TRUE(fixed_point128<63>(opaque(6)) * fixed_point128<63>(opaque(7)) == fixed_point128<63>(42));
 }
 TEST(fixed_point128, ConstexprMathFunctions)
 {
@@ -2055,14 +2309,16 @@ TEST(fixed_point128, ConstexprMathFunctions)
     static_assert(trunc(-two_and_a_half) == fp(-2));
     static_assert(round(fp::half()) == fp(1));  // the halfway value rounds away from zero
     static_assert(round(-fp::half()) == fp(-1));
-    static_assert(round(fp::half() >> 1).is_positive());  // -0.25 rounds to +0, never to -0
+    static_assert(round(-(fp::half() >> 1)).is_positive());  // -0.25 rounds to +0, never to -0
+    static_assert(round(-(fp::half() >> 1)).is_zero());
     static_assert(copysign(fp(5), fp(-1)).is_negative());
     static_assert(fmin(fp(1), fp(2)) == fp(1));
     static_assert(fmax(fp(1), fp(2)) == fp(2));
     static_assert(fdim(fp(5), fp(3)) == fp(2));
     static_assert(fdim(fp(3), fp(5)) == fp(0));
     static_assert(ilogb(fp(8)) == 3);
-    static_assert(lzcnt128(fp::one()) == 31);  // 1.0 sets bit F, leaving the I-1 integer bits above it clear
+    static_assert(lzcnt128(fp::one()) == 32);  // 1.0 sets bit F, leaving the sign and the I-1 integer bits above it clear
+    static_assert(lzcnt128(-fp::one()) == 32);  // counted on the magnitude, so the sign makes no difference
 
     // modf splits into an integer and a fraction part, both carrying the sign of the input
     constexpr fp modf_int = [] { fp ip; (void)modf(-(fp(5) >> 1), &ip); return ip; }();

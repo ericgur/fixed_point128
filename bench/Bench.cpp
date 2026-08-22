@@ -309,12 +309,66 @@ template <typename Body> [[nodiscard]] int64_t MeasureRate(double time_budget, B
 }
 
 /**
+ * @brief Multiplier on the time budget of the comparison operator benchmark.
+ *
+ * That benchmark is the only one whose loop is dominated by branch mispredictions: it sums four
+ * comparisons of a rotating operand against the middle of the same set, and since BuildArgs() started
+ * producing unpredictable arguments the outcomes are a coin toss. A misprediction bound loop measures
+ * far less repeatably than a throughput bound one, because what it really depends on is the state the
+ * predictor happens to be in.
+ *
+ * Measured over 15 consecutive runs of one binary, pinned, against 0.4G-5G/s benchmarks that hold
+ * still to 0.05%:
+ *
+ * <UL>
+ * <LI>at the ordinary budget: int128_t 5.36% standard deviation, 17.4% spread; uint128_t 2.54% and
+ *     9.0%</LI>
+ * <LI>at four times the budget: int128_t 3.60% and 11.0%; uint128_t 1.41% and 3.6%</LI>
+ * </UL>
+ *
+ * MeasureRate() reports the fastest batch it saw, so a longer budget gives that minimum more batches
+ * to settle into and cuts the run to run variation by about a third. It does not remove it - the
+ * residue is per process predictor state that no amount of sampling inside one process reaches - so
+ * this benchmark stays the noisiest of the set and its small differences should be read with that in
+ * mind.
+ */
+constexpr double BENCH_COMPARISON_TIME_SCALE = 4.0;
+
+/**
  * @brief Number of distinct arguments a timed loop cycles through. Must be a power of two.
  *
- * Sixty four arguments of at most 24 bytes stay inside L1, so cycling through them costs an L1 load
- * per iteration and nothing else.
+ * A timed loop replays this set for the whole of its budget, so the set length is also the period of
+ * every data dependent branch inside the measured code. A branch predictor that can hold a pattern
+ * that long stops mispredicting, and the benchmark then reports the cost of code without the
+ * mispredictions its callers actually pay.
+ *
+ * Sixty four was too short to survive that. Simulated against the rounding branch in operator*=(), a
+ * gshare predictor with eight bits of history learns a 64 argument sequence perfectly; at 1024 it
+ * reaches 64%, which is close enough to the 50% floor that the branch still costs what it should.
+ * 1024 arguments of 16 bytes are 16 KB, comfortably inside a 48 KB L1 data cache, and the loop walks
+ * them sequentially so the hardware prefetcher covers the rest.
  */
-constexpr uint64_t BENCH_ARG_COUNT = 64;
+constexpr uint64_t BENCH_ARG_COUNT = 1024;
+
+/** @brief Seed for the argument perturbations. Fixed, so every run measures the same operands. */
+constexpr uint64_t BENCH_ARG_SEED = 0x243F6A8885A308D3ull;
+
+/**
+ * @brief splitmix64. Deterministic, and well enough distributed for choosing argument perturbations.
+ *
+ * Used only to build the argument sets, never inside a timed loop.
+ *
+ * @param state Generator state, advanced by the call.
+ * @return The next 64 bit value.
+ */
+[[nodiscard]] constexpr uint64_t NextRandom(uint64_t& state) noexcept
+{
+    state += 0x9E3779B97F4A7C15ull;
+    uint64_t z = state;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
 
 /**
  * @brief Fills @p args with values that differ in their low order bits but not in their magnitude.
@@ -335,16 +389,45 @@ constexpr uint64_t BENCH_ARG_COUNT = 64;
  * number of times that depends on it and the results would otherwise stop being comparable with
  * earlier runs.
  *
+ * The perturbation is random rather than an arithmetic progression, which matters more than it
+ * sounds. The rounding step in operator*=() and square() branches on bit F-1 of the product, and for
+ * an evenly spaced set of arguments that bit follows the carry pattern of a linear sequence - a short
+ * repeating shape the predictor gets right every time. With `base + (base >> 16) * i` it was not even
+ * a shape: measured over the 64 argument set this function used to build, the rounding bit of the
+ * multiplication benchmark was **1 for every argument**, so the branch never changed direction at
+ * all. A change that removes that branch could only ever look like a regression.
+ *
+ * The same bound is reached here from a step 2^10 times finer multiplied by a random 16 bit value, so
+ * the arguments span the same range while their low order bits carry no pattern. The rounding bit
+ * then comes out at 50.7% ones with 96% of the transition density of a fair coin.
+ *
  * @tparam T Argument type.
  * @param args Array of BENCH_ARG_COUNT elements to fill.
- * @param base Argument the benchmark would otherwise have used on its own. Becomes args[0].
+ * @param base Argument the benchmark would otherwise have used on its own.
  */
 template <typename T> void BuildArgs(T* args, const T& base)
 {
-    const T step = base >> 16;
+    const T step = base >> 26;
+    uint64_t state = BENCH_ARG_SEED;
     for (uint64_t i = 0; i < BENCH_ARG_COUNT; ++i) {
-        args[i] = base + step * static_cast<uint32_t>(i);
+        args[i] = base + step * static_cast<uint32_t>(NextRandom(state) >> 48);
     }
+}
+
+/**
+ * @brief The centre of the set BuildArgs() produces, for benchmarks that need to split it in half.
+ *
+ * The midpoint of the random multiplier's range, so about half the set compares above it and half
+ * below, without the outcome being a function of the loop counter the way the median of an evenly
+ * spaced set was.
+ *
+ * @tparam T Argument type.
+ * @param base The same base passed to BuildArgs().
+ * @return A value in the middle of the perturbation range.
+ */
+template <typename T> [[nodiscard]] T ArgsMidpoint(const T& base)
+{
+    return base + (base >> 26) * static_cast<uint32_t>(0x8000);
 }
 
 /**
@@ -357,6 +440,14 @@ template <typename T> void BuildArgs(T* args, const T& base)
  * them - and nothing at all in extra instructions.
  *
  * See BuildArgs() for why the loop cycles through a set of arguments rather than reusing one.
+ *
+ * Assigning the returned result is what BenchBinary() had to stop doing, because MSVC widens the
+ * copy of a trivially copyable 128 bit return value to 16 bytes and then stalls on the store
+ * forwarding. Nothing measured here reaches that: every unary function the two integer types have -
+ * sqrt() and the log() family - returns a uint64_t, which is copied with a single store, and the
+ * two fractional types assign their QWORDs one at a time and so never see the wide copy. A unary
+ * function returning uint128_t or int128_t would reintroduce it, and would need the treatment
+ * BenchBinary() documents.
  *
  * @tparam T Operand type.
  * @tparam Func Callable invoked as func(const T&).
@@ -395,28 +486,48 @@ template <typename T, typename Func> void BenchUnary(const char* name, double ti
  * from repeating - see BuildArgs() - and it leaves the right hand side free to be a type that has
  * no arithmetic of its own, such as the uint32_t exponent of the integer pow().
  *
+ * @p op has to apply the operation to the left hand operand in place rather than return the result,
+ * for the reason spelled out on BenchAccumulate(): written as `result = lhs op rhs`, MSVC builds the
+ * operator's return value in a stack temporary with two QWORD stores and then copies it into the
+ * escaped result with a single 16 byte load. That load overlaps both stores and cannot be forwarded,
+ * so it waits for them to reach L1 - about 15 cycles, on every iteration.
+ *
+ * The stall only lands on the types whose copy assignment is the compiler generated one, because
+ * that is the copy MSVC is free to widen to 16 bytes; fixed_point128 and float128 assign their two
+ * QWORDs individually and never see it. Timing `lhs op rhs` therefore charged uint128_t and int128_t
+ * for a stall the fractional types were not paying, which put fixed_point128 ahead of uint128_t on
+ * the 128 bit multiplication - 491M/s against 258M/s, for an operation that is three multiplies
+ * against four plus a shift and a rounding step. In place, the two come out at 494M/s and 1.73G/s,
+ * and clang-cl - which never emitted the wide copy and so always measured the multiply itself -
+ * agrees with both figures.
+ *
+ * Nothing is lost by measuring the compound assignment: the binary operator is defined as `lhs op=
+ * rhs` on a copy of the left operand, and the copy is exactly what the loop makes when it reloads
+ * the next operand into the result.
+ *
  * @tparam T Type of the left hand operand.
  * @tparam U Type of the right hand operand.
- * @tparam Func Callable invoked as func(const T&, const U&).
+ * @tparam Op Callable invoked as op(T& lhs, const U& rhs), which must update lhs in place.
  * @param name Name to print the measurement under.
  * @param time_per_function Time to spend measuring, in seconds.
  * @param left Left hand operand, and the base the rest of the rotating set is derived from.
  * @param right Right hand operand, the same on every iteration.
- * @param func Operation to measure.
+ * @param op Operation to measure.
  */
-template <typename T, typename U, typename Func> void BenchBinary(const char* name, double time_per_function, T left, U right, Func func)
+template <typename T, typename U, typename Op> void BenchBinary(const char* name, double time_per_function, T left, U right, Op op)
 {
-    const int64_t ips = MeasureRate(time_per_function, [left, right, func](uint64_t count) {
+    const int64_t ips = MeasureRate(time_per_function, [left, right, op](uint64_t count) {
         T args[BENCH_ARG_COUNT];
         BuildArgs(args, left);
         U rhs = right;
-        auto result = func(args[0], rhs);
+        T result = args[0];
         Escape(args[0]);
         Escape(rhs);
         Escape(result);
         for (uint64_t i = count; i != 0; --i) {
             Barrier();
-            result = func(args[i & (BENCH_ARG_COUNT - 1)], rhs);
+            result = args[i & (BENCH_ARG_COUNT - 1)];
+            op(result, rhs);
         }
         DoNotOptimize(result);
     });
@@ -542,11 +653,21 @@ template <int32_t I> struct BenchTraits<fixed_point128<I>> {
     [[nodiscard]] static T operandB() noexcept { return T::e(); }
     [[nodiscard]] static T operandC() noexcept { return T::golden_ratio(); }
     [[nodiscard]] static MulType mulA() noexcept { return MulType(fabs(T::pi())); }
-    [[nodiscard]] static MulType mulB() noexcept
-    {
-        srand(0x12345678);
-        return MulType((double)rand() / 1.0101010101010101);
-    }
+
+    /**
+     * @brief Right hand side of the 128 bit multiplication benchmark.
+     *
+     * This used to be `(double)rand() / 1.0101010101010101` after `srand(0x12345678)`, which was
+     * wrong twice over. rand() is not the same sequence on every implementation, so MSVC and Clang
+     * were multiplying by different numbers and their results were not comparable. And whatever the
+     * draw, dividing a value up to RAND_MAX by 1.01 lands far outside the +-256 that
+     * fixed_point128<8> can hold, so the operand saturated to the type maximum: the benchmark was
+     * timing a multiply by 256, and the rounding bit of every product came out 1.
+     *
+     * e has the full 128 bits of the type and sits well inside its range.
+     */
+    [[nodiscard]] static MulType mulB() noexcept { return MulType::e(); }
+
     [[nodiscard]] static IntMulType intMulA() noexcept { return IntMulType::pi(); }
 };
 
@@ -569,11 +690,11 @@ template <> struct BenchTraits<float128> {
     [[nodiscard]] static T operandB() noexcept { return T::e(); }
     [[nodiscard]] static T operandC() noexcept { return T::sqrt_2(); }
     [[nodiscard]] static MulType mulA() noexcept { return fabs(T::pi()); }
-    [[nodiscard]] static MulType mulB() noexcept
-    {
-        srand(0x12345678);
-        return MulType((double)rand() / 1.0101010101010101);
-    }
+
+    /** @brief Right hand side of the multiplication benchmark. See the fixed_point128 mulB() for
+     *         why this is a constant and not a draw from rand(). */
+    [[nodiscard]] static MulType mulB() noexcept { return MulType::e(); }
+
     [[nodiscard]] static IntMulType intMulA() noexcept { return T::pi(); }
 };
 
@@ -596,10 +717,10 @@ template <typename T> void bench_comparison_operators(double time_per_function =
     // side of an unrelated constant and every comparison would take the branch it took last time.
     // Sitting the right hand side inside the set splits the outcomes evenly, which is what a
     // comparison in real code does.
-    const int64_t ips = MeasureRate(time_per_function, [](uint64_t count) {
+    const int64_t ips = MeasureRate(time_per_function * BENCH_COMPARISON_TIME_SCALE, [](uint64_t count) {
         T args[BENCH_ARG_COUNT];
         BuildArgs(args, Traits::operandB());
-        T f2 = args[BENCH_ARG_COUNT / 2];
+        T f2 = ArgsMidpoint(Traits::operandB());
         int64_t matches = 0;
         Escape(args[0]);
         Escape(f2);
@@ -637,7 +758,7 @@ template <typename T> void bench_multiplication(double time_per_function = 1.0)
     using IntMulType = typename Traits::IntMulType;
 
     BenchBinary<MulType, MulType>("Multiplication by 128-bit value", time_per_function, Traits::mulA(), Traits::mulB(),
-                                  [](const MulType& lhs, const MulType& rhs) { return lhs * rhs; });
+                                  [](MulType& lhs, const MulType& rhs) { lhs *= rhs; });
 
     // The result is escaped rather than accumulated. The accumulating form (f10 = f10 * int_val) was
     // degenerate: the low QWORD of the product does not depend on the high QWORD, so with nothing
@@ -645,7 +766,7 @@ template <typename T> void bench_multiplication(double time_per_function = 1.0)
     // operation into a single 64 bit mulx and Clang went further, vectorizing the remaining chain
     // 4 wide - neither was timing a 128 bit multiply.
     BenchBinary<IntMulType, uint32_t>("Multiplication by int32_t", time_per_function, Traits::intMulA(), 123456789u,
-                                      [](const IntMulType& lhs, const uint32_t& rhs) { return lhs * rhs; });
+                                      [](IntMulType& lhs, const uint32_t& rhs) { lhs *= rhs; });
 }
 
 template <typename T> void bench_division(double time_per_function = 1.0)
@@ -653,17 +774,25 @@ template <typename T> void bench_division(double time_per_function = 1.0)
     using Traits = BenchTraits<T>;
 
     BenchBinary<T, double>("Division by double (exponent of 2)", time_per_function, Traits::operandA(), 64.0,
-                           [](const T& lhs, const double& rhs) { return lhs / rhs; });
+                           [](T& lhs, const double& rhs) { lhs /= rhs; });
 
-    BenchBinary<T, int64_t>("Division by int64", time_per_function, Traits::operandA(), 5ll, [](const T& lhs, const int64_t& rhs) { return lhs / rhs; });
+    BenchBinary<T, int64_t>("Division by int64", time_per_function, Traits::operandA(), 5ll, [](T& lhs, const int64_t& rhs) { lhs /= rhs; });
 
-    BenchBinary<T, T>("Division by 128-bit integer value", time_per_function, Traits::operandA(), T(5), [](const T& lhs, const T& rhs) { return lhs / rhs; });
+    BenchBinary<T, T>("Division by 128-bit integer value", time_per_function, Traits::operandA(), T(5), [](T& lhs, const T& rhs) { lhs /= rhs; });
 
     // Only meaningful where the divisor can hold a fraction. For the integer types this loop would
     // be the previous one with a different divisor.
     if constexpr (Traits::isFractional) {
         BenchBinary<T, T>("Division by 128-bit fractional value", time_per_function, Traits::operandA(), Traits::operandB(),
-                          [](const T& lhs, const T& rhs) { return lhs / rhs; });
+                          [](T& lhs, const T& rhs) { lhs /= rhs; });
+    }
+    // The divisor above is small enough to fit in one QWORD, which sends every type down the 64 bit
+    // path. Only a divisor past 2^64 reaches div_128bit, and for the integer types nothing else
+    // measured here does - so without this row their long division had no coverage at all. The
+    // fractional types reach it through the fractional divisor above.
+    else {
+        BenchBinary<T, T>("Division by 128-bit value above 2^64", time_per_function, Traits::operandA(), Traits::operandB(),
+                          [](T& lhs, const T& rhs) { lhs /= rhs; });
     }
 }
 
@@ -712,12 +841,12 @@ template <typename T> void bench_pow(double time_per_function = 1.0)
 
     if constexpr (Traits::hasTranscendental) {
         BenchBinary<T, T>("pow", time_per_function, Traits::operandB(), Traits::operandC(),
-                          [](const T& base, const T& exponent) { return pow(base, exponent); });
+                          [](T& base, const T& exponent) { base = pow(base, exponent); });
     } else {
         // A small base keeps the result inside 128 bits; the cost of the binary exponentiation
         // depends on the exponent, not on the base.
         BenchBinary<T, uint32_t>("pow (integer exponent)", time_per_function, T(7), 5u,
-                                 [](const T& base, const uint32_t& exponent) { return pow(base, exponent); });
+                                 [](T& base, const uint32_t& exponent) { base = pow(base, exponent); });
     }
 }
 
@@ -1274,7 +1403,7 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     fp from_i32((int32_t)1);           // int32_t
     fp from_cstr("1.5");               // const char*
     fp from_str(std::string("1.5"));   // std::string
-    fp from_raw(0ull, 1ull, 0u);       // raw (low, high, sign)
+    fp from_raw(0ull, 1ull);           // raw (low, high)
 
     // cross-template copy constructor (I2 = 10)
     fixed_point128<10> f10(1.5);
@@ -1298,7 +1427,11 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)(bool)from_double;
 
     // --- Arithmetic compound-assignment operators ---
-    fp a = fp::e();
+    // The operands are kept small enough that nothing below leaves the range of any instantiation
+    // this is called with, fixed_point128<1> included, whose range stops at 2. An overflowed value
+    // lands wherever the wrap takes it, possibly negative, and log() rejects a non positive
+    // argument by throwing - which is a crash rather than a measurement.
+    fp a = fp::half();
     fp b = fp::golden_ratio();
     fp c;
 
@@ -1377,18 +1510,24 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)a.get_exponent();
 
     // --- Static constant accessors ---
-    (void)fp::pi();
-    (void)fp::pi2();
+    // pi, pi2 and e do not fit in the smallest instantiations and say so with a static_assert
+    if constexpr (I >= 2) {
+        (void)fp::pi();
+        (void)fp::e();
+    }
+    if constexpr (I >= 3) {
+        (void)fp::pi2();
+    }
     (void)fp::half_pi();
     (void)fp::golden_ratio();
-    (void)fp::e();
     (void)fp::sqrt_2();
     (void)fp::one();
     (void)fp::half();
     (void)fp::epsilon();
 
     // --- Friend math functions (CRT-style) ---
-    fp val = fp::e();
+    // below one, so log1p() and exp() stay in range as well - see the note at 'a' above
+    fp val = fp::half();
     fp half_val = fp::half();
 
     (void)fabs(val);
@@ -1407,10 +1546,13 @@ template <int32_t I> FP128_NO_INLINE void force_instantiation()
     (void)hypot(val, val);
     (void)sqr(val);
     (void)sqrt(val);
-    (void)exp(val);
-    (void)exp2(val);
-    (void)expm1(val);
-    (void)pow(val, val);
+    // the exponential family multiplies by e(), which needs 2 integer bits
+    if constexpr (I >= 2) {
+        (void)exp(val);
+        (void)exp2(val);
+        (void)expm1(val);
+        (void)pow(val, val);
+    }
     (void)log(val);
     (void)log2(val);
     (void)log10(val);
@@ -1510,10 +1652,10 @@ int main(int argc, char* argv[])
         types.selectAll();
     }
 
-    // Force instantiation of all public methods and friend functions for I=1, 40 and 64.
+    // Force instantiation of all public methods and friend functions for I=1, 40 and 63.
     force_instantiation<1>();
     force_instantiation<40>();
-    force_instantiation<64>();
+    force_instantiation<63>();
 
     bench(types);
 

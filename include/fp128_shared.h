@@ -71,7 +71,7 @@
  *  @{
  */
 #define FP128_VERSION_MAJOR 0   ///< Breaking changes to the public interface.
-#define FP128_VERSION_MINOR 10  ///< Backwards compatible additions.
+#define FP128_VERSION_MINOR 11  ///< Backwards compatible additions.
 #define FP128_VERSION_PATCH 0   ///< Fixes that change neither.
 #define FP128_VERSION_BUILD 0   ///< Rebuild of an unchanged source tree.
 
@@ -108,6 +108,14 @@
 #define FP128_ARM64
 #endif
 
+// Detect x86-64 under a GCC style frontend. Most of the x86 intrinsics MSVC provides have a
+// __builtin equivalent there, so this is only needed where the operation exists as an instruction
+// but neither as an intrinsic nor as something the compiler will produce on its own - which today
+// means udiv128() and the DIV instruction. MSVC never takes these paths; it has the intrinsic.
+#if defined(FP128_CLANG) && (defined(__x86_64__) || defined(_M_X64))
+#define FP128_X64
+#endif
+
 // Set to TRUE to disable function inlining - useful for profiling a specific function. Default 0
 #ifndef FP128_DISABLE_INLINE
 #define FP128_DISABLE_INLINE 0
@@ -141,10 +149,15 @@
  * forwarded to. Forcing the wrapper open does not force the callee open with it, so the code that
  * does the actual work still gets outlined when the optimizer thinks that is better.
  *
- * The by value shift operators of float128 and fixed_point128 are the exception, and say why at
- * their definitions: what they forward to is large enough that expanding the wrapper crowds out the
- * arithmetic around it. Treat any addition to the forced set the same way - measure it, and record
- * the number if the answer is surprising.
+ * Two places depart from that rule, and both say why at their definitions. The by value shift
+ * operators of float128 and fixed_point128 are forwarders that are nonetheless *not* forced: what
+ * they forward to is large enough that expanding the wrapper crowds out the arithmetic around it.
+ * float128::get_components() and float128::norm_fraction_sticky() go the other way - they have
+ * bodies of their own and are forced anyway, because the callers' exponent arithmetic only folds
+ * once they are open, and Clang would not open them on its own.
+ *
+ * Treat any addition to the forced set the same way - measure it, and record the number if the
+ * answer is surprising.
  */
 #if FP128_DISABLE_INLINE != 0
 #define FP128_INLINE       FP128_NO_INLINE
@@ -166,27 +179,30 @@ static constexpr bool FP128_CPP_STYLE_MODULO = true;  ///< Use C++ modulo semant
  * @def FP128_USE_RECIPROCAL_FOR_DIVISION
  * @brief Selects how fixed_point128 divides by a value that is neither a power of two nor an integer.
  *
- * Non zero (the default) computes <tt>a / b</tt> as <tt>a * reciprocal(b)</tt>, where reciprocal()
- * refines a double precision estimate with Newton iterations. Zero selects the hand written long
+ * Non zero computes <tt>a / b</tt> as <tt>a * reciprocal(b)</tt>, where reciprocal() refines a double
+ * precision estimate with Newton iterations. Zero (the default) selects the hand written long
  * division instead. Only the general case is affected either way: a power of two divisor is still
  * turned into a shift, and an integral divisor that fits in 64 bit still goes through div_64bit().
  *
- * Override it on the command line (<tt>/DFP128_USE_RECIPROCAL_FOR_DIVISION=0</tt> or
- * <tt>-DFP128_USE_RECIPROCAL_FOR_DIVISION=0</tt>) or by defining it before including any header of
+ * Override it on the command line (<tt>/DFP128_USE_RECIPROCAL_FOR_DIVISION=1</tt> or
+ * <tt>-DFP128_USE_RECIPROCAL_FOR_DIVISION=1</tt>) or by defining it before including any header of
  * this library, exactly as with FP128_DISABLE_INLINE.
  *
- * The default is non zero because the reciprocal is the faster of the two. Measured over a table of
- * 256 random divisors, it runs at 1.4x to 1.7x the rate of the long division for fixed_point128<10>
- * and 1.8x for fixed_point128<32>, on both MSVC and clang-cl. What it buys with that is accuracy:
- * the two algorithms disagree on roughly 40% of those divisors, by up to 1.7 ulp, and comparing the
- * residual <tt>|a - q * b|</tt> of each puts the long division closer to the exact quotient every
- * single time it differs. Divide with this off when the last two bits have to be right.
+ * The default used to be non zero, and the reason was speed: against the old 32 bit limb long
+ * division the reciprocal ran 1.4x to 1.7x faster, which was worth its cost in accuracy. div_128bit()
+ * removed that trade. Measured over a table of 256 random divisors on fixed_point128<10>, the long
+ * division now runs at 2.0x (MSVC) and 2.7x (clang-cl) the rate of the reciprocal, so the default is
+ * zero and the accuracy comes for free: the two algorithms disagree on roughly 40% of those divisors,
+ * by up to 1.7 ulp, and comparing the residual <tt>|a - q * b|</tt> of each puts the long division
+ * closer to the exact quotient every single time it differs. Set this to non zero only to reproduce
+ * the older behaviour.
  *
  * The flag is deliberately specific to fixed_point128. The other three types are not built the same
  * way, and measuring them says to leave them alone:
  * <UL>
- * <LI>float128 loses on both counts - multiplying by a reciprocal runs at 0.47x (MSVC) to 0.55x
- *     (clang-cl) of its long division, and is the less accurate of the two by the same residual test.
+ * <LI>float128 loses on both counts - multiplying by a reciprocal ran at 0.47x (MSVC) to 0.55x
+ *     (clang-cl) of its long division before div_128bit, and further behind since, and it is the
+ *     less accurate of the two by the same residual test.
  *     reciprocal() is the slower half: it normalizes its operand and then runs two or three float128
  *     multiplications, each of which renormalizes and rounds, where the fixed_point128 equivalent
  *     multiplies raw 128 bit words. So float128::operator/=() always divides.</LI>
@@ -208,7 +224,7 @@ static constexpr bool FP128_CPP_STYLE_MODULO = true;  ///< Use C++ modulo semant
  *       and produce identical results under either setting of this flag.
  */
 #ifndef FP128_USE_RECIPROCAL_FOR_DIVISION
-#define FP128_USE_RECIPROCAL_FOR_DIVISION 1
+#define FP128_USE_RECIPROCAL_FOR_DIVISION 0
 #endif
 
 /***********************************************************************************
@@ -498,15 +514,28 @@ FP128_FORCE_INLINE constexpr uint32_t udiv64(uint64_t dividend, uint32_t divisor
 }
 
 /**
- * @brief Portable 128-bit by 64-bit unsigned division (GCC/Clang fallback).
+ * @brief 128-bit by 64-bit unsigned division (GCC/Clang counterpart of the _udiv128 intrinsic).
  *
- * @note AArch64 has no 128/64 bit divide instruction (UDIV is at most 64/64), so there is no
- *       assembly variant of this function. The __uint128_t expression below lowers to a call to
- *       the compiler runtime helper (__udivti3 / __umodti3) which is faster than any short
- *       hand written long division. Callers on ARM64 should prefer the reciprocal based
- *       division path (see FP128_USE_RECIPROCAL_FOR_DIVISION) built on mulx_u64.
+ * @warning The quotient must fit in 64 bits, which means @p hi_dividend must be smaller than
+ *          @p divisor. This is the same precondition the MSVC _udiv128 intrinsic carries, and
+ *          for the same reason: both compile to the x86 DIV instruction, which raises #DE rather
+ *          than truncating. Both callers satisfy it - div_128bit() normalizes its divisor so the
+ *          high word it passes is always the smaller, and div_64bit() passes the remainder of a
+ *          previous division by the same divisor.
  *
- * @param hi_dividend Upper 64 bits of the 128-bit dividend.
+ * @note On x86-64 this is one DIV instruction, written as assembly because there is no builtin
+ *       for it and the portable expression below does not produce it: Clang cannot prove the
+ *       quotient fits, so it lowers `__uint128_t / uint64_t` to a __udivti3 call - a full software
+ *       128/128 division. That call cost 2.8x on `uint128_t` division against MSVC, which has the
+ *       intrinsic.
+ *
+ * @note AArch64 has no 128/64 bit divide instruction (UDIV is at most 64/64), so it keeps the
+ *       portable path, where the __uint128_t expression lowers to the compiler runtime helper
+ *       (__udivti3 / __umodti3) - still faster than any short hand written long division. Callers
+ *       on ARM64 should prefer the reciprocal based division path
+ *       (see FP128_USE_RECIPROCAL_FOR_DIVISION) built on mulx_u64.
+ *
+ * @param hi_dividend Upper 64 bits of the 128-bit dividend. Must be smaller than @p divisor.
  * @param lo_dividend Lower 64 bits of the 128-bit dividend.
  * @param divisor 64-bit divisor.
  * @param remainder Pointer to receive the 64-bit remainder (may be nullptr).
@@ -514,6 +543,23 @@ FP128_FORCE_INLINE constexpr uint32_t udiv64(uint64_t dividend, uint32_t divisor
  */
 FP128_FORCE_INLINE constexpr uint64_t udiv128(uint64_t hi_dividend, uint64_t lo_dividend, uint64_t divisor, uint64_t* remainder)
 {
+#if defined(FP128_X64)
+    // Inline assembly is not allowed during constant evaluation, use the portable path instead.
+    if (!std::is_constant_evaluated()) {
+        uint64_t quot = 0, rem = 0;
+        // DIV divides RDX:RAX by its operand, leaving the quotient in RAX and the remainder in
+        // RDX. The divisor is constrained to a register rather than "rm" for two reasons: it
+        // cannot then land in either of those - the two tied operands already hold RAX and RDX,
+        // so the allocator has to pick a third register - and a register operand carries its own
+        // width, which lets the mnemonic go without the "q" suffix and so assemble under either
+        // inline assembly dialect. DIV leaves the flags undefined, hence the "cc" clobber.
+        __asm__("div %[d]" : "=a"(quot), "=d"(rem) : [d] "r"(divisor), "a"(lo_dividend), "d"(hi_dividend) : "cc");
+        if (remainder) {
+            *remainder = rem;
+        }
+        return quot;
+    }
+#endif
     __uint128_t dividend = (static_cast<__uint128_t>(hi_dividend) << 64) | lo_dividend;
     uint64_t quot = static_cast<uint64_t>(dividend / divisor);
     if (remainder) {
@@ -971,29 +1017,48 @@ FP128_INLINE constexpr void shift_left128_inplace(uint64_t& l, uint64_t& h, int 
  * for the whole of the surrounding routine even with __forceinline, which costs more than this
  * whole operation is worth: written as a function it made fixed_point128<10>::log2() 40% slower.
  *
- * The two expansions compute the same thing and differ only in how they compile. Clang turns the
- * carry propagating form into four instructions and the branch into nine, and is 40% faster on
- * log2() with it - that function reaches this code once for every bit of its result, so a third of
- * its inner loop was the rounding. MSVC is the other way round by about 10%: it compiles the branch
- * into a conditional move and schedules that better than an unconditional add sitting on the
- * dependency chain.
+ * The rounding bit is bit F-1 of a product, which is as good as random for every caller that
+ * multiplies data rather than constants. A branch on it therefore mispredicts about half the time,
+ * and this macro sits in operator*=() and square(), the two hottest routines in the library. The
+ * carry propagating form has no branch to mispredict: BT sets the carry flag and two ADCs consume
+ * it, four instructions of fixed latency.
  *
- * Both figures come from the benchmark cycling through a set of arguments, so neither is an
- * artifact of a branch the predictor had memorized. Timed on a single repeated argument the two
- * spellings compare the other way round on both compilers, which is what the rotating arguments in
- * bench/Bench.cpp are there to avoid.
+ * Both compilers want that form, and MSVC wants it far more than Clang does. MSVC used to be given
+ * the branch instead, on the strength of a log2() measurement in which it if converted the branch
+ * into a conditional move; that if conversion is not something it does reliably, and in the
+ * Mandelbrot escape-time loop of a real renderer it emits a real branch, three per iteration on three
+ * unpredictable bits. There the change is worth 1.9x - a 640x360 frame at 2048 iterations goes from
+ * 625ms to 324ms, taking MSVC from roughly half of clang-cl's speed to level with it.
+ *
+ * Measured on an i9-12900K, one core, fastest of three runs, over the 32 fixed_point128<10>
+ * benchmarks in bench/Bench.cpp. Ratios are the carry propagating form against the branch:
+ *
+ * |                            | MSVC P-core | MSVC E-core | Clang P-core |
+ * | -------------------------- | ----------- | ----------- | ------------ |
+ * | median over all 32         | +52%        | +43%        | +6.7%        |
+ * | exp2 / exp / pow / expm1   | 1.87-1.81x  | 1.77-1.74x  | 1.17-1.11x   |
+ * | atan / asin / acos         | 1.78-1.67x  | 1.61-1.40x  | 1.09-1.00x   |
+ * | tan / sin / cos            | 1.63-1.56x  | 1.50-1.43x  | 1.03-1.01x   |
+ * | log2 / log                 | 1.54-1.55x  | 1.62-1.63x  | 1.15-1.14x   |
+ * | sqrt, reciprocal           | -2%, -3%    | 0%, +20%    | +1%, +3%     |
+ * | isolated operator*=() loop | -7%         | 2.01x       | -4%          |
+ *
+ * The transcendentals gain most because they reach this code once per bit of their result, so the
+ * rounding was a large part of their inner loop. The isolated multiplication loop is the one case
+ * that regresses on a P-core: accumulating a single product per iteration leaves the core enough
+ * slack to hide the branch, which no caller that chains multiplications gives it. The same loop is
+ * twice as fast on an E-core, whose narrower recovery pays more for a misprediction than it saves.
+ *
+ * A warning for anyone re-measuring this. Until 2026-08-21 bench/Bench.cpp built its operands as an
+ * arithmetic progression and multiplied them by an operand that silently saturated to the type
+ * maximum, which made the rounding bit **1 for every argument in the set** - a branch that never
+ * changes direction is free, and the benchmark reported this change as a 6% regression. Randomising
+ * the operands costs the branch build 45-48% on the transcendentals and the carry build 1-3%; that
+ * asymmetry is the check that the benchmark can see a misprediction at all. bench_mandelbrot() still
+ * shows a small loss because it iterates one bounded orbit with no escape test, the shape MSVC does
+ * if convert - it is not a substitute for measuring a real render.
  */
-#if defined(FP128_CLANG)
 #define FP128_ADD_ROUND_BIT(l, h, round_up) ((h) += addcarryx_u64(0, (l), static_cast<uint64_t>(round_up), &(l)))
-#else
-#define FP128_ADD_ROUND_BIT(l, h, round_up)      \
-    do {                                         \
-        if (round_up) {                          \
-            ++(l); /* wraps around to zero */    \
-            (h) += (l) == 0;                     \
-        }                                        \
-    } while (0)
-#endif
 /**
  * @brief Right shift a 128 bit integer (inplace) with rounding.
  * Handles any positive shift value.
@@ -1046,6 +1111,65 @@ FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe(uint64_t& l, uint6
     }
 }
 /**
+ * @brief Arithmetic right shift of a 128 bit two's complement value (inplace) with rounding.
+ *
+ * The signed counterpart of shift_right128_inplace_safe: the vacated top bits are filled with
+ * copies of the sign bit instead of zeros, so the shift divides by a power of two for negative
+ * values as well as positive ones. Rounding is half to even and is applied to the two's complement
+ * bits, which means a tie moves towards the even neighbour rather than away from zero.
+ *
+ * Handles any positive shift value. A shift of 128 or more leaves zero whatever the sign: rounding
+ * to nearest is what this function does, and every value shifted that far is nearer to zero than to
+ * the last place below it.
+ *
+ * @param l Low QWORD
+ * @param h High QWORD, holding the sign in its MSB
+ * @param shift Bits to shift, between 0-inf
+ */
+FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe_signed(uint64_t& l, uint64_t& h, int shift) noexcept
+{
+    FP128_ASSERT(shift >= 0);
+    if (shift == 0)
+        return;
+
+    const int64_t value = static_cast<int64_t>(h);
+    const uint64_t sign_bits = static_cast<uint64_t>(value >> 63);  // all zeros or all ones
+    uint64_t lsb = 0;
+    switch (shift >> 6) {
+    case 0:  // 1-63 bit
+        lsb = (shift == 1) ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
+        l = (l >> shift) | (h << (64 - shift));
+        h = static_cast<uint64_t>(value >> shift);
+        break;
+    case 1:  // 64-127 bit
+        shift -= 64;
+        switch (shift) {
+        case 0:
+            // the last clause is the sticky bit: it distinguishes an exact tie from a remainder
+            // above half, exactly as in the unsigned version
+            lsb = ((h & 1) << 2) | ((l >> 63) << 1) | ((l & 0x7FFFFFFFFFFFFFFFull) != 0 ? 1 : 0);
+            break;
+        case 1:
+            lsb = ((h & 3) << 1) | (l != 0 ? 1 : 0);
+            break;
+        default:
+            lsb = (h >> (shift - 2)) & 7;
+        }
+
+        l = static_cast<uint64_t>(value >> shift);
+        h = sign_bits;
+        break;
+    default:  // >127 bit
+        h = l = 0;
+    }
+
+    // Use rounding half to even, see shift_right128_inplace_safe for what the three bits mean.
+    if (lsb >= 6 || lsb == 3) {
+        ++l;  // low will wrap around to zero if overflowed
+        h += l == 0;
+    }
+}
+/**
  * @brief Left shift a 128 bit integer (inplace).
  * Handles any positive shift value.
  * @param l Low QWORD
@@ -1084,6 +1208,12 @@ template <int shift> [[nodiscard]] FP128_INLINE constexpr uint64_t shift_right12
     if constexpr (shift == 0) {
         return l;
     } else if constexpr (shift < 64) {
+        // Left as the portable spelling on purpose. MSVC does not recognize it as a funnel shift
+        // and expands it into SHR, SHL and OR where SHRD would be one instruction, and forcing
+        // __shiftright128 here is 6% faster on a Golden Cove P-core - but 47% slower on a
+        // Gracemont E-core, where SHRD is microcoded. On a hybrid part the OpenMP render spreads
+        // over both core types, so the E-core penalty swamps the P-core gain and the whole frame
+        // gets slower. Clang matches this pattern into SHRD on its own where it pays.
         return (l >> shift) | (h << (64 - shift));
     } else if constexpr (shift < 128) {
         return h >> (shift - 64);
@@ -1172,169 +1302,25 @@ FP128_INLINE constexpr void twos_complement128(uint64_t& l, uint64_t& h) noexcep
     h = ~h + (l == 0);
 }
 /**
- * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
- * @param q (output) Pointer to receive the quotient
- * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
- * @param u Pointer Numerator, an array of uint32_t
- * @param v denominator (uint32_t)
- * @param m Count of elements in u
- * @return 0 for success
- */
-FP128_INLINE static int32_t div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, uint32_t v, int64_t m) noexcept
-{
-    if (u == nullptr || q == nullptr || v == 0)
-        return 1;
-
-    while (m > 0 && u[m - 1] == 0)
-        --m;
-
-    uint32_t k = 0;
-    for (auto j = m - 1; j >= 0; --j) {
-        q[j] = udiv64((((uint64_t)k) << 32) + u[j], v, &k);
-    }
-
-    if (r != nullptr)
-        *r = k;
-    return 0;
-}
-/**
- * @brief 32 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
- * @param q (output) Pointer to receive the quotient
- * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
- * @param u Pointer numerator, an array of uint32_t
- * @param v Pointer denominator, an array of uint32_t
- * @param m Count of elements in u
- * @param n Count of elements in v
- * @return 0 for success
- */
-inline static int div_32bit(uint32_t* q, uint32_t* r, const uint32_t* u, const uint32_t* v, int m, int n) noexcept
-{
-    if (q == nullptr || u == nullptr || v == nullptr)
-        return 1;
-
-    constexpr uint64_t WORD_WIDTH = 32ull;         // bit width of a word
-    constexpr uint64_t BASE = 1ull << WORD_WIDTH;  // Number base (32 bits).
-    constexpr uint64_t MASK = BASE - 1;            // 32 bit mask
-    uint32_t *un, *vn;                             // Normalized form of u, v.
-    uint64_t qhat;                                 // Estimated quotient digit.
-    uint64_t rhat;                                 // A remainder.
-    uint64_t p;                                    // Product of two digits.
-    int64_t t, k;                                  // Temporary variables
-    int32_t i, j;                                  // Indexes
-    // disable various warnings, some are bogus in VS2022.
-    // the below code relies on the implied truncation (to 32 bit) of several expressions.
-#if defined(FP128_MSVC)
-#pragma warning(push)
-#pragma warning(disable : 6255)
-#pragma warning(disable : 4244)
-#pragma warning(disable : 6297)
-#pragma warning(disable : 6385)
-#pragma warning(disable : 6386)
-#pragma warning(disable : 26451)
-#pragma warning(disable : 26493)
-#pragma warning(disable : 26438)
-#endif
-
-    // shrink the arrays to avoid extra work on small numbers
-    while (m > 0 && u[m - 1] == 0)
-        --m;
-    while (n > 0 && v[n - 1] == 0)
-        --n;
-
-    if (m < n || n <= 0 || v[n - 1] == 0)
-        return 1;  // Return if invalid param.
-
-    // Take care of the case of a single-digit divisor here.
-    if (n == 1)
-        return div_32bit(q, r, u, v[0], m);
-
-    /* Normalize by shifting v left just enough so that its high-order
-    bit is on, and shift u left the same amount. We may have to append a
-    high-order digit on the dividend; we do that unconditionally. */
-
-    const int32_t s = lzcnt32(v[n - 1]);  // 0 <= s <= WORD_WIDTH-1.
-    const int32_t s_comp = WORD_WIDTH - s;
-    vn = (uint32_t*)alloca(sizeof(uint32_t) * n);
-    for (i = n - 1; i > 0; --i) {
-        vn[i] = (v[i] << s) | ((uint64_t)v[i - 1] >> s_comp);
-    }
-    vn[0] = v[0] << s;
-
-    un = (uint32_t*)alloca(sizeof(uint32_t) * (m + 1));
-    un[m] = (uint64_t)u[m - 1] >> s_comp;
-    for (i = m - 1; i > 0; --i)
-        un[i] = (u[i] << s) | ((uint64_t)u[i - 1] >> s_comp);
-    un[0] = u[0] << s;
-
-    for (j = m - n; j >= 0; --j) {  // Main loop.
-        // Compute estimate qhat of q[j].
-        qhat = udiv128(0, ((uint64_t)un[j + n] << WORD_WIDTH) | un[j + n - 1], vn[n - 1], &rhat);
-        // qhat = (un[j + n] * BASE + un[j + n - 1]) / vn[n - 1];
-        // rhat = (un[j + n] * BASE + un[j + n - 1]) - qhat * vn[n - 1];
-again:
-        if (qhat >= BASE || qhat * vn[n - 2] > ((rhat << WORD_WIDTH) | un[j + n - 2])) {
-            --qhat;
-            rhat += vn[n - 1];
-            if (rhat < BASE)
-                goto again;
-        }
-
-        // Multiply and subtract.
-        k = 0;
-        for (i = 0; i < n; ++i) {
-            p = qhat * vn[i];
-            t = un[i + j] - k - (p & MASK);
-            un[i + j] = t;
-            k = (p >> WORD_WIDTH) - (t >> WORD_WIDTH);
-        }
-        t = un[j + n] - k;
-        un[j + n] = t;
-
-        q[j] = qhat;          // Store quotient digit.
-        if (t < 0) {          // If we subtracted too
-            q[j] = q[j] - 1;  // much, add back.
-            k = 0;
-            for (i = 0; i < n; ++i) {
-                t = (uint64_t)un[i + j] + vn[i] + k;
-                un[i + j] = t;
-                k = t >> WORD_WIDTH;
-            }
-            un[j + n] = un[j + n] + k;
-        }
-    }  // End j.
-    // If the caller wants the remainder, unnormalize
-    // it and pass it back.
-    if (r != nullptr) {
-        for (i = 0; i < n - 1; ++i)
-            r[i] = (un[i] >> s) | ((uint64_t)un[i + 1] << s_comp);
-
-        r[n - 1] = un[n - 1] >> s;
-    }
-    return 0;
-#if defined(FP128_MSVC)
-#pragma warning(pop)
-#endif
-}
-/**
  * @brief 64 bit words unsigned divide function. Variation of the code from the book Hacker's Delight.
  * @param q (output) Pointer to receive the quotient. Expected to be initialized to zero
  * @param r (output, optional) Pointer to receive the remainder. Can be nullptr
  * @param u Pointer to Numerator, an array of uint64_t
  * @param v denominator (uint64_t)
  * @param m Count of elements in u
- * @return 0 for success
+ * @return true on success, false when a pointer is null or the divisor is zero.
  */
-FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* u, uint64_t v, int64_t m) noexcept
+FP128_INLINE static bool div_64bit(uint64_t* q, uint64_t* r, const uint64_t* u, uint64_t v, int64_t m) noexcept
 {
     if (u == nullptr || q == nullptr)
-        return 1;
+        return false;
     uint64_t dummy_reminder {};
     if (r == nullptr) {
         r = &dummy_reminder;
     }
 
     if (v == 0)  // error case
-        return 1;
+        return false;
 
     while (m > 0 && u[m - 1] == 0)
         --m;
@@ -1343,12 +1329,12 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
     if (m < 2) {
         if (m == 0 || u[0] < v) {
             *r = (m == 0) ? 0 : u[0];
-            return 0;
+            return true;
         }
         if (u[0] == v) {
             *q = 1;
             *r = 0;
-            return 0;
+            return true;
         }
     }
 
@@ -1360,7 +1346,114 @@ FP128_INLINE static int32_t div_64bit(uint64_t* q, uint64_t* r, const uint64_t* 
 
     // Remainder
     *r = k[1];
-    return 0;
+    return true;
+}
+/**
+ * @brief Divides an unsigned integer of up to 256 bits by a 128 bit one. Knuth algorithm D, 64 bit limbs.
+ *
+ * This is the divide every 128 bit type in this library reaches once the divisor needs more than 64
+ * bits: int128_t and uint128_t divide 128 by 128, fixed_point128 and float128 divide 256 by 128
+ * because they scale the numerator by 2^128 first to keep the fraction bits of the quotient.
+ *
+ * The limb width is the whole point. The same algorithm over 32 bit limbs sees those shapes as
+ * m=4,n=4 and m=8,n=4 - up to five main loop passes with a four iteration multiply-subtract in each,
+ * where 64 bit limbs need one and three passes of two. The quotient estimate costs one DIV
+ * instruction either way. Measured on the 256/128 shape, pinned to a single core, the wider limbs
+ * are worth 3.1x under MSVC and 7.9x under clang-cl, and the float128 division benchmarks gain 109%
+ * and 382% respectively. Narrow limbs also cost Clang more than they cost MSVC: it used to trail by
+ * 1.6x on this division and is the faster of the two toolchains here.
+ *
+ * The estimate needs a 128/64 divide, which x86-64 has and AArch64 does not; udiv128() provides it
+ * either way, falling back to the compiler runtime helper where there is no instruction.
+ *
+ * @note This does not shrink its operands: leading zero words in @p u cost one wasted pass each but
+ *       no accuracy, and a divisor whose high word is zero is rejected rather than handled, because
+ *       that case belongs in div_64bit() which is cheaper again. Every caller here already branches
+ *       on it.
+ *
+ * @param q (output) Quotient, m - 1 words, q[0] lowest. Only those words are written, so a caller
+ *          wanting a wider zero filled result must zero the rest itself.
+ * @param r (output, optional) Remainder, two words. Can be nullptr.
+ * @param u Numerator, @p m words, u[0] lowest.
+ * @param v Denominator, two words. v[1] must be non zero.
+ * @param m Count of words in @p u. Must be 2, 3 or 4.
+ * @return true on success, false when a parameter fails one of the conditions above.
+ */
+FP128_INLINE static bool div_128bit(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v, int64_t m) noexcept
+{
+    constexpr int64_t MAX_WORDS = 4;  // 256 bit numerator, the widest any type here divides
+    if (q == nullptr || u == nullptr || v == nullptr || m < 2 || m > MAX_WORDS || v[1] == 0)
+        return false;
+
+    // Normalize so the divisor's high bit is set, which is what bounds the quotient estimate to two
+    // too large. The numerator gains a word for the bits shifted out of its top.
+    const int32_t s = static_cast<int32_t>(lzcnt64(v[1]));
+    const uint64_t vn1 = (s != 0) ? ((v[1] << s) | (v[0] >> (64 - s))) : v[1];
+    const uint64_t vn0 = v[0] << s;
+
+    uint64_t un[MAX_WORDS + 1] {};
+    un[m] = (s != 0) ? (u[m - 1] >> (64 - s)) : 0;
+    for (int64_t i = m - 1; i > 0; --i) {
+        un[i] = (s != 0) ? ((u[i] << s) | (u[i - 1] >> (64 - s))) : u[i];
+    }
+    un[0] = u[0] << s;
+
+    for (int64_t j = m - 2; j >= 0; --j) {
+        uint64_t qhat, rhat;
+        bool correct = true;
+        if (un[j + 2] >= vn1) {
+            // The exact estimate is at least 2^64 here, which DIV cannot return - it raises #DE
+            // instead of truncating. Knuth's cap of b - 1 applies, with the remainder it implies.
+            qhat = UINT64_MAX;
+            rhat = un[j + 1] + vn1;
+            correct = (rhat >= vn1);  // a carry out puts rhat past 2^64, where no correction applies
+        } else {
+            qhat = udiv128(un[j + 2], un[j + 1], vn1, &rhat);
+        }
+
+        // Walk the estimate down while qhat * vn0 exceeds the two words it has to fit under.
+        while (correct) {
+            uint64_t phi;
+            const uint64_t plo = mulx_u64(qhat, vn0, &phi);
+            if (phi < rhat || (phi == rhat && plo <= un[j])) {
+                break;
+            }
+            --qhat;
+            const uint64_t next = rhat + vn1;
+            if (next < rhat) {
+                break;
+            }
+            rhat = next;
+        }
+
+        // Multiply and subtract: un[j..j+2] -= qhat * vn, the product being three words wide.
+        uint64_t p0hi, p1hi, product1;
+        const uint64_t p0 = mulx_u64(qhat, vn0, &p0hi);
+        const uint64_t p1 = mulx_u64(qhat, vn1, &p1hi);
+        const uint64_t product2 = p1hi + addcarryx_u64(0, p1, p0hi, &product1);
+
+        unsigned char borrow = subborrow_u64(0, un[j], p0, &un[j]);
+        borrow = subborrow_u64(borrow, un[j + 1], product1, &un[j + 1]);
+        borrow = subborrow_u64(borrow, un[j + 2], product2, &un[j + 2]);
+
+        q[j] = qhat;
+        if (borrow != 0) {
+            // The estimate was one too large after all, which the correction above cannot always
+            // catch. Undo the overshoot by adding the divisor back; Knuth puts this at about two
+            // divisors in 2^64, so the branch is essentially never taken.
+            --q[j];
+            unsigned char carry = addcarryx_u64(0, un[j], vn0, &un[j]);
+            carry = addcarryx_u64(carry, un[j + 1], vn1, &un[j + 1]);
+            un[j + 2] += carry;
+        }
+    }
+
+    if (r != nullptr) {
+        r[0] = (s != 0) ? ((un[0] >> s) | (un[1] << (64 - s))) : un[0];
+        r[1] = un[1] >> s;
+    }
+
+    return true;
 }
 /**
  * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
@@ -1617,16 +1710,27 @@ inline constexpr uint64_t log2_value_table[][2] = {
 };
 
 /**
- * @brief 1/(n*ln2) for n = 1 upwards, already in fixed_point128<1> form; entry [i] holds 1/((i+1)*ln2).
+ * @brief 1/(n*ln2) for n = 1 upwards, as a raw 128 bit value with 127 fraction bits; entry [i] holds
+ *        1/((i+1)*ln2).
  *
- * Stored pre-scaled because the series loop reads one entry per iteration, and shifting a raw
- * fraction into place every time would cost more than the multiply the entry is used for.
+ * Stored pre-scaled because the series loop reads one entry per iteration, and bringing a value
+ * into place from a decimal string every time is out of the question.
  *
  * The division by ln(2) that turns the natural logarithm into a base two one is folded into these
  * constants rather than applied once at the end. That removes a multiply from every call and, more
  * importantly, the rounding that came with it - which mattered for the instantiations whose own
- * precision is close to the 127 bits the series runs at. Entry zero is 1/ln2 = 1.4427, still inside
- * the range of fixed_point128<1>, and the accumulator peaks around 1.47.
+ * precision is close to the 127 bits the series runs at.
+ *
+ * Two readings of the same bits, one per consumer:
+ * <UL>
+ * <LI>float128 takes an entry as a plain 128 bit fraction, which makes it 1/(2n*ln2) - half the
+ *     mathematical value, so that every one of them stays below one. It doubles the series once at
+ *     the end.</LI>
+ * <LI>fixed_point128 takes it as a fixed_point128<1>, whose 126 fraction bits are one short of what
+ *     the entry carries, so it shifts each one down by a bit as it reads it. That gives 1/(n*ln2)
+ *     itself; entry zero is 1.4427 and the accumulator peaks around 1.47, both inside the range of
+ *     that instantiation, which reaches just under 2.</LI>
+ * </UL>
  */
 inline constexpr uint64_t log2_inv_n_table[][2] = {
     {0xB8AA3B295C17F0BBull, 0xBE87FED0691D3E89ull},

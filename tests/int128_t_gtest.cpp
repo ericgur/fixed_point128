@@ -1108,8 +1108,10 @@ TEST(int128_t, IntegralTypesAndScalarOnTheLeft)
 }
 // int128_t and uint128_t are now aliases of a single class template. Nothing but this test pins the
 // properties the merge had to preserve: the storage is unchanged, the 16 byte alignment survived the
-// template, and the two types still refuse to convert into one another. Trivial copyability is new,
-// a consequence of defaulting the copy and move members.
+// template, and the two types still refuse to convert into one another.
+//
+// The type is deliberately *not* trivially copyable; see the uint128_t version of this test for the
+// store forwarding stall that a defaulted 16 byte copy costs on MSVC.
 TEST(int128_t, LayoutAndTraits)
 {
     static_assert(std::is_same_v<int128_t, int128_base<true>>, "int128_t is the signed instantiation");
@@ -1117,7 +1119,7 @@ TEST(int128_t, LayoutAndTraits)
     static_assert(sizeof(int128_t) == 16, "the object holds exactly two QWORDs");
     static_assert(alignof(int128_t) == 16, "FP128_ALIGN16 has to survive the template");
     static_assert(std::is_standard_layout_v<int128_t>, "the division helpers alias the members as an array");
-    static_assert(std::is_trivially_copyable_v<int128_t>, "the copy and move members are defaulted");
+    static_assert(!std::is_trivially_copyable_v<int128_t>, "the copy and move members are written out, not defaulted");
     // getting from one signedness to the other needs two user defined conversions, which the
     // language never performs implicitly, and leaves the explicit form ambiguous
     static_assert(!std::is_convertible_v<uint128_t, int128_t>, "no silent unsigned to signed conversion");

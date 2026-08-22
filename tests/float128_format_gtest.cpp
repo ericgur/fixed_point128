@@ -311,16 +311,20 @@ TEST(fixed_point128, NumericLimits)
     static_assert(limits::is_specialized && limits::is_signed);
     // A fixed point value is exactly the number it stands for, unlike a floating point one.
     static_assert(limits::is_exact && !limits::is_integer);
-    static_assert(limits::digits == 128 && limits::radix == 2);
+    // one of the 128 bits is the sign, the other 127 carry magnitude
+    static_assert(limits::digits == 127 && limits::radix == 2);
     static_assert(!limits::has_infinity && !limits::has_quiet_NaN);
-    static_assert(limits::min_exponent == 32 - 128 && limits::max_exponent == 32);
+    static_assert(limits::min_exponent == 32 - 127 && limits::max_exponent == 32);
 
     // The grid spacing is the same everywhere, which is the whole point of the representation.
     const fixed_point128<32> one = fixed_point128<32>::one();
     EXPECT_TRUE(one + limits::epsilon() > one);
     EXPECT_TRUE(limits::min() == limits::epsilon());
-    // The sign is a separate field, so the range is symmetric.
-    EXPECT_TRUE(limits::lowest() == -limits::max());
+    // Two's complement makes the range asymmetric: lowest() is one step below -max() and is its
+    // own negation, having no positive counterpart.
+    EXPECT_TRUE(limits::lowest() == -limits::max() - limits::epsilon());
+    EXPECT_TRUE(-limits::lowest() == limits::lowest());
+    EXPECT_TRUE(limits::lowest() < -limits::max());
 }
 TEST(fixed_point128, FormatAndStream)
 {

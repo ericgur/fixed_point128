@@ -108,9 +108,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="$(FP128Root).gitignore" />
-    <None Include="$(FP128Root)CLAUDE.md" />
     <None Include="$(FP128Root)cpp.hint" />
-    <None Include="$(FP128Root)README.md" />
     <None Include="$(FP128Root)CMakeLists.txt" />
     <None Include="$(FP128Root)CMakePresets.json" />
   </ItemGroup>
