@@ -19,14 +19,5 @@ fp128_enable_declspec(log2_ulp_dump)
 fp128_link_clang_builtins(log2_ulp_dump)
 fp128_link_static_runtime(log2_ulp_dump)
 
-##
-# The same two MSVC /W4 diagnostics the benchmark and the tests suppress, reached for the same
-# reasons - see bench/CMakeLists.txt for what they are and why they are deliberate.
-##
-fp128_uses_msvc_frontend(FP128_TOOLS_MSVC_FRONTEND)
-if(FP128_TOOLS_MSVC_FRONTEND)
-    target_compile_options(log2_ulp_dump PRIVATE /wd4201 /wd4702)
-endif()
-
 set_target_properties(log2_ulp_dump PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

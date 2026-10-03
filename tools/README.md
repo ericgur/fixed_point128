@@ -44,7 +44,7 @@ to match; `--check` verifies that too.
 
 `log2_ulp_dump` prints the library's answers as exact bit patterns, and `log2_ulp_check.py`
 computes what they should have been at 400 bits of precision and reports the difference in ulps.
-Nothing is printed in decimal anywhere in between: a `fixed_point128` carries up to 127 fraction
+Nothing is printed in decimal anywhere in between: a `fixed_point128` carries up to 126 fraction
 bits, and rendering one as decimal loses exactly the bits being measured.
 
 Build the dump tool and run the pair:
@@ -69,10 +69,17 @@ The argument is the number of samples per input class per type; a few thousand t
 two, most of it in mpmath.
 
 Rows are split by input class, because they break different things: values in `[1,2)` where the
-series does its work, values across the exponent range, values just above one where cancellation is
-worst, and every argument reduction boundary with its immediate neighbours. Keeping them apart
-matters - the `near-one` class is the one that catches a `log2` which is accurate in absolute terms
-but not relative to its own result, and averaging it in with the rest hides that completely.
+series does its work, values across the exponent range, values just above one and just below it
+where cancellation is worst, and every argument reduction boundary with its immediate neighbours.
+Keeping them apart matters - the `near-one` and `below-one` classes are the ones that catch a `log2`
+which is accurate in absolute terms but not relative to its own result, and averaging them in with
+the rest hides that completely.
+
+The two sides of one need a class each because `float128` takes a different path on each. Above one
+the exponent is zero and nothing cancels; below it the exponent is -1, and adding that to the
+logarithm of a mantissa just under two cancels. Before 0.10.0.0 `log2` did exactly that and lost a
+bit of its result for every power of two the argument sat closer to one - half the mantissa at
+2^-60, nearly all of it at 2^-110 - and with only `near-one` in the harness nothing showed it.
 
 One ulp always means one unit in the last place *of that result*: the fixed grid 2^-F for
 `fixed_point128`, and the local grid for `float128`. So the columns are comparable across every row

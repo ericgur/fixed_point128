@@ -27,7 +27,7 @@
 // Half of the accuracy harness; log2_ulp_check.py is the other half and computes the reference.
 // See tools/README.md.
 //
-// Nothing is printed in decimal: these types carry up to 127 fraction bits and a decimal rendering
+// Nothing is printed in decimal: these types carry up to 126 fraction bits and a decimal rendering
 // would lose exactly the bits being measured. Every value is emitted as
 //
 //     sign mantissa_high mantissa_low exponent
@@ -76,10 +76,13 @@ static void EmitValue(uint32_t sign, uint64_t mant_high, uint64_t mant_low, int3
  * The members are private and this tool is not a friend, so the bits are read one at a time. It
  * runs once per sample and the cost is irrelevant next to the mpmath side of the comparison.
  *
+ * The QWORDs hold the value in two's complement, so they are its magnitude only when @p v is not
+ * negative. Callers pass fabs() of the value they want to emit.
+ *
  * @tparam I Number of integer bits.
  * @param v Value to take apart.
- * @param low Receives the low QWORD of the magnitude.
- * @param high Receives the high QWORD of the magnitude.
+ * @param low Receives the low QWORD of the two's complement value.
+ * @param high Receives the high QWORD of the two's complement value.
  */
 template <int32_t I> static void RawBits(const fixed_point128<I>& v, uint64_t& low, uint64_t& high)
 {
@@ -97,16 +100,20 @@ template <int32_t I> static void RawBits(const fixed_point128<I>& v, uint64_t& l
  * A fixed_point128<I> holds its value on a fixed grid of 2^-F, so both the mantissa scale and the
  * ulp are 2^-F regardless of how large the value is.
  *
+ * The type stores two's complement while the dump format is sign and magnitude, so each value is
+ * emitted as its sign followed by the bits of fabs() of it. The result is negative for every
+ * argument below one.
+ *
  * @tparam I Number of integer bits.
  * @param x Argument to log2.
  */
 template <int32_t I> static void Emit(const fixed_point128<I>& x)
 {
-    constexpr int32_t F = 128 - I;
+    constexpr int32_t F = fixed_point128<I>::F;
     uint64_t x_low = 0, x_high = 0, r_low = 0, r_high = 0;
-    RawBits(x, x_low, x_high);
+    RawBits(fabs(x), x_low, x_high);
     const fixed_point128<I> result = log2(x);
-    RawBits(result, r_low, r_high);
+    RawBits(fabs(result), r_low, r_high);
 
     printf("fixed_point128<%d>/%s", I, g_group);
     EmitValue(static_cast<uint32_t>(x.is_negative()), x_high, x_low, -F);
@@ -158,15 +165,24 @@ static void EmitFloat(const float128& x)
 /**
  * @brief Emits samples for one fixed_point128 instantiation, over the input classes that matter.
  *
- * Four groups, because they stress different parts of the implementation:
+ * Five groups, because they stress different parts of the implementation:
  * - Values in [1,2), where the series does all its work.
- * - Values over the whole representable range, which exercise the exponent path. Skipped when the
+ * - Values over the whole positive range, which exercise the exponent path. Skipped when the
  *   instantiation has too few integer bits to hold the answer: log2 of the smallest representable
  *   value is -F, so 2^(I-1) has to exceed F or the result overflows and the comparison would be
  *   measuring that instead.
  * - Values just above one, the worst case for cancellation, where log2 is near zero.
  * - The reduction boundaries themselves and their immediate neighbours, where the table index
  *   changes and |z| is at its largest.
+ * - Values just below one, the mirror image of the third group, where log2 is near zero and
+ *   negative.
+ *
+ * Each group tags its lines with its own label, the same ones SweepFloat() uses where the classes
+ * coincide, so log2_ulp_check.py reports them as separate rows.
+ *
+ * Every group draws from the one generator in turn, so a new group goes last: placed anywhere else
+ * it would shift the samples of every group after it, and dumps taken before it was added would no
+ * longer be comparable with --baseline.
  *
  * @tparam I Number of integer bits.
  * @param count Samples per group.
@@ -174,20 +190,25 @@ static void EmitFloat(const float128& x)
 template <int32_t I> static void Sweep(uint64_t count)
 {
     using fp = fixed_point128<I>;
-    constexpr int32_t F = 128 - I;
+    constexpr int32_t F = fp::F;
     uint64_t seed = 0x123456789ABCDEF0ull;
 
+    // one() has bit F set, which is bit F - 64 of the high QWORD. Masking the random fraction to the
+    // bits below it keeps the value inside [1,2). F is at least 64, so the shift is always defined.
+    g_group = "unit-range";
+    constexpr uint64_t unit_fraction_mask = (1ull << (F - 64)) - 1;
     for (uint64_t n = 0; n < count; ++n) {
         const uint64_t high = Next(seed), low = Next(seed);
-        // one() has bit F set; masking the fraction below it keeps the value inside [1,2)
-        const fp v = fp::one() + fp(low, high & ((F >= 64) ? ((1ull << (F - 64)) - 1) : 0ull), 0);
+        const fp v = fp::one() + fp(low, high & unit_fraction_mask);
         Emit<I>(v);
     }
 
+    // Bit 127 is the sign, so it is cleared to keep the argument positive.
+    g_group = "full-range";
     if constexpr (I >= 8 && (I >= 40 || (1ll << (I - 1)) > F)) {
         for (uint64_t n = 0; n < count; ++n) {
             const uint64_t high = Next(seed), low = Next(seed);
-            const fp v = fp(low, high, 0);
+            const fp v = fp(low, high & ~(1ull << 63));
             if (v.is_zero()) {
                 continue;
             }
@@ -195,22 +216,30 @@ template <int32_t I> static void Sweep(uint64_t count)
         }
     }
 
+    g_group = "near-one";
     for (uint64_t n = 0; n < count; ++n) {
-        const fp v = fp::one() + fp(Next(seed), 0, 0);
+        const fp v = fp::one() + fp(Next(seed), 0ull);
         Emit<I>(v);
     }
 
+    g_group = "boundaries";
     constexpr int32_t entries = 1 << log2_reduction_bits;
     for (uint32_t j = 0; j < entries; ++j) {
         const fp step = fp::one() >> log2_reduction_bits;
         const fp boundary = fp::one() + step * j;
         Emit<I>(boundary);
         for (uint64_t d = 1; d <= 3; ++d) {
-            Emit<I>(boundary + fp(d, 0, 0));
+            Emit<I>(boundary + fp(d, 0ull));
             if (j != 0) {
-                Emit<I>(boundary - fp(d, 0, 0));
+                Emit<I>(boundary - fp(d, 0ull));
             }
         }
+    }
+
+    g_group = "below-one";
+    for (uint64_t n = 0; n < count; ++n) {
+        const fp v = fp::one() - fp(Next(seed), 0ull);
+        Emit<I>(v);
     }
 }
 
@@ -257,6 +286,15 @@ static void SweepFloat(uint64_t count)
             }
         }
     }
+
+    // Mantissas just under two at exponent -1, i.e. values just below one, as far below it as
+    // near-one goes above. Kept apart from near-one because it takes a different path: a log2 that
+    // adds the exponent -1 to the logarithm of the mantissa cancels here, and log2() has to avoid
+    // that on purpose. Last, for the reason given on Sweep().
+    g_group = "below-one";
+    for (uint64_t n = 0; n < count; ++n) {
+        EmitFloat(float128(Next(seed), FP128_MAX_VALUE_64(frac_bits - 64), FLOAT128_EXP_BIAS - 1, 0));
+    }
 }
 
 int main(int argc, char* argv[])
@@ -274,7 +312,7 @@ int main(int argc, char* argv[])
     Sweep<10>(count);
     Sweep<20>(count);
     Sweep<32>(count);
-    Sweep<64>(count);
+    Sweep<63>(count);
     SweepFloat(count);
 
     return 0;

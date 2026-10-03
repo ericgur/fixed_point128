@@ -7,6 +7,22 @@ and this project adheres to a four-part `MAJOR.MINOR.PATCH.BUILD` version scheme
 exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants in
 [`include/fp128_shared.h`](include/fp128_shared.h).
 
+## [Unreleased]
+
+### Fixed
+
+- **`float128::log2()` near one** — the error just below one (up to 8.7 ulp) and just above it
+  (up to 3.8 ulp) is now at most 1.5 ulp on both sides, and arguments within 2^-4 of one run 3-6x
+  faster. `log`, `log10` and `log1p` gain 4-13% from the same change.
+- **`tools/log2_ulp_dump`** builds again against the two's complement `fixed_point128`, emits
+  negative results correctly, labels its input classes, and gains a `below-one` class.
+
+### Changed
+
+- The MSVC warning suppressions shared by every first-party target live in one place:
+  `fp128_set_warnings()` for CMake and `msvc/fixed_point128.warnings.props` for MSBuild, which
+  also silences code-analysis warning C6262 for the benchmark's 16 KB argument arrays.
+
 ## [0.11.0.0] - 2026-08-22
 
 ### Added
@@ -305,6 +321,7 @@ up to it.
 - clang compatibility for `fixed_point128` and for the benchmark's add/sub/mul/div
   conditions.
 
+[Unreleased]: https://github.com/ericgur/fixed_point128/compare/v0.11.0.0...HEAD
 [0.11.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.11.0.0
 [0.10.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.10.0.0
 [0.9.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.9.0.0

@@ -32,7 +32,6 @@
               layout is the point of the type.
         4702  MSVC reports the code after an `if constexpr` chain as unreachable for the instantiations
               where an earlier branch returns, even though it is live for all the others.
-        Mirrors the /wd4201 /wd4702 options in bench/CMakeLists.txt and tests/CMakeLists.txt.
       -->
       <DisableSpecificWarnings>4201;4702;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
