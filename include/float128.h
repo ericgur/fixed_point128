@@ -894,7 +894,7 @@ public:
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
      */
-    [[nodiscard]] FP128_FORCE_INLINE operator std::string() const noexcept { return operator char*(); }
+    [[nodiscard]] FP128_INLINE operator std::string() const noexcept { return operator char*(); }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
      * @return object string representation
@@ -3480,9 +3480,9 @@ public:
      * What matters more than the term count is that the result stays accurate relative to its own
      * size. Near one the logarithm is proportional to t, and t reaches this function exactly - the
      * subtraction that produced it cancelled two values within a factor of two of each other, which
-     * is exact. Computing the same thing as a difference of two numbers near one, which is what
-     * log2()'s argument reduction does, loses a bit for every power of two the argument sits closer
-     * to one: at t = 2^-60 barely half the mantissa survives.
+     * is exact. Computing the same thing as a difference of two numbers near one loses a bit for
+     * every power of two the argument sits closer to one: at t = 2^-60 barely half the mantissa
+     * survives.
      *
      * @param t Offset from one, must satisfy |t| <= 2^-4
      * @return log(1+t)
@@ -3529,10 +3529,11 @@ public:
      * @brief Calculates the Log base 2 of x: y = log2(x)
      *
      * Accurate relative to its own result, which matters most for an argument close to one: the
-     * answer is then proportional to the mantissa's fraction, and that fraction is carried through
-     * exactly rather than being rounded onto a grid it would barely register on. The earlier
-     * implementation built the answer as a fixed point fraction of 112 bits before returning it as
-     * a float, which left log2(1 + 2^-112) with no correct significant bits at all.
+     * answer is then proportional to x - 1, and that difference is carried through exactly rather
+     * than being rounded onto a grid it would barely register on. That holds on both sides of one;
+     * below it the exponent is -1, and the answer is formed without the -1 that would cancel. The
+     * earlier implementation built the answer as a fixed point fraction of 112 bits before
+     * returning it as a float, which left log2(1 + 2^-112) with no correct significant bits at all.
      *
      * @param x The number to perform log2 on.
      * @return log2(x)
@@ -3542,13 +3543,6 @@ public:
         if (x.is_negative() || x.is_zero()) {
             return -inf();
         }
-
-        // Near one the reduction below forms the answer as a difference of two values close to
-        // one, which costs it a bit for every power of two the argument sits closer to one. The
-        // series has no such cancellation, see log1p_small().
-        const float128 offset = x - float128::one();
-        if (fabs(offset) <= log1p_small_limit())
-            return log1p_small(offset) * float128::log2_e();
 
         // Calculate the log in 2 steps:
         // - The integer part is simple and fast via the get_exponent() function.
@@ -3572,6 +3566,11 @@ public:
         // The leading log2_reduction_bits fraction bits choose the reciprocal to reduce with.
         const size_t j = static_cast<size_t>(frac_high >> (FRAC_BITS - 64 - log2_reduction_bits));
 
+        // x in [1 - 2^-6, 1): the exponent is -1 and the mantissa is within 2^-5 of two, which puts
+        // its leading fraction bits in one of the last two table rows.
+        constexpr size_t entries = size_t{1} << log2_reduction_bits;
+        const bool just_below_one = (expo == -1) && (j >= entries - 2);
+
         // z, the reduced argument, as a 128 bit fraction. The series below needs |z| <= 2^-6.
         uint64_t z_low = 0, z_high = 0;
         uint32_t z_sign = 0;
@@ -3582,6 +3581,18 @@ public:
             // the answer is then proportional to f, and f survives intact.
             z_low = frac_low << 16;
             z_high = (frac_high << 16) | (frac_low >> 48);
+        } else if (just_below_one) {
+            // The mirror image of the case above. Reducing from the exponent -1 would form the
+            // answer as -1 plus the logarithm of a mantissa just under two, and that sum cancels: it
+            // loses a bit for every power of two x sits closer to one, half the mantissa at 2^-60
+            // below one and nearly all of it at 2^-110. Instead the series is taken at one itself,
+            // with z = x - 1. That difference is exact - x is mantissa/2, which as a 128 bit fraction
+            // has room for every bit of it - and the answer is then proportional to z, as above.
+            const uint64_t m_low = frac_low << 15;
+            const uint64_t m_high = (1ull << 63) | (frac_high << 15) | (frac_low >> 49);
+            const uint8_t borrow = subborrow_u64(0, 0, m_low, &z_low);
+            subborrow_u64(borrow, 0, m_high, &z_high);
+            z_sign = 1;
         } else {
             // mantissa/2 as a 128 bit fraction, which is in [0.5,1)
             const uint64_t m_low = frac_low << 15;
@@ -3626,6 +3637,35 @@ public:
             }
         }
 
+        // The rest of (0.5, 1) that the table reduces. The answer is -1 + T + S, where T is the table
+        // value below and S the series, and it is as small as 0.0227, so the -1 still cancels up to
+        // five and a half bits. Rounding T to a float128 first leaves an absolute error of 2^-114
+        // for those bits to expose - measured, up to 9 ulp at 1 - 2^-4 and 42 at 1 - 2^-6 - so the
+        // sum is formed on the exact 128 bit fractions instead, where every term is good to a few
+        // units of 2^-128, and rounded once. That keeps this range within 0.75 ulp.
+        if (expo == -1 && j != 0 && !just_below_one) {
+            uint64_t s_low = 0, s_high = 0;
+            mul128_high(z_low, z_high, acc_low, acc_high, s_low, s_high);
+            s_high = (s_high << 1) | (s_low >> 63);  // undo the halving the table carries
+            s_low <<= 1;
+
+            // r = 1 - T - S = -log2(x). T is in (0,1), so 1 - T fits a fraction exactly.
+            uint64_t r_low = 0, r_high = 0;
+            const uint8_t borrow = subborrow_u64(0, 0, log2_value_table[j][1], &r_low);
+            subborrow_u64(borrow, 0, log2_value_table[j][0], &r_high);
+            if (z_sign) {
+                const uint8_t carry = addcarryx_u64(0, r_low, s_low, &r_low);
+                addcarryx_u64(carry, r_high, s_high, &r_high);
+            } else {
+                const uint8_t borrow_s = subborrow_u64(0, r_low, s_low, &r_low);
+                subborrow_u64(borrow_s, r_high, s_high, &r_high);
+            }
+
+            float128 res = from_fraction128(r_low, r_high);
+            res.set_sign(1);
+            return res;
+        }
+
         // The product is formed in float128 rather than in the fraction arithmetic above. A fraction
         // grid is absolute, and log2(1+z) is proportional to z, so holding the product on that grid
         // would leave a small result with only as many significant bits as it has room above 2^-128.
@@ -3634,6 +3674,12 @@ public:
         float128 series = from_fraction128(z_low, z_high) * from_fraction128(acc_low, acc_high);
         series <<= 1;  // undo the halving the table carries
         series.set_sign(z_sign);
+
+        // Taken at one, so the series is the whole answer: neither the exponent nor a table value
+        // applies.
+        if (just_below_one) {
+            return series;
+        }
 
         // -log2(recip), the part of the answer the reduction removed. Zero when nothing was reduced.
         const float128 table_value = (j != 0) ? from_fraction128(log2_value_table[j][1], log2_value_table[j][0]) : float128();
@@ -5678,6 +5724,9 @@ namespace std
  *
  * The values are given as encodings rather than computed, which keeps every one of them usable in
  * a constant expression and independent of the string parser.
+ *
+ * The const, volatile and const volatile forms need no specialization of their own: \<limits\>
+ * already defines numeric_limits<cv T> to have the members of numeric_limits<T>.
  */
 template <> class numeric_limits<fp128::float128>
 {
@@ -5710,10 +5759,12 @@ public:
     static constexpr int min_exponent10 = -4931;
     static constexpr int max_exponent10 = 4932;
 
-    // has_denorm and has_denorm_loss are deprecated in C++23 but remain part of the interface a
+    // has_denorm and has_denorm_loss are deprecated since C++23 but remain part of the interface a
     // generic caller may read, so they are provided.
+    FP128_SUPPRESS_DEPRECATED_BEGIN
     static constexpr float_denorm_style has_denorm = denorm_present;
     static constexpr bool has_denorm_loss = false;
+    FP128_SUPPRESS_DEPRECATED_END
 
     /// @brief Smallest positive normal value, 2^-16382.
     [[nodiscard]] static constexpr fp128::float128 min() noexcept { return fp128::float128(0, 0x0001000000000000ull); }
@@ -5730,17 +5781,6 @@ public:
     [[nodiscard]] static constexpr fp128::float128 infinity() noexcept { return fp128::float128::inf(); }
     [[nodiscard]] static constexpr fp128::float128 quiet_NaN() noexcept { return fp128::float128::nan(); }
     [[nodiscard]] static constexpr fp128::float128 signaling_NaN() noexcept { return fp128::float128::signaling_nan(); }
-};
-
-/// @brief const, volatile and cv qualified float128 have the same numeric properties.
-template <> class numeric_limits<const fp128::float128> : public numeric_limits<fp128::float128>
-{
-};
-template <> class numeric_limits<volatile fp128::float128> : public numeric_limits<fp128::float128>
-{
-};
-template <> class numeric_limits<const volatile fp128::float128> : public numeric_limits<fp128::float128>
-{
 };
 
 /**

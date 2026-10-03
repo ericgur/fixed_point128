@@ -13,6 +13,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>  // std::integer_sequence
 #include "gtest_shared.h"
 
 /**********************************************************************
@@ -251,12 +252,22 @@ TEST(int128_t, NumericLimits)
     static_assert(signed_limits::is_signed && !unsigned_limits::is_signed);
     static_assert(signed_limits::digits == 127 && unsigned_limits::digits == 128);
     static_assert(signed_limits::radix == 2 && !signed_limits::has_infinity);
-    static_assert(unsigned_limits::is_modulo && !signed_limits::is_modulo);
+    static_assert(signed_limits::digits10 == 38 && unsigned_limits::digits10 == 38);
     static_assert(std::numeric_limits<const int128_t>::digits == signed_limits::digits);
+    static_assert(std::numeric_limits<const volatile uint128_t>::digits == unsigned_limits::digits);
 
-    // The extremes wrap into each other, which is what makes them the extremes.
+    // Both types are modulo: the signed one wraps too, its overflow being defined rather than
+    // undefined like a builtin's. The extremes wrap into each other under +, - and *.
+    static_assert(unsigned_limits::is_modulo && signed_limits::is_modulo);
     EXPECT_TRUE(signed_limits::max() + int128_t(1) == signed_limits::min());
     EXPECT_TRUE(signed_limits::min() - int128_t(1) == signed_limits::max());
+    EXPECT_TRUE(signed_limits::max() * int128_t(2) == int128_t(-2));
+    EXPECT_TRUE(signed_limits::min() * int128_t(-1) == signed_limits::min());
+
+    // A zero divisor throws, which is the types' trap.
+    static_assert(signed_limits::traps && unsigned_limits::traps);
+    EXPECT_THROW((void)(int128_t(1) / int128_t(0)), std::logic_error);
+    EXPECT_THROW((void)(uint128_t(1) / uint128_t(0)), std::logic_error);
     EXPECT_TRUE(signed_limits::lowest() == signed_limits::min());
     EXPECT_TRUE(unsigned_limits::min().is_zero());
     EXPECT_TRUE(unsigned_limits::max() + uint128_t(1) == uint128_t(0));
@@ -306,15 +317,39 @@ TEST(int128_t, Hash)
 }
 TEST(fixed_point128, NumericLimits)
 {
-    using limits = std::numeric_limits<fixed_point128<32>>;
+    using fp = fixed_point128<32>;
+    using limits = std::numeric_limits<fp>;
 
     static_assert(limits::is_specialized && limits::is_signed);
     // A fixed point value is exactly the number it stands for, unlike a floating point one.
     static_assert(limits::is_exact && !limits::is_integer);
     // one of the 128 bits is the sign, the other 127 carry magnitude
-    static_assert(limits::digits == 127 && limits::radix == 2);
+    static_assert(limits::digits == 127 && limits::digits10 == 38 && limits::radix == 2);
     static_assert(!limits::has_infinity && !limits::has_quiet_NaN);
-    static_assert(limits::min_exponent == 32 - 127 && limits::max_exponent == 32);
+    static_assert(limits::min_exponent == 32 - 126 && limits::max_exponent == 32);
+    static_assert(limits::min_exponent10 == -28 && limits::max_exponent10 == 9);
+    static_assert(limits::max_digits10 == 39 && std::numeric_limits<fixed_point128<10>>::max_digits10 == 40);
+    static_assert(std::numeric_limits<const fp>::min_exponent == limits::min_exponent);
+
+    // Every value is a constant expression, as the standard requires of a specialization.
+    static_assert(limits::min() == fp::epsilon() && limits::epsilon() == fp::epsilon());
+    static_assert(limits::lowest() < fp(0) && fp(0) < limits::max());
+    static_assert(limits::round_error() == fp::half());
+    static_assert(limits::infinity() == fp(0) && limits::quiet_NaN() == fp(0) && limits::signaling_NaN() == fp(0));
+    // no value is subnormal, so the smallest one of any kind is the smallest positive one
+    static_assert(limits::denorm_min() == limits::min());
+
+    // Multiplication and division round to nearest. Truncating either result would leave one
+    // epsilon, not two.
+    static_assert(limits::round_style == std::round_to_nearest);
+    const fp eps = limits::epsilon();
+    EXPECT_TRUE((eps * 7) * (fp::half() >> 1) == eps * 2);  // 1.75 epsilon
+    EXPECT_TRUE((eps * 5) / fp(3) == eps * 2);               // 1.67 epsilon
+    EXPECT_TRUE(-(eps * 5) / fp(3) == -(eps * 2));
+
+    // A zero divisor throws, which is the type's trap.
+    static_assert(limits::traps);
+    EXPECT_THROW((void)(fp::one() / fp(0)), std::logic_error);
 
     // The grid spacing is the same everywhere, which is the whole point of the representation.
     const fixed_point128<32> one = fixed_point128<32>::one();
@@ -325,6 +360,47 @@ TEST(fixed_point128, NumericLimits)
     EXPECT_TRUE(limits::lowest() == -limits::max() - limits::epsilon());
     EXPECT_TRUE(-limits::lowest() == limits::lowest());
     EXPECT_TRUE(limits::lowest() < -limits::max());
+}
+/**
+ * @brief Checks the exponent and decimal digit members of numeric_limits<fixed_point128<I>>
+ *        against their definitions rather than against the formulas that compute them.
+ *
+ * float128 holds the powers of ten exactly: 10^k needs k * log2(5) bits of significand, about 89
+ * for the largest k used here, well within its 113.
+ */
+template <int32_t I> static void CheckFixedPointLimitsAgainstDefinitions()
+{
+    using fp = fixed_point128<I>;
+    using limits = std::numeric_limits<fp>;
+    const fp one = fp::one();
+
+    // 2^(min_exponent - 1) is the smallest positive value. The shift drops no set bit, so it is exact.
+    EXPECT_TRUE((one >> (1 - limits::min_exponent)) == limits::min()) << "I=" << I;
+    // 2^(max_exponent - 1) is in range and max() is one epsilon short of twice that.
+    const fp top = one << (limits::max_exponent - 1);
+    EXPECT_TRUE(limits::max() - top == top - limits::epsilon()) << "I=" << I;
+
+    // max_digits10: in the top decade, from 10^max_exponent10 up, n significant digits are
+    // 10^(max_exponent10 + 1 - n) apart. They tell neighbours apart only when that is less than the
+    // grid spacing 2^(I - 127), that is when 10^(n - 1 - max_exponent10) exceeds 2^(127 - I). This
+    // has to hold for max_digits10 and fail for one digit fewer.
+    float128 ten_power(1);
+    for (int32_t k = 0; k < limits::max_digits10 - 2 - limits::max_exponent10; ++k) {
+        ten_power *= float128(10);
+    }
+    const float128 inverse_spacing = ldexp(float128(1), 127 - I);
+    EXPECT_TRUE(ten_power < inverse_spacing) << "I=" << I;
+    EXPECT_TRUE(ten_power * float128(10) > inverse_spacing) << "I=" << I;
+}
+/// @brief Runs CheckFixedPointLimitsAgainstDefinitions for I = 1 + each of Offsets.
+template <int32_t... Offsets> static void CheckFixedPointLimitsForEveryI(std::integer_sequence<int32_t, Offsets...>)
+{
+    (CheckFixedPointLimitsAgainstDefinitions<Offsets + 1>(), ...);
+}
+// Whether max_digits10 is 39 or 40 depends on I, so every one of the 63 instantiations is checked.
+TEST(fixed_point128, NumericLimitsForEveryI)
+{
+    CheckFixedPointLimitsForEveryI(std::make_integer_sequence<int32_t, 63>{});
 }
 TEST(fixed_point128, FormatAndStream)
 {

@@ -46,12 +46,25 @@ endfunction()
 # strict. `/utf-8` is passed on the MSVC frontend because all sources in this repository are UTF-8 and
 # MSVC otherwise decodes them using the system ANSI code page.
 #
+# Two MSVC /W4 diagnostics fire on deliberate constructs in the library headers, and every target that
+# includes them reaches both. They are suppressed here, on the project's own targets, rather than on
+# the fixed_point128 INTERFACE target, so that consumers of the library keep full control of their own
+# warning settings.
+#
+#   C4201  float128 stores its 128 bits in an anonymous struct wrapping an anonymous union. The layout
+#          is the point of the type, and the extension is universally supported.
+#   C4702  MSVC reports the code after an `if constexpr` chain as unreachable for the instantiations
+#          where an earlier branch returns, even though it is live for all the others. A compiler
+#          limitation rather than dead code.
+#
+# The MSBuild equivalent is msvc/fixed_point128.warnings.props.
+#
 # @param target Target to apply the options to.
 ##
 function(fp128_set_warnings target)
     fp128_uses_msvc_frontend(msvcFrontend)
     if(msvcFrontend)
-        target_compile_options(${target} PRIVATE /W4 /utf-8)
+        target_compile_options(${target} PRIVATE /W4 /utf-8 /wd4201 /wd4702)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra)
     endif()

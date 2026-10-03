@@ -27,6 +27,13 @@
       -->
       <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
       <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <!--
+        4201  float128 stores its 128 bits in an anonymous struct wrapping an anonymous union. The
+              layout is the point of the type.
+        4702  MSVC reports the code after an `if constexpr` chain as unreachable for the instantiations
+              where an earlier branch returns, even though it is live for all the others.
+      -->
+      <DisableSpecificWarnings>4201;4702;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
   </ItemDefinitionGroup>
 
@@ -37,10 +44,25 @@
     </ClCompile>
   </ItemDefinitionGroup>
 
-  <!-- PREfast is configured but only runs when RunCodeAnalysis is turned on for a build. -->
+  <!--
+    PREfast is configured but only runs when RunCodeAnalysis is turned on for a build. The tests turn it
+    off again, so in practice the analysis warnings below concern the benchmark alone.
+  -->
   <ItemDefinitionGroup Condition="'$(PlatformToolset)'!='ClangCL'">
     <ClCompile>
       <EnablePREfast>true</EnablePREfast>
+      <!--
+        6262  The benchmark lambdas keep BENCH_ARG_COUNT operands on the stack - 16 KB, exactly the
+              analyzer's default threshold - so each frame lands a few dozen bytes over it. They run on
+              the main thread's 1 MB stack and do not recurse. The array is sized to defeat the branch
+              predictor and stays on the stack to keep the timed loops' addressing unchanged; see
+              BENCH_ARG_COUNT in bench/Bench.cpp.
+        6326  The sign handling in int128_base::operator/= compares two values that are compile time
+              constants in the unsigned instantiation. That is the design - the doc comment on the
+              operator states that every sign related step folds away when the type is unsigned - and
+              the benchmark reaches it because it measures uint128_t.
+      -->
+      <DisableSpecificWarnings>6262;6326;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
   </ItemDefinitionGroup>
 

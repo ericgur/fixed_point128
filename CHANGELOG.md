@@ -7,6 +7,40 @@ and this project adheres to a four-part `MAJOR.MINOR.PATCH.BUILD` version scheme
 exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants in
 [`include/fp128_shared.h`](include/fp128_shared.h).
 
+## [0.12.0.0] - 2026-10-03
+
+### Fixed
+
+- **`float128::log2()` near one** — the error just below one (up to 8.7 ulp) and just above it
+  (up to 3.8 ulp) is now at most 1.5 ulp on both sides, and arguments within 2^-4 of one run 3-6x
+  faster. `log`, `log10` and `log1p` gain 4-13% from the same change.
+- **`tools/log2_ulp_dump`** builds again against the two's complement `fixed_point128`, emits
+  negative results correctly, labels its input classes, and gains a `below-one` class.
+- **`std::numeric_limits<fixed_point128<I>>`** conforms to the standard and to the arithmetic:
+  - every member function is `constexpr`, as the standard requires of a specialization;
+  - `min_exponent` is `I - 126`, so that 2^(min_exponent-1) is the smallest positive value, the
+    way `max_exponent = I` already read; it was one too low;
+  - `max_digits10` is 40 rather than 39 for the fifteen `I` where 39 digits print some
+    neighbouring values identically (4, 7, 10, 14, 17, 20, 24, 27, 30, 37, 40, 47, 50, 57, 60);
+  - `round_style` is `round_to_nearest`, which is what multiplication and division do;
+  - `traps` is `true`: division by zero throws, the same as for the integer types;
+  - `denorm_min()` returns the smallest positive value instead of zero.
+- **`std::numeric_limits<int128_t>::is_modulo`** is `true`. The signed type wraps on overflow
+  exactly as the unsigned one does.
+- **No deprecation warnings under C++23 and C++26.** Clang reported two per specialization for the
+  `has_denorm` members, which are now declared with the warning suppressed locally.
+
+### Removed
+
+- The `numeric_limits` specializations for `const`, `volatile` and `const volatile` qualified
+  types. `<limits>` already provides them, forwarding to the unqualified specialization.
+
+### Changed
+
+- The MSVC warning suppressions shared by every first-party target live in one place:
+  `fp128_set_warnings()` for CMake and `msvc/fixed_point128.warnings.props` for MSBuild, which
+  also silences code-analysis warning C6262 for the benchmark's 16 KB argument arrays.
+
 ## [0.11.0.0] - 2026-08-22
 
 ### Added
@@ -305,6 +339,7 @@ up to it.
 - clang compatibility for `fixed_point128` and for the benchmark's add/sub/mul/div
   conditions.
 
+[0.12.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.12.0.0
 [0.11.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.11.0.0
 [0.10.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.10.0.0
 [0.9.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.9.0.0
