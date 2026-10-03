@@ -16,6 +16,24 @@ exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants 
   faster. `log`, `log10` and `log1p` gain 4-13% from the same change.
 - **`tools/log2_ulp_dump`** builds again against the two's complement `fixed_point128`, emits
   negative results correctly, labels its input classes, and gains a `below-one` class.
+- **`std::numeric_limits<fixed_point128<I>>`** conforms to the standard and to the arithmetic:
+  - every member function is `constexpr`, as the standard requires of a specialization;
+  - `min_exponent` is `I - 126`, so that 2^(min_exponent-1) is the smallest positive value, the
+    way `max_exponent = I` already read; it was one too low;
+  - `max_digits10` is 40 rather than 39 for the fifteen `I` where 39 digits print some
+    neighbouring values identically (4, 7, 10, 14, 17, 20, 24, 27, 30, 37, 40, 47, 50, 57, 60);
+  - `round_style` is `round_to_nearest`, which is what multiplication and division do;
+  - `traps` is `true`: division by zero throws, the same as for the integer types;
+  - `denorm_min()` returns the smallest positive value instead of zero.
+- **`std::numeric_limits<int128_t>::is_modulo`** is `true`. The signed type wraps on overflow
+  exactly as the unsigned one does.
+- **No deprecation warnings under C++23 and C++26.** Clang reported two per specialization for the
+  `has_denorm` members, which are now declared with the warning suppressed locally.
+
+### Removed
+
+- The `numeric_limits` specializations for `const`, `volatile` and `const volatile` qualified
+  types. `<limits>` already provides them, forwarding to the unqualified specialization.
 
 ### Changed
 

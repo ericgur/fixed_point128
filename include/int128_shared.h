@@ -2024,6 +2024,9 @@ namespace std
  * Specialized so that generic code written against a builtin integer - anything reaching for
  * numeric_limits<T>::max() to seed a minimum, or for digits10 to size a buffer - compiles and
  * behaves correctly when instantiated with int128_t or uint128_t.
+ *
+ * The const, volatile and const volatile forms need no specialization of their own: \<limits\>
+ * already defines numeric_limits<cv T> to have the members of numeric_limits<T>.
  */
 template <bool IsSigned> class numeric_limits<fp128::int128_base<IsSigned>>
 {
@@ -2037,20 +2040,33 @@ public:
     static constexpr bool has_infinity = false;
     static constexpr bool has_quiet_NaN = false;
     static constexpr bool has_signaling_NaN = false;
+    // has_denorm and has_denorm_loss are deprecated since C++23 but remain part of the interface a
+    // generic caller may read, so they are provided.
+    FP128_SUPPRESS_DEPRECATED_BEGIN
     static constexpr bool has_denorm_loss = false;
     static constexpr float_denorm_style has_denorm = denorm_absent;
+    FP128_SUPPRESS_DEPRECATED_END
     static constexpr float_round_style round_style = round_toward_zero;
     static constexpr bool is_iec559 = false;
     static constexpr bool is_bounded = true;
-    /// @brief Arithmetic wraps around, which is what the truncated 128 bit operators do.
-    static constexpr bool is_modulo = !IsSigned;
+    /**
+     * @brief Both types wrap around: +, - and * keep the low 128 bits of the exact result, which
+     *        differs from it by a multiple of 2^128 = max() - min() + 1.
+     *
+     * The builtin signed integers report false only because their overflow is undefined. Here it
+     * is defined for the signed type as well, and the two's complement bit pattern of a negative
+     * value is its residue modulo 2^128.
+     */
+    static constexpr bool is_modulo = true;
+    /// @brief Division by zero throws std::logic_error rather than producing a value.
     static constexpr bool traps = true;
     static constexpr bool tinyness_before = false;
 
     /// @brief Value bits, which excludes the sign bit for the signed type.
     static constexpr int digits = IsSigned ? 127 : 128;
-    /// @brief Decimal digits that can be represented without change: floor(digits * log10(2)).
-    static constexpr int digits10 = IsSigned ? 38 : 38;
+    /// @brief Decimal digits that can be represented without change: floor(digits * log10(2)),
+    ///        which is 38 for both 127 and 128 bits.
+    static constexpr int digits10 = 38;
     static constexpr int max_digits10 = 0;
     static constexpr int radix = 2;
     static constexpr int min_exponent = 0;
@@ -2074,18 +2090,6 @@ public:
     [[nodiscard]] static constexpr value_type quiet_NaN() noexcept { return value_type(); }
     [[nodiscard]] static constexpr value_type signaling_NaN() noexcept { return value_type(); }
     [[nodiscard]] static constexpr value_type denorm_min() noexcept { return value_type(); }
-};
-
-/// @brief const, volatile and cv qualified 128 bit integers have the same numeric properties.
-template <bool IsSigned> class numeric_limits<const fp128::int128_base<IsSigned>> : public numeric_limits<fp128::int128_base<IsSigned>>
-{
-};
-template <bool IsSigned> class numeric_limits<volatile fp128::int128_base<IsSigned>> : public numeric_limits<fp128::int128_base<IsSigned>>
-{
-};
-template <bool IsSigned>
-class numeric_limits<const volatile fp128::int128_base<IsSigned>> : public numeric_limits<fp128::int128_base<IsSigned>>
-{
 };
 
 /// @brief Hash support, so a 128 bit integer can be a key in an unordered container.

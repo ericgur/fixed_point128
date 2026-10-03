@@ -5724,6 +5724,9 @@ namespace std
  *
  * The values are given as encodings rather than computed, which keeps every one of them usable in
  * a constant expression and independent of the string parser.
+ *
+ * The const, volatile and const volatile forms need no specialization of their own: \<limits\>
+ * already defines numeric_limits<cv T> to have the members of numeric_limits<T>.
  */
 template <> class numeric_limits<fp128::float128>
 {
@@ -5756,10 +5759,12 @@ public:
     static constexpr int min_exponent10 = -4931;
     static constexpr int max_exponent10 = 4932;
 
-    // has_denorm and has_denorm_loss are deprecated in C++23 but remain part of the interface a
+    // has_denorm and has_denorm_loss are deprecated since C++23 but remain part of the interface a
     // generic caller may read, so they are provided.
+    FP128_SUPPRESS_DEPRECATED_BEGIN
     static constexpr float_denorm_style has_denorm = denorm_present;
     static constexpr bool has_denorm_loss = false;
+    FP128_SUPPRESS_DEPRECATED_END
 
     /// @brief Smallest positive normal value, 2^-16382.
     [[nodiscard]] static constexpr fp128::float128 min() noexcept { return fp128::float128(0, 0x0001000000000000ull); }
@@ -5776,17 +5781,6 @@ public:
     [[nodiscard]] static constexpr fp128::float128 infinity() noexcept { return fp128::float128::inf(); }
     [[nodiscard]] static constexpr fp128::float128 quiet_NaN() noexcept { return fp128::float128::nan(); }
     [[nodiscard]] static constexpr fp128::float128 signaling_NaN() noexcept { return fp128::float128::signaling_nan(); }
-};
-
-/// @brief const, volatile and cv qualified float128 have the same numeric properties.
-template <> class numeric_limits<const fp128::float128> : public numeric_limits<fp128::float128>
-{
-};
-template <> class numeric_limits<volatile fp128::float128> : public numeric_limits<fp128::float128>
-{
-};
-template <> class numeric_limits<const volatile fp128::float128> : public numeric_limits<fp128::float128>
-{
 };
 
 /**

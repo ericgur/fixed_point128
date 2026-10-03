@@ -3403,6 +3403,15 @@ namespace std
  * A fixed point type is exact on its own grid rather than approximate like a floating point one,
  * so is_exact is true and epsilon is the spacing of that grid - the same everywhere, unlike a
  * float's, which is the spacing near one.
+ *
+ * The exponent members read the grid the way the floating point definitions read a significand:
+ * the smallest positive value epsilon() = 2^(I-127) is 2^(min_exponent-1), and max() is just under
+ * 2^max_exponent = 2^I. min() follows the floating point reading too and is the smallest positive
+ * value; lowest() is the most negative one.
+ *
+ * Every member is usable in a constant expression, as the standard requires of a specialization.
+ * The const, volatile and const volatile forms need no specialization of their own: \<limits\>
+ * already defines numeric_limits<cv T> to have the members of numeric_limits<T>.
  */
 template <int32_t I> class numeric_limits<fp128::fixed_point128<I>>
 {
@@ -3417,52 +3426,58 @@ public:
     static constexpr bool has_infinity = false;
     static constexpr bool has_quiet_NaN = false;
     static constexpr bool has_signaling_NaN = false;
+    // has_denorm and has_denorm_loss are deprecated since C++23 but remain part of the interface a
+    // generic caller may read, so they are provided.
+    FP128_SUPPRESS_DEPRECATED_BEGIN
     static constexpr bool has_denorm_loss = false;
     static constexpr float_denorm_style has_denorm = denorm_absent;
-    static constexpr float_round_style round_style = round_toward_zero;
+    FP128_SUPPRESS_DEPRECATED_END
+    /// @brief Multiplication, division and the right shift round to the nearest grid value.
+    static constexpr float_round_style round_style = round_to_nearest;
     static constexpr bool is_iec559 = false;
     static constexpr bool is_bounded = true;
     static constexpr bool is_modulo = false;
-    static constexpr bool traps = false;
+    /// @brief Division by zero throws std::logic_error rather than producing a value.
+    static constexpr bool traps = true;
     static constexpr bool tinyness_before = false;
 
     /// @brief Value bits. One of the 128 is the sign, so 127 of them carry magnitude.
     static constexpr int digits = 127;
     /// @brief Decimal digits that survive a round trip: floor(127 * log10(2)).
     static constexpr int digits10 = 38;
-    static constexpr int max_digits10 = 39;
     static constexpr int radix = 2;
-    /// @brief The last place is 2^(I-127), and the largest magnitude is just under 2^I.
-    static constexpr int min_exponent = I - 127;
+    /// @brief 2^(min_exponent-1) = 2^(I-127) is the smallest positive value, epsilon().
+    static constexpr int min_exponent = I - 126;
+    /// @brief 2^(max_exponent-1) = 2^(I-1) is the largest power of two in range; max() is 2^I - epsilon().
     static constexpr int max_exponent = I;
     static constexpr int min_exponent10 = static_cast<int>((I - 127) * 0.30102999566398119521);
     static constexpr int max_exponent10 = static_cast<int>(I * 0.30102999566398119521);
+    /**
+     * @brief Significant decimal digits that tell every pair of neighbouring values apart.
+     *
+     * The top decade, from 10^max_exponent10 to max(), needs the most. Its values have
+     * max_exponent10 + 1 integer digits, and the fraction needs floor((127 - I) * log10(2)) + 1
+     * decimal places before their spacing falls below the grid spacing 2^(I-127). The total is 40
+     * for the I where the two floors add up to 38 (4, 7, 10, 14, ..., 57, 60) and 39 for the rest.
+     */
+    static constexpr int max_digits10 = max_exponent10 + static_cast<int>((127 - I) * 0.30102999566398119521) + 2;
 
     /// @brief Smallest positive value, which is one unit in the last place.
-    [[nodiscard]] static value_type min() noexcept { return value_type::epsilon(); }
+    [[nodiscard]] static constexpr value_type min() noexcept { return value_type::epsilon(); }
     /// @brief Largest value, every bit below the sign set: 2^I - epsilon().
-    [[nodiscard]] static value_type max() noexcept { return value_type(UINT64_MAX, 0x7FFFFFFFFFFFFFFFull); }
+    [[nodiscard]] static constexpr value_type max() noexcept { return value_type(UINT64_MAX, 0x7FFFFFFFFFFFFFFFull); }
     /// @brief Most negative value, exactly -2^I. Two's complement makes the range asymmetric, so
     ///        this one has no positive counterpart and negating it wraps back to itself.
-    [[nodiscard]] static value_type lowest() noexcept { return value_type(0, 1ull << 63); }
+    [[nodiscard]] static constexpr value_type lowest() noexcept { return value_type(0, 1ull << 63); }
     /// @brief Spacing of the grid, the same at every magnitude.
-    [[nodiscard]] static value_type epsilon() noexcept { return value_type::epsilon(); }
-    [[nodiscard]] static value_type round_error() noexcept { return value_type::half(); }
-    [[nodiscard]] static value_type infinity() noexcept { return value_type(); }
-    [[nodiscard]] static value_type quiet_NaN() noexcept { return value_type(); }
-    [[nodiscard]] static value_type signaling_NaN() noexcept { return value_type(); }
-    [[nodiscard]] static value_type denorm_min() noexcept { return value_type(); }
-};
-
-/// @brief const, volatile and cv qualified fixed_point128 have the same numeric properties.
-template <int32_t I> class numeric_limits<const fp128::fixed_point128<I>> : public numeric_limits<fp128::fixed_point128<I>>
-{
-};
-template <int32_t I> class numeric_limits<volatile fp128::fixed_point128<I>> : public numeric_limits<fp128::fixed_point128<I>>
-{
-};
-template <int32_t I> class numeric_limits<const volatile fp128::fixed_point128<I>> : public numeric_limits<fp128::fixed_point128<I>>
-{
+    [[nodiscard]] static constexpr value_type epsilon() noexcept { return value_type::epsilon(); }
+    /// @brief Largest rounding error of an operation in units in the last place, one half.
+    [[nodiscard]] static constexpr value_type round_error() noexcept { return value_type::half(); }
+    [[nodiscard]] static constexpr value_type infinity() noexcept { return value_type(); }
+    [[nodiscard]] static constexpr value_type quiet_NaN() noexcept { return value_type(); }
+    [[nodiscard]] static constexpr value_type signaling_NaN() noexcept { return value_type(); }
+    /// @brief No value is subnormal, so this is the smallest positive one, the same as min().
+    [[nodiscard]] static constexpr value_type denorm_min() noexcept { return value_type::epsilon(); }
 };
 
 /// @brief Hash support, so a fixed_point128 can be a key in an unordered container.
