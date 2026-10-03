@@ -894,7 +894,7 @@ public:
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
      */
-    [[nodiscard]] FP128_FORCE_INLINE operator std::string() const noexcept { return operator char*(); }
+    [[nodiscard]] FP128_INLINE operator std::string() const noexcept { return operator char*(); }
     /**
      * @brief Converts to a C string (slow) string holds all meaningful fraction bits.
      * @return object string representation
