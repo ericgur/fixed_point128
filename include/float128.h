@@ -48,6 +48,10 @@
  * log2, log10, pow, erf, erfc, etc.).
  * All methods are inline for maximum performance.
  *
+ * The arithmetic, the conversions and the operations of IEEE 754-2008 clause 5 are correctly
+ * rounded. The rounding directions and exception flags the standard also requires are opt in,
+ * through FP128_IEEE_ENV; see the floating point environment section below.
+ *
  * @see fp128_shared.h for supporting intrinsics and utilities.
  */
 
@@ -56,6 +60,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cfenv>    // FE_ rounding directions and exception flags, which the float128 environment reuses
+#include <cfloat>   // LDBL_MANT_DIG, which selects the long double conversion
 #include <cmath>    // FP_NAN and friends, and the double seeds of sqrt/cbrt
 #include <climits>  // INT_MAX, the ilogb answer for an infinity
 #include <cstdlib>  // strtoull, for the nan() payload
@@ -63,6 +69,7 @@
 #include <format>     // std::formatter
 #include <functional> // std::hash
 #include <istream>
+#include <limits>
 #include <ostream>
 #include "fp128_shared.h"
 #include "fp128_decimal.h"
@@ -80,6 +87,8 @@ class float128;
 /// @brief Reads a decimal string into a float128. Defined below, declared here because the
 ///        constructor from a string delegates to it.
 std::from_chars_result from_chars(const char* first, const char* last, float128& value);
+/// @brief Reads a decimal or hexadecimal string into a float128. Defined below.
+std::from_chars_result from_chars(const char* first, const char* last, float128& value, std::chars_format fmt);
 
 namespace detail
 {
@@ -163,6 +172,14 @@ float128 hypot(const float128& x, const float128& y, const float128& z) noexcept
 float128 lgamma(float128 x) noexcept;
 float128 tgamma(float128 x) noexcept;
 constexpr float128 abs(const float128& x) noexcept;
+constexpr bool totalorder(const float128& x, const float128& y) noexcept;
+constexpr bool totalordermag(const float128& x, const float128& y) noexcept;
+constexpr float128 fmaxmag(const float128& x, const float128& y) noexcept;
+constexpr float128 fminmag(const float128& x, const float128& y) noexcept;
+constexpr bool iscanonical(const float128& x) noexcept;
+constexpr bool issignaling(const float128& x) noexcept;
+constexpr bool issubnormal(const float128& x) noexcept;
+constexpr bool iszero(const float128& x) noexcept;
 /// The only one of these that a call cannot reach through argument dependent lookup: its argument
 /// is a plain character pointer, so the name has to be visible at namespace scope - and a call has
 /// to be qualified as fp128::nan(...) wherever `<cmath>` puts its own nan(const char*) in scope too.
@@ -177,6 +194,410 @@ float128 double_factorial(int x) noexcept;
 /// @}
 
 /***********************************************************************************
+ *                                  Floating point environment
+ ************************************************************************************/
+
+/**
+ * @name Floating point environment
+ *
+ * IEEE 754-2008 asks two things of a binary format beyond its arithmetic. Clause 4 requires four
+ * rounding-direction attributes the program can choose between: to nearest with ties to even, the
+ * default, and towards zero, towards positive infinity and towards negative infinity. Clause 7
+ * requires five exceptions - invalid operation, division by zero, overflow, underflow and inexact -
+ * each reported by a status flag that stays raised until the program lowers it.
+ *
+ * float128 provides both, as a per thread environment of its own that is entirely separate from the
+ * hardware one <cfenv> controls: setting the rounding direction here does not change how double
+ * rounds, and an exception raised by a float128 operation shows up here and not in fetestexcept().
+ *
+ * <B>The environment is opt in.</B> It exists only when every translation unit that includes this
+ * header is compiled with FP128_IEEE_ENV defined. Without it, which is the default, every operation
+ * rounds to nearest with ties to even, no flag is ever raised, and the code that would maintain the
+ * environment compiles away, leaving the arithmetic exactly as fast as it was before the
+ * environment existed. The functions below are still declared, so the same source builds either
+ * way: they report the fixed default and refuse to change it.
+ *
+ * The macro changes the definition of inline functions, so it must have the same value in every
+ * translation unit of a program. Mixing the two violates the one definition rule.
+ *
+ * The rounding directions and exception flags are named with the FE_ constants of <cfenv>, so the
+ * calls read the way their hardware counterparts do:
+ * @code
+ *     fp128::fesetround(FE_UPWARD);
+ *     float128 bound = a / b;                       // rounded towards +inf
+ *     if (fp128::fetestexcept(FE_INEXACT)) { ... }  // the quotient was not exact
+ * @endcode
+ * The calls have to be qualified: their arguments are plain integers, so argument dependent lookup
+ * cannot tell them from the <cfenv> functions of the same name.
+ * @{
+ */
+
+namespace detail
+{
+/// @brief The rounding-direction attributes IEEE 754-2008 requires of a binary format.
+enum class rounding : uint8_t {
+    nearest_even,  ///< roundTiesToEven, the default
+    toward_zero,   ///< roundTowardZero
+    upward,        ///< roundTowardPositive
+    downward       ///< roundTowardNegative
+};
+
+/// @brief The per thread state behind the float128 environment.
+struct float_env {
+    rounding mode = rounding::nearest_even;  ///< Rounding direction in effect.
+    int flags = 0;                           ///< Raised exceptions, as FE_ bits.
+};
+
+#ifdef FP128_IEEE_ENV
+/// @brief The environment of the calling thread.
+inline thread_local float_env env;
+#endif
+
+/**
+ * @brief The rounding direction every float128 operation applies.
+ *
+ * Constant evaluation always rounds to nearest: a thread local cannot be read there, and a constant
+ * whose value depended on the thread that happened to compile it would be meaningless anyway.
+ *
+ * Never store the result in a const local: `const rounding mode = current_rounding();` makes the
+ * initializer manifestly constant evaluated, so it would always see nearest_even. Pass the call
+ * as an argument, or keep the local non const.
+ *
+ * @return The current rounding direction, or nearest_even without FP128_IEEE_ENV.
+ */
+[[nodiscard]] FP128_FORCE_INLINE constexpr rounding current_rounding() noexcept
+{
+#ifdef FP128_IEEE_ENV
+    if (!std::is_constant_evaluated())
+        return env.mode;
+#endif
+    return rounding::nearest_even;
+}
+
+/**
+ * @brief Raises exception flags. Does nothing without FP128_IEEE_ENV or during constant evaluation.
+ * @param flags FE_ bits to raise
+ */
+FP128_FORCE_INLINE constexpr void raise_flags([[maybe_unused]] int flags) noexcept
+{
+#ifdef FP128_IEEE_ENV
+    if (!std::is_constant_evaluated())
+        env.flags |= flags;
+#endif
+}
+
+/**
+ * @brief Sets the exception flags aside for its lifetime, and discards whatever is raised meanwhile.
+ *
+ * For computations whose intermediate operations raise exceptions the result does not: the trial
+ * parses of the shortest decimal search, or the Newton steps of sqrt(), which are inexact even when
+ * the root they converge on is exact. Compiles to nothing without FP128_IEEE_ENV.
+ */
+class flag_quiet
+{
+public:
+    flag_quiet() noexcept
+    {
+#ifdef FP128_IEEE_ENV
+        saved = env.flags;
+#endif
+    }
+    ~flag_quiet()
+    {
+#ifdef FP128_IEEE_ENV
+        env.flags = saved;
+#endif
+    }
+    flag_quiet(const flag_quiet&) = delete;
+    flag_quiet& operator=(const flag_quiet&) = delete;
+
+private:
+    [[maybe_unused]] int saved = 0;  ///< Flags raised before the scope began.
+};
+
+/**
+ * @brief Reduces what a math function's internal operations raise to what its result justifies.
+ *
+ * A function such as sin() is built from dozens of additions and multiplications, and those raise
+ * exceptions of their own: a series term underflows, an intermediate overflows on a path whose
+ * result does not. IEEE 754-2008 9.2 asks the function to signal as one operation would - inexact
+ * when the result is, overflow when the result overflowed, underflow when it is tiny and inexact.
+ * Constructed after a function has dealt with its special cases, which raise invalid and division
+ * by zero themselves, it sets the caller's flags aside; operator() then keeps inexact if any step
+ * raised it and derives the rest from the result. Compiles to nothing without FP128_IEEE_ENV.
+ */
+class flag_filter
+{
+public:
+    flag_filter() noexcept
+    {
+#ifdef FP128_IEEE_ENV
+        saved = env.flags;
+        env.flags = 0;
+#endif
+    }
+    ~flag_filter()
+    {
+#ifdef FP128_IEEE_ENV
+        env.flags = saved | kept;
+#endif
+    }
+    flag_filter(const flag_filter&) = delete;
+    flag_filter& operator=(const flag_filter&) = delete;
+
+    /**
+     * @brief The same as operator(), for a result known to be inexact without an operation
+     *        having said so: an overflow or underflow decided from the argument's range alone.
+     * @tparam T float128
+     * @param result The function's result
+     * @return result
+     */
+    template <typename T> [[nodiscard]] T inexact(const T& result) noexcept
+    {
+        raise_flags(FE_INEXACT);
+        return (*this)(result);
+    }
+
+    /**
+     * @brief Records the flags a result justifies and passes the result through.
+     * @tparam T float128, which is incomplete where this is declared
+     * @param result The function's result, from finite operands
+     * @return result
+     */
+    template <typename T> [[nodiscard]] T operator()(const T& result) noexcept
+    {
+#ifdef FP128_IEEE_ENV
+        const int raised = env.flags;
+        int justified = raised & FE_INEXACT;
+        if (result.is_nan())
+            justified |= FE_INVALID;
+        else if (result.is_inf())
+            justified |= FE_OVERFLOW | FE_INEXACT;
+        else if ((result.is_zero() || result.is_subnormal()) && (raised & FE_INEXACT) != 0)
+            justified |= FE_UNDERFLOW;
+        kept |= justified;
+#endif
+        return result;
+    }
+
+private:
+    [[maybe_unused]] int saved = 0;  ///< Flags raised before the function began.
+    [[maybe_unused]] int kept = 0;   ///< Flags the result justified.
+};
+
+/**
+ * @brief The digit rounding the current direction comes down to for a value of a given sign.
+ * @param sign Sign of the value being converted
+ * @return How to round its last digit.
+ */
+[[nodiscard]] inline digit_rounding digit_rounding_for(uint32_t sign) noexcept
+{
+    switch (current_rounding()) {
+    case rounding::toward_zero: return digit_rounding::toward_zero;
+    case rounding::upward:      return (sign != 0) ? digit_rounding::toward_zero : digit_rounding::away_from_zero;
+    case rounding::downward:    return (sign != 0) ? digit_rounding::away_from_zero : digit_rounding::toward_zero;
+    default:                    return digit_rounding::nearest_even;
+    }
+}
+}  // namespace detail
+
+/**
+ * @brief The rounding direction float128 arithmetic uses on the calling thread.
+ * @return One of FE_TONEAREST, FE_TOWARDZERO, FE_UPWARD or FE_DOWNWARD.
+ */
+[[nodiscard]] inline int fegetround() noexcept
+{
+    switch (detail::current_rounding()) {
+    case detail::rounding::toward_zero: return FE_TOWARDZERO;
+    case detail::rounding::upward:      return FE_UPWARD;
+    case detail::rounding::downward:    return FE_DOWNWARD;
+    default:                            return FE_TONEAREST;
+    }
+}
+
+/**
+ * @brief Selects the rounding direction float128 arithmetic uses on the calling thread.
+ * @param round One of FE_TONEAREST, FE_TOWARDZERO, FE_UPWARD or FE_DOWNWARD
+ * @return Zero on success. Non zero for an unknown direction, and for anything but FE_TONEAREST
+ *         when the program was built without FP128_IEEE_ENV.
+ */
+inline int fesetround(int round) noexcept
+{
+    detail::rounding mode = detail::rounding::nearest_even;
+    if (round == FE_TOWARDZERO)
+        mode = detail::rounding::toward_zero;
+    else if (round == FE_UPWARD)
+        mode = detail::rounding::upward;
+    else if (round == FE_DOWNWARD)
+        mode = detail::rounding::downward;
+    else if (round != FE_TONEAREST)
+        return 1;
+
+#ifdef FP128_IEEE_ENV
+    detail::env.mode = mode;
+    return 0;
+#else
+    return (mode == detail::rounding::nearest_even) ? 0 : 1;
+#endif
+}
+
+/**
+ * @brief Tests float128 exception flags (IEEE 754 testFlags).
+ * @param excepts FE_ bits to test
+ * @return The subset of @p excepts that is raised. Always zero without FP128_IEEE_ENV.
+ */
+[[nodiscard]] inline int fetestexcept([[maybe_unused]] int excepts) noexcept
+{
+#ifdef FP128_IEEE_ENV
+    return detail::env.flags & excepts & FE_ALL_EXCEPT;
+#else
+    return 0;
+#endif
+}
+
+/**
+ * @brief Lowers float128 exception flags (IEEE 754 lowerFlags).
+ * @param excepts FE_ bits to clear
+ * @return Zero.
+ */
+inline int feclearexcept([[maybe_unused]] int excepts) noexcept
+{
+#ifdef FP128_IEEE_ENV
+    detail::env.flags &= ~excepts;
+#endif
+    return 0;
+}
+
+/**
+ * @brief Raises float128 exception flags (IEEE 754 raiseFlags).
+ * @param excepts FE_ bits to raise
+ * @return Zero on success; non zero without FP128_IEEE_ENV, when there is nowhere to raise them.
+ */
+inline int feraiseexcept(int excepts) noexcept
+{
+#ifdef FP128_IEEE_ENV
+    detail::env.flags |= excepts & FE_ALL_EXCEPT;
+    return 0;
+#else
+    return (excepts & FE_ALL_EXCEPT) != 0 ? 1 : 0;
+#endif
+}
+
+/**
+ * @brief Saves the state of float128 exception flags (IEEE 754 saveAllFlags).
+ * @param flagp Receives the saved state
+ * @param excepts FE_ bits to save
+ * @return Zero.
+ */
+inline int fegetexceptflag(std::fexcept_t* flagp, int excepts) noexcept
+{
+    if (flagp != nullptr)
+        *flagp = static_cast<std::fexcept_t>(fetestexcept(excepts));
+    return 0;
+}
+
+/**
+ * @brief Restores float128 exception flags saved by fegetexceptflag (IEEE 754 restoreFlags).
+ *
+ * Only the flags named in @p excepts are written, each set to the state it had when saved.
+ *
+ * @param flagp State saved by fegetexceptflag()
+ * @param excepts FE_ bits to restore
+ * @return Zero.
+ */
+inline int fesetexceptflag([[maybe_unused]] const std::fexcept_t* flagp, [[maybe_unused]] int excepts) noexcept
+{
+#ifdef FP128_IEEE_ENV
+    if (flagp != nullptr) {
+        const int mask = excepts & FE_ALL_EXCEPT;
+        detail::env.flags = (detail::env.flags & ~mask) | (static_cast<int>(*flagp) & mask);
+    }
+#endif
+    return 0;
+}
+/// @}
+
+namespace detail
+{
+/**
+ * @brief The binary expansion of 2/pi after the binary point, most significant word first.
+ *
+ * The trigonometric functions reduce a large argument by multiplying it with a window of these
+ * bits chosen by its exponent (see float128::reduce_large()). An argument near the top of the
+ * binary128 range reads about 16650 bits in. Generated by tools/gen_two_over_pi.py, which also
+ * verifies it; do not edit by hand.
+ */
+inline constexpr uint64_t two_over_pi_bits[] = {
+    0xA2F9836E4E441529, 0xFC2757D1F534DDC0, 0xDB6295993C439041, 0xFE5163ABDEBBC561,
+    0xB7246E3A424DD2E0, 0x06492EEA09D1921C, 0xFE1DEB1CB129A73E, 0xE88235F52EBB4484,
+    0xE99C7026B45F7E41, 0x3991D639835339F4, 0x9C845F8BBDF9283B, 0x1FF897FFDE05980F,
+    0xEF2F118B5A0A6D1F, 0x6D367ECF27CB09B7, 0x4F463F669E5FEA2D, 0x7527BAC7EBE5F17B,
+    0x3D0739F78A5292EA, 0x6BFB5FB11F8D5D08, 0x56033046FC7B6BAB, 0xF0CFBC209AF4361D,
+    0xA9E391615EE61B08, 0x6599855F14A06840, 0x8DFFD8804D732731, 0x06061556CA73A8C9,
+    0x60E27BC08C6B47C4, 0x19C367CDDCE8092A, 0x8359C4768B961CA6, 0xDDAF44D15719053E,
+    0xA5FF07053F7E33E8, 0x32C2DE4F98327DBB, 0xC33D26EF6B1E5EF8, 0x9F3A1F35CAF27F1D,
+    0x87F121907C7C246A, 0xFA6ED5772D30433B, 0x15C614B59D19C3C2, 0xC4AD414D2C5D000C,
+    0x467D862D71E39AC6, 0x9B0062337CD2B497, 0xA7B4D55537F63ED7, 0x1810A3FC764D2A9D,
+    0x64ABD770F87C6357, 0xB07AE715175649C0, 0xD9D63B3884A7CB23, 0x24778AD623545AB9,
+    0x1F001B0AF1DFCE19, 0xFF319F6A1E666157, 0x9947FBACD87F7EB7, 0x652289E83260BFE6,
+    0xCDC4EF09366CD43F, 0x5DD7DE16DE3B5892, 0x9BDE2822D2E88628, 0x4D58E232CAC616E3,
+    0x08CB7DE050C017A7, 0x1DF35BE01834132E, 0x6212830148835B8E, 0xF57FB0ADF2E91E43,
+    0x4A48D36710D8DDAA, 0x425FAECE616AA428, 0x0AB499D3F2A6067F, 0x775C83C2A3883C61,
+    0x78738A5A8CAFBDD7, 0x6F63A62DCBBFF4EF, 0x818D67C12645CA55, 0x36D9CAD2A8288D61,
+    0xC277C9121426049B, 0x4612C459C444C5C8, 0x91B24DF31700AD43, 0xD4E5492910D5FDFC,
+    0xBE00CC941EEECE70, 0xF53E1380F1ECC3E7, 0xB328F8C79405933E, 0x71C1B3092EF3450B,
+    0x9C12887B20AB9FB5, 0x2EC292472F327B6D, 0x550C90A7721FE76B, 0x96CB314A1679E279,
+    0x4189DFF49794E884, 0xE6E29731996BED88, 0x365F5F0EFDBBB49A, 0x486CA46742727132,
+    0x5D8DB8159F09E5BC, 0x25318D3974F71C05, 0x30010C0D68084B58, 0xEE2C90AA4702E774,
+    0x24D6BDA67DF77248, 0x6EEF169FA6948EF6, 0x91B45153D1F20ACF, 0x3398207E4BF56863,
+    0xB25F3EDD035D407F, 0x8985295255C06437, 0x10D86D324832754C, 0x5BD4714E6E5445C1,
+    0x090B69F52AD56614, 0x9D072750045DDB3B, 0xB4C576EA17F9877D, 0x6B49BA271D296996,
+    0xACCCC65414AD6AE2, 0x9089D98850722CBE, 0xA4049407777030F3, 0x27FC00A871EA49C2,
+    0x663DE06483DD9797, 0x3FA3FD94438C860D, 0xDE41319D39928C70, 0xDDE7B7173BDF082B,
+    0x3715A0805C93805A, 0x921110D8E80FAF80, 0x6C4BFFDB0F903876, 0x185915A562BBCB61,
+    0xB989C7BD401004F2, 0xD2277549F6B6EBBB, 0x22DBAA140A2F2689, 0x768364333B091A94,
+    0x0EAA3A51C2A31DAE, 0xEDAF12265C4DC26D, 0x9C7A2D9756C0833F, 0x03F6F0098C402B99,
+    0x316D07B43915200C, 0x5BC3D8C492F54BAD, 0xC6A5CA4ECD37A736, 0xA9E69492AB6842DD,
+    0xDE6319EF8C76528B, 0x6837DBFCABA1AE31, 0x15DFA1AE00DAFB0C, 0x664D64B705ED3065,
+    0x29BF56573AFF47B9, 0xF96AF3BE75DF9328, 0x3080ABF68C6615CB, 0x040622FA1DE4D9A4,
+    0xB33D8F1B5709CD36, 0xE9424EA4BE13B523, 0x331AAAF0A8654FA5, 0xC1D20F3F0BCD785B,
+    0x76F923048B7B7217, 0x8953A6C6E26E6F00, 0xEBEF584A9BB7DAC4, 0xBA66AACFCF761D02,
+    0xD12DF1B1C1998C77, 0xADC3DA4886A05DF7, 0xF480C62FF0AC9AEC, 0xDDBC5C3F6DDED01F,
+    0xC790B6DB2A3A25A3, 0x9AAF009353AD0457, 0xB6B42D297E804BA7, 0x07DA0EAA76A1597B,
+    0x2A12162DB7DCFDE5, 0xFAFEDB89FDBE896C, 0x76E4FCA90670803E, 0x156E85FF87FD073E,
+    0x2833676186182AEA, 0xBD4DAFE7B36E6D8F, 0x3967955BBF3148D7, 0x8416DF30432DC735,
+    0x6125CE70C9B8CB30, 0xFD6CBFA200A4E46C, 0x05A0DD5A476F21D2, 0x1262845CB9496170,
+    0xE0566B0152993755, 0x50B7D51EC4F1335F, 0x6E13E4305DA92E85, 0xC3B21D3632A1A4B7,
+    0x08D4B1EA21F716E4, 0x698F77FF2780030C, 0x2D408DA0CD4F99A5, 0x20D3A2B30A5D2F42,
+    0xF9B4CBDA11D0BE7D, 0xC1DB9BBD17AB81A2, 0xCA5C6A0817552E55, 0x0027F0147F8607E1,
+    0x640B148D4196DEBE, 0x872AFDDAB6256B34, 0x897BFEF3059EBFB9, 0x4F6A68A82A4A5AC4,
+    0x4FBCF82D985AD795, 0xC7F48D4D0DA63A20, 0x5F57A4B13F149538, 0x800120CC86DD71B6,
+    0xDEC9F560BF11654D, 0x6B0701ACB08CD0C0, 0xB24855510EFB1EC3, 0x72953B06A33540C0,
+    0x7BDC06CC45E0FA29, 0x4EC8CAD641F3E8DE, 0x647CD8649B31BED9, 0xC397A4D45877C5E3,
+    0x6913DAF03C3ABA46, 0x18465F7555F5BDD2, 0xC6926E5D2EACED44, 0x0E423E1C87C461E9,
+    0xFD29F3D6E7CA7C22, 0x35916FC5E0088DD7, 0xFFE26A6EC6FDB0C1, 0x0893745D7CB2AD6B,
+    0x9D6ECD7B723E6A11, 0xC6A9CFF7DF7329BA, 0xC9B55100B70DB2E2, 0x24BA74607DE58AD8,
+    0x742C150D0C188194, 0x667E162901767A9F, 0xBEFDFDEF4556367E, 0xD913D9ECB9BA8BFC,
+    0x97C427A831C36EF1, 0x36C59456A8D8B5A8, 0xB40ECCCF2D891234, 0x576F89562CE3CE99,
+    0xB920D6AA5E6B9C2A, 0x3ECC5F114A0BFDFB, 0xF4E16D3B8E2C86E2, 0x84D4E9A9B4FCD1EE,
+    0xEFC9352E61392F44, 0x2138C8D91B0AFC81, 0x6A4AFBD81C2F84B4, 0x538C994ECC2254DC,
+    0x552AD6C6C096190B, 0xB8701A649569605A, 0x26EE523F0F117F11, 0xB5F4F5CBFC2DBC34,
+    0xEEBC34CC5DE8605E, 0xDD9B8E67EF3392B8, 0x17C99B5861BC57E1, 0xC68351103ED84871,
+    0xDDDD1C2DA118AF46, 0x2C21D7F359987AD9, 0xC0549EFA864FFC06, 0x56AE79E536228922,
+    0xAD38DC9367AAE855, 0x3826829BE7CAA40D, 0x51B133990ED7A948, 0x0569F0B265A7887F,
+    0x974C8836D1F9B392, 0x214A827B21CF98DC, 0x9F405547DC3A74E1, 0x42EB67DF9DFE5FD4,
+    0x5EA4677B7AACBAA2, 0xF65523882B55BA41, 0x086E59862A218347, 0x39E6E389D49EE540,
+    0xFB49E956FFCA0F1C, 0x8A59C52BFA94C5C1, 0xD3CFC50FAE5ADB86, 0xC5476243853B8621,
+    0x94792C8761107B4C, 0x2A1A2C8012BF4390, 0x2688893C78E4C4A8, 0x7BDBE5C23AC4EAF4,
+    0x268A67F7BF920D2B, 0xA365B1933D0B7CBD, 0xDC51A463DD27DDE1, 0x6919949A9529A828,
+    0xCE68B4ED09209F44, 0xCA984E638270237C, 0x7E32B90F8EF5A7E7, 0x561408F1212A9DB5,
+    0x4D7E6F5119A5ABF9, 0xB5D6DF8261DD9602, 0x36169F3AC4A1A283, 0x6DED727A8D39A9B8,
+    0x825C326B5B2746ED, 0x34007700D255F4FC, 0x4D59018071E0E13F, 0x89B295F364A8F1AE,
+    0xA74B38FC4CEAB2BB, 0x47270BABC3A734BA, 0x6052DD34F8563AEB, 0x7E8A31BB365895B7,
+};
+}  // namespace detail
+
+/***********************************************************************************
  *                                  Main Code
  ************************************************************************************/
 
@@ -185,6 +606,25 @@ float128 double_factorial(int x) noexcept;
  *
  * This class implements the standard operators a floating point data type.<BR>
  * All of float128's methods are inline for maximum performance.
+ *
+ * <B>IEEE 754-2008:</B>
+ * <UL>
+ * <LI>Addition, subtraction, multiplication, division, sqrt(), fma(), the remainders, the
+ *     rounding to an integral value and the conversions to and from double, float, long double,
+ *     the integer types and text are correctly rounded - each computes the exact result and rounds
+ *     it once, to the destination's width, its subnormal range included (see round_pack()).</LI>
+ * <LI>Every one of them follows the standard's rules for zeros, infinities and NaNs: the sign of
+ *     an exact zero sum, the invalid operations, a signaling NaN quieted, the payload of the first
+ *     NaN operand delivered.</LI>
+ * <LI>Round to nearest, ties to even, is the only rounding direction and no exception flag is
+ *     kept, unless FP128_IEEE_ENV is defined; with it fp128::fesetround() chooses among the four
+ *     directions clause 4 requires, and the five flags of clause 7 are raised and tested through
+ *     fp128::fetestexcept() and its siblings. Only with the macro does the type claim conformance
+ *     (numeric_limits::is_iec559, is754version2008()).</LI>
+ * <LI>The math functions of clause 9 follow its special values but are not correctly rounded,
+ *     which the standard recommends rather than requires. Each one's error is measured and stated
+ *     in tests/float128_accuracy_gtest.cpp.</LI>
+ * </UL>
  *
  * <B>Implementation notes:</B>
  * <UL>
@@ -322,12 +762,14 @@ public:
     FP128_INLINE constexpr float128(double x) noexcept
     {
         low = high = 0;
-        // very common case
-        if (x == 0)
-            return;
-
         // hack the double bit fields
         const Double d(x);
+
+        // very common case. The sign is kept: -0.0 is a value of its own.
+        if (x == 0) {
+            set_sign(d.s());
+            return;
+        }
 
         // subnormal numbers
         if (d.e() == 0) {
@@ -345,8 +787,18 @@ public:
         // NaN & INF
         else if (d.e() == 0x7FF) {
             set_exponent_bits(INF_EXP_BIASED);
-            // zero for +- INF, non-zero for NaN
-            set_fraction_bits((d.f()) ? 1 : 0);
+            if (d.f() != 0) {
+                // A NaN keeps its payload, moved to the top of the wider fraction where the
+                // conversion back to double looks for it, and its quiet bit lands on the quiet bit.
+                // A signaling NaN is quieted: the conversion is an operation, and a signaling
+                // operand makes it the invalid one.
+                low = d.f() << (FRAC_BITS - dbl_frac_bits);
+                set_fraction_bits(d.f() >> (64 - (FRAC_BITS - dbl_frac_bits)));
+                if (is_signaling()) {
+                    detail::raise_flags(FE_INVALID);
+                    high |= QUIET_NAN_BIT;
+                }
+            }
         }
         // normal numbers
         else {
@@ -360,15 +812,23 @@ public:
     }
     /**
      * @brief Generic constructor for integral and floating-point types.
-     * Floating-point types are converted via double. Integral types are converted directly.
-     * Character pointer types delegate to the const char* constructor.
+     *
+     * Every value of every builtin arithmetic type is representable, so the conversion is exact.
+     * float goes through double, which holds it exactly. A long double wider than a double - the
+     * x87 extended format, or binary128 itself - is read from its encoding, since a double would
+     * round it. Integral types are converted directly. Character pointer types delegate to the
+     * const char* constructor.
+     *
      * @tparam T Source type (must be arithmetic or a character pointer type)
      * @param x Input value
      */
     template <typename T> constexpr float128(T x) noexcept : low(0), high(0)
     {
         if constexpr (std::is_floating_point_v<T>) {
-            *this = float128(static_cast<double>(x));
+            if constexpr (std::is_same_v<T, long double> && LDBL_MANT_DIG != 53)
+                *this = from_long_double(x);
+            else
+                *this = float128(static_cast<double>(x));
             return;
         } else if constexpr (std::is_same_v<char*, T> || std::is_same_v<unsigned char*, T> || std::is_same_v<const unsigned char*, T>) {
             *this = float128(static_cast<const char*>(x));
@@ -411,303 +871,29 @@ public:
         if (x == nullptr)
             return;
 
-        // The decimal form is read by from_chars(), which builds the exact value and rounds it
-        // once to the nearest representable one. The code below reads a hexadecimal literal, where
-        // every digit lands on a bit and no rounding arises.
+        // Everything is read by from_chars(), which builds the exact value and rounds it once:
+        // a decimal number, a hexadecimal one (0x1.8p1, the form printf's %a writes), or one of
+        // inf, infinity, nan, nan(payload) and snan. Leading white space is skipped, as strtod()
+        // skips it.
         //
-        // The decimal path used to live here too: it accumulated the digits as a float128 and
-        // divided by a power of ten held in the type. Negative powers of ten are not
-        // representable in binary, so that division rounded, and the value came back about an ulp
-        // away from the one the string named - close enough to look right and far enough that
-        // writing it back out took 35 digits instead of one.
-        const char* probe = x;
-        while (*probe != 0 && isspace(static_cast<unsigned char>(*probe)))
-            ++probe;
-        const char* body = probe;
+        // The decimal path used to live here: it accumulated the digits as a float128 and divided
+        // by a power of ten held in the type. Negative powers of ten are not representable in
+        // binary, so that division rounded, and the value came back about an ulp away from the
+        // one the string named. The hexadecimal path that remained here read integers only, so
+        // 0x1.8p1 came back as 1, and it truncated the digits past the 29th rather than rounding.
+        while (*x != 0 && isspace(static_cast<unsigned char>(*x)))
+            ++x;
+        const char* const end = x + strlen(x);
+        const char* body = x;
         if (*body == '-' || *body == '+')
             ++body;
-        if (!(body[0] == '0' && (body[1] == 'x' || body[1] == 'X'))) {
-            from_chars(probe, probe + strlen(probe), *this);
+        if (body[0] == '0' && (body[1] == 'x' || body[1] == 'X')) {
+            // std::from_chars takes a hexadecimal number without its prefix.
+            if (from_chars(body + 2, end, *this, std::chars_format::hex).ec == std::errc {} && *x == '-')
+                invert_sign();
             return;
         }
-
-        constexpr uint64_t base16_max_digits = (112 + 4) / 4;  // 29 hex digits. 28 for the fraction (112 bit) and another for the unity
-        constexpr uint64_t base10_max_digits = 35;             // maximum for 112 bit of mantissa/fraction is 34, read one extra to get maximum precision
-        uint32_t sign = 0;
-        uint32_t base = 10;
-        int32_t expo2 = 0;   // base2 exponent
-        int32_t expo10 = 0;  // base10 exponent
-
-        // convert the input string to lowercase for simpler processing.
-        const auto x_len = 1 + strlen(x);
-        // make_unique_for_overwrite throws bad_alloc, which this noexcept constructor must not
-        // propagate. The nothrow form reports a failed allocation as a null pointer instead.
-        auto str_ptr = std::unique_ptr<char[]>(new (std::nothrow) char[x_len]);
-        char* p = str_ptr.get();
-        if (p == nullptr)
-            return;
-
-        strnlwr(p, x, x_len);
-
-        // skip leading white space. The cast keeps a negative char from reaching isspace, which
-        // only accepts values representable as unsigned char (or EOF).
-        while (*p && isspace(static_cast<unsigned char>(*p)))
-            ++p;
-
-        if (*p == '\0') {
-            *this = float128();
-            return;
-        }
-        // set negative sign if needed
-        if (*p == '-') {
-            sign = 1;
-            ++p;
-        } else if (*p == '+')
-            ++p;
-
-        // check for infinity
-        if (0 == strncmp(p, "inf", 3)) {
-            *this = inf();
-            return;
-        }
-        // check for nan
-        else if (0 == strncmp(p, "nan", 3)) {
-            *this = nan();
-            return;
-        }
-
-        int32_t max_digits = base10_max_digits;
-        // check for a hex string
-        if (0 == strncmp(p, "0x", 2)) {
-            base = 16;
-            p += 2;
-            max_digits = base16_max_digits;
-        }
-
-        // skip leading zeros
-        while (*p == '0')
-            ++p;
-
-        int32_t int_digits = 0, frac_digits = 0;
-        char* int_start = p;
-        char* frac_start = nullptr;
-
-        // count the integer digits
-        while (isdigit(static_cast<unsigned char>(*p)) || (base == 16 && *p >= 'a' && *p <= 'f')) {
-            ++int_digits;
-            ++p;
-        }
-
-        // got a hex unsigned int literal
-        // every digit is 4 bits, need to keep at most 112 bits after the msb.
-        if (base == 16) {
-            // zero value
-            if (int_digits == 0) {
-                set_sign(sign);
-                return;
-            }
-
-            uint64_t* frac_bits = &low;  // fill the internal data structure directly
-            // start at the leftmost digit and iterate right
-
-            int32_t digits_consumed = std::min(int_digits, max_digits);
-            char* cur_digit = int_start;
-            char* const end_digit = int_start + digits_consumed;
-
-            // fill the internal structure starting at the top bits of high
-            while (cur_digit < end_digit) {
-                uint64_t d = *cur_digit;
-                if (d >= '0' && d <= '9')
-                    d -= '0';
-                else
-                    d = 10ull + d - 'a';
-
-                ++cur_digit;
-                auto index = 1 - (expo2 >> 6);  // fill high part first
-                assert(index >= 0 && index <= 1);
-                auto shift = 60 - (expo2 & 63);
-                frac_bits[index] |= d << shift;
-                expo2 += 4;
-            }
-            // shift the result into position and fix the exponent
-            uint64_t left_digit = high >> 60;
-            assert(left_digit != 0);
-            static constexpr int32_t digit_msb_lut[16] = {0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3};
-            const auto digit_msb = digit_msb_lut[left_digit];
-            expo2 -= 4 - digit_msb;
-            expo2 += 4 * (int_digits - digits_consumed);  // account for digits which do not fit in the fraction.
-
-            // overflow
-            if (expo2 > INF_EXP_UNBIASED) {
-                *this = inf();
-            } else {
-                shift_right128_inplace_safe(low, high, 124 + digit_msb - FRAC_BITS);  // move digit's 2nd  msb to bit 111
-                set_exponent(expo2);
-                set_sign(sign);
-            }
-
-            // a hex input value has no exponent or fraction. see note below about exponent support for hex.
-            return;
-        }
-
-        // Note: fraction and exponent are valid only with base 10 until 'p' style strings are supported (base2 hex exponents). e.g. "1.EDp5F"
-        assert(base == 10);
-
-        // check for the optional decimal point
-        if (*p == '.') {
-            *p = '\0';
-            ++p;
-            frac_start = (isdigit(static_cast<unsigned char>(*p))) ? p : nullptr;
-
-            // count the fraction digits if they exist
-            if (frac_start) {
-                while (isdigit(static_cast<unsigned char>(*p))) {
-                    ++frac_digits;
-                    ++p;
-                }
-
-                // back track and erase the trailing zeros
-                char* pp = p - 1;
-                while (*pp == '0') {
-                    --frac_digits;
-                    *pp-- = '\0';
-                }
-            }
-
-            // TODO: optimize small numbers
-            // integer part is zero - skip the leading zeros in the fraction and adjust the exponent
-            // example 0.01 == 0.1E-1
-            // if (int_digits == 0 && frac_start != nullptr) {
-            //    while (*frac_start == '0') {
-            //        ++frac_start;
-            //        --frac_digits;
-            //        --expo10_adjust;
-            //    }
-            //}
-        }
-
-        // check for the optional exponent
-        if (*p == 'e') {
-            *p = '\0';  // terminate the fraction string
-            ++p;
-            // convert the exponent
-            expo10 = strtol(p, nullptr, 10);
-
-            // underflow
-            if (expo10 < -4965) {
-                return;
-            }
-
-            // overflow
-            if (expo10 > 4932) {
-                *this = inf();
-            }
-        }
-
-        // compute the integer part
-        if (base == 10) {
-            uint128_t int_part;
-            int32_t digits_consumed = std::min(int_digits, max_digits);
-            char* const end_digit = int_start + digits_consumed;
-            *end_digit = '\0';
-            int_part = int_start;
-            int32_t shift_bits = 0;
-
-            // mark the extra exponent that may exist if we had enough bits to represent the entire value
-            auto extra_digits = int_digits - digits_consumed;
-
-            // multiply by 10 for each digit
-            while (extra_digits > 0) {
-                --extra_digits;
-                uint64_t msb = int_part ? log2(int_part) : 0;
-                if (msb >= 123) {
-                    int_part >>= 4;
-                    shift_bits += 4;
-                    assert(msb - log2(int_part) == 4);
-                }
-                int_part *= 10;
-            }
-
-            int32_t msb = int_part ? static_cast<int32_t>(log2(int_part)) : 0;
-            expo2 = msb + shift_bits;
-
-            // shift the integer value into position: msb at bit 112
-            int32_t shift = 0;
-            shift = FRAC_BITS - msb;
-            if (shift > 0)
-                int_part <<= shift;
-            else
-                int_part >>= -shift;
-
-            // set the integer part if non-zero
-            if (int_part) {
-                int_part.get_components(low, high);  // unity bit is erased by set_exponent()
-                set_exponent(expo2);
-                set_sign(sign);
-            }
-        }
-
-        // if both integer & fraction are zero, the result is zero regardless of the exponent e.g. 0E9999
-        if (int_digits == 0 && frac_digits == 0) {
-            set_sign(sign);
-            return;
-        }
-
-        // The fraction part is relevant if:
-        // 1) Adding more digits actually changes the value
-        // 2) Fraction digits exist and not all zero
-        float128 frac_part;
-        if (frac_digits > 0) {
-            // A fraction below 0.1 begins with zeros that carry no information. Skipping them and
-            // compensating through the divisor's exponent means the digit budget is spent on
-            // significant digits only. Charging the leading zeros against it, as this used to,
-            // left a value such as 1.1e-7 with barely 29 significant digits, too few to read back.
-            int32_t leading_zeros = 0;
-            if (int_digits == 0) {
-                while (leading_zeros < frac_digits && frac_start[leading_zeros] == '0')
-                    ++leading_zeros;
-            }
-
-            // take the minimum of the actual digits in the string versus what is the maximum possible to hold in 112 bit.
-            const int32_t digits = std::min(frac_digits - leading_zeros, max_digits - int_digits);
-
-            // Read the digits as a plain integer and scale down with a single division.
-            //
-            // The accumulation is exact: a float128 holds every integer below 2^113, which is a
-            // little above 10^34, so all the digits kept here survive without rounding. Only the
-            // final divide rounds.
-            //
-            // The previous implementation instead multiplied by a stored 10^-9 constant once per
-            // group of 9 digits and summed the pieces. Negative powers of ten are not
-            // representable in binary, so that constant was already inexact, its running product
-            // compounded the error, and every partial sum rounded again. Even "0.5", which is
-            // exactly representable, came out one unit in the last place low.
-            float128 numerator;
-            for (int32_t i = 0; i < digits; ++i) {
-                numerator = numerator * 10 + (frac_start[leading_zeros + i] - '0');
-            }
-
-            // the skipped zeros are put back through the exponent of the divisor
-            frac_part = numerator / exp10(digits + leading_zeros);
-            frac_part.set_sign(sign);
-        }
-
-        // integer only, no fraction or exponent
-        if (frac_digits == 0 && expo10 == 0) {
-            return;
-        }
-
-        //
-        // assemble the integer and fraction to a single value
-        //
-        *this += frac_part;
-
-        // adjust the result based on the exponent
-        if (expo10 != 0) {
-            float128 e = exp10(expo10);
-            // let the below handle overflow/underflow
-            *this *= e;
-        }
+        from_chars(x, end, *this);
     }
     /**
      * @brief Constructor from std::string.
@@ -752,144 +938,363 @@ public:
     //
 
     /**
+     * @name Conversion to narrower floating point formats
+     *
+     * IEEE 754-2008 5.4.2 convertFormat: the value is rounded once, in the current direction, to
+     * the destination's precision and range - including its subnormal range, which keeps fewer
+     * bits than its normal one. A NaN keeps its sign and as much of its payload as fits, and is
+     * quieted.
+     * @{
+     */
+
+    /// @brief A finite value rounded to a narrower binary format, see narrow().
+    struct narrowed {
+        uint64_t sig = 0;      ///< Significand, below 2^P. Zero for a zero result.
+        int32_t lsb = 0;       ///< Weight of the significand's lowest bit, as a power of two.
+        uint32_t sign = 0;     ///< Sign of the result.
+        bool to_inf = false;   ///< The value overflowed to infinity.
+    };
+
+    /**
+     * @brief Rounds this finite, non zero value to a narrower binary format.
+     *
+     * Overflow produces infinity, or the largest finite value in the two directions that round
+     * towards it, and raises the overflow and inexact flags. A result that is tiny after rounding
+     * and inexact raises underflow.
+     *
+     * @tparam P Precision of the destination, counting its leading bit whether stored or implicit.
+     *         At most 64, so the significand fits a single word.
+     * @tparam EMIN Exponent of the destination's smallest normal value
+     * @tparam EMAX Exponent of its largest finite value
+     * @return The rounded significand and the weight of its lowest bit.
+     */
+    template <int32_t P, int32_t EMIN, int32_t EMAX> [[nodiscard]] FP128_INLINE constexpr narrowed narrow() const noexcept
+    {
+        static_assert(P >= 2 && P <= 64, "the significand has to fit in a QWORD");
+        constexpr uint64_t all_ones = (P == 64) ? UINT64_MAX : ((1ull << P) - 1);
+
+        narrowed res;
+        uint64_t l = 0, h = 0;
+        int32_t e = 0;
+        get_components(l, h, e, res.sign);
+        // Not const: a const local of enumeration type initialized from a constant expression is
+        // usable in constant expressions, which makes its initializer manifestly constant evaluated
+        // - std::is_constant_evaluated() would answer true there, and fix the direction to nearest.
+        detail::rounding mode = detail::current_rounding();
+
+        // The lowest bit kept is P-1 places below the leading one, or the destination's subnormal
+        // floor when that is higher. The 113 bit significand's own lowest bit weighs 2^(e-112).
+        res.lsb = ((e < EMIN) ? EMIN : e) - (P - 1);
+        const int32_t drop = res.lsb - (e - FRAC_BITS);
+
+        // Tininess is detected after rounding: a value just below the smallest normal one is not
+        // tiny when rounding it to P bits with an unbounded exponent carries it up to there.
+        bool tiny = e < EMIN;
+        if (e == EMIN - 1) {
+            uint64_t tl = l, th = h, textra = 0;
+            shift_right_jam128_extra(tl, th, textra, FRAC_BITS + 1 - P);
+            if (tl == all_ones && round_increment(mode, res.sign, textra))
+                tiny = false;
+        }
+
+        uint64_t extra = 0;
+        shift_right_jam128_extra(l, h, extra, drop);
+        res.sig = l;  // at most P bits are left, and P is at most 64
+        if (extra != 0) {
+            detail::raise_flags(tiny ? (FE_INEXACT | FE_UNDERFLOW) : FE_INEXACT);
+            if (round_increment(mode, res.sign, extra)) {
+                ++res.sig;
+                // A carry out of the top lands on the next power of two. It has to be read before
+                // the tie is settled: for a 64 bit significand the carry shows as a wrap to zero,
+                // and a tie that rounded zero up to one and back to even leaves a zero as well.
+                const bool carry = (P == 64) ? (res.sig == 0) : ((res.sig >> (P % 64)) != 0);
+                if (mode == detail::rounding::nearest_even && (extra << 1) == 0)
+                    res.sig &= ~1ull;  // an exact tie goes to the even neighbour
+                if (carry) {
+                    res.sig = 1ull << (P - 1);
+                    ++res.lsb;
+                }
+            }
+        }
+
+        if (res.lsb + (P - 1) > EMAX) {
+            detail::raise_flags(FE_OVERFLOW | FE_INEXACT);
+            res.to_inf = mode == detail::rounding::nearest_even || mode == ((res.sign != 0) ? detail::rounding::downward : detail::rounding::upward);
+            res.sig = all_ones;
+            res.lsb = EMAX - (P - 1);
+        }
+        return res;
+    }
+
+    /**
+     * @brief The top of a NaN's payload, for a narrower format to carry.
+     *
+     * The payload is the fraction below the quiet bit, bits 110:0. A narrower format keeps its top
+     * bits, which is where the conversion from that format puts them, so a payload survives the
+     * round trip.
+     *
+     * @param shift FRAC_BITS - 1 less the payload width of the destination, at least 47
+     * @return Bits 110:shift of the fraction, right aligned.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE constexpr uint64_t nan_payload_top(int32_t shift) const noexcept
+    {
+        const uint64_t frac_high = get_fraction_bits() & (UPPER_FRAC_MASK >> 1);
+        return (shift >= 64) ? (frac_high >> (shift - 64)) : ((frac_high << (64 - shift)) | (low >> shift));
+    }
+
+    /**
      * @brief Operator double
+     *
+     * Correctly rounded in the current direction. Overflow keeps its sign, as does a value too small
+     * for the subnormal range, and a NaN keeps its sign and the top 51 bits of its payload.
      */
     [[nodiscard]] FP128_INLINE constexpr operator double() const noexcept
     {
-        Double d {};
-
-        // nan and inf
-        if (get_exponent_bits() == INF_EXP_BIASED) {
-            // zero fraction means inf, otherwise nan
-            if (low == 0 && get_fraction_bits() == 0) {
-                return (get_sign()) ? -HUGE_VAL : HUGE_VAL;
+        const uint64_t sign = static_cast<uint64_t>(get_sign()) << 63;
+        if (is_special()) {
+            if (is_nan()) {
+                if (is_signaling())
+                    detail::raise_flags(FE_INVALID);
+                return std::bit_cast<double>(sign | (0x7FFull << 52) | (1ull << 51) | nan_payload_top(FRAC_BITS - 1 - 51));
             }
-            return NAN;
+            return std::bit_cast<double>(sign | (0x7FFull << 52));
         }
+        if (is_zero())
+            return std::bit_cast<double>(sign);
 
-        int32_t expo = get_exponent();
-        // subnormal and underflow
-        if (expo < -1022) {
-            int32_t shift = (int32_t)(FRAC_BITS - dbl_frac_bits) - 1022 - expo;
-
-            // underflow
-            if (shift >= FRAC_BITS) {
-                return 0;
-            }
-
-            // add the msb back
-            uint64_t h = get_fraction_bits() | (1ull << (FRAC_BITS - 64));
-            return Double::make(get_sign(), 0, shift_right128_round(low, h, shift));
-        }
-        // too big for double
-        else if (expo > 1023) {
-            return HUGE_VAL;
-        }
-        // normal numbers
-        else {
-            d.set_e(1023ull + expo);
-            d.set_f(shift_right128_round(low, get_fraction_bits(), FRAC_BITS - dbl_frac_bits));
-            d.set_s(get_sign());
-
-            // fraction caused a round up
-            if (d.f() == 0 && get_fraction_bits() != 0)
-                d.set_e(d.e() + 1);
-
-            return d.val();
-        }
+        const narrowed n = narrow<53, -1022, 1023>();
+        if (n.to_inf)
+            return std::bit_cast<double>(sign | (0x7FFull << 52));
+        // A normal significand's leading one adds the last unit to the exponent field, which is
+        // why the field is written one short; a subnormal one has no leading one and no exponent.
+        if (n.sig >> 52)
+            return std::bit_cast<double>(sign + (static_cast<uint64_t>(n.lsb + 52 + 1023 - 1) << 52) + n.sig);
+        return std::bit_cast<double>(sign | n.sig);
     }
     /**
      * @brief operator float converts to a float
+     *
+     * Rounded once, straight to single precision. Going through double, as this used to, rounds
+     * twice: 1 + 2^-24 + 2^-82 became 1 + 2^-24 in double, a tie, which then went to 1.0f.
      */
-    [[nodiscard]] FP128_FORCE_INLINE constexpr operator float() const noexcept
+    [[nodiscard]] FP128_INLINE constexpr operator float() const noexcept
     {
-        // TODO: write proper function
-        double v = static_cast<double>(*this);
-        return static_cast<float>(v);
-    }
-    /**
-     * @brief operator uint64_t converts to a uint64_t
-     */
-    [[nodiscard]] FP128_INLINE constexpr operator uint64_t() const noexcept
-    {
-        uint64_t l, h;
-        int32_t e;
-        uint32_t s;
-        get_components(l, h, e, s);
+        const uint32_t sign = get_sign() << 31;
+        if (is_special()) {
+            if (is_nan()) {
+                if (is_signaling())
+                    detail::raise_flags(FE_INVALID);
+                return std::bit_cast<float>(sign | 0x7F800000u | 0x00400000u | static_cast<uint32_t>(nan_payload_top(FRAC_BITS - 1 - 22)));
+            }
+            return std::bit_cast<float>(sign | 0x7F800000u);
+        }
+        if (is_zero())
+            return std::bit_cast<float>(sign);
 
-        if (e > 63)
-            return (s) ? static_cast<uint64_t>(INT64_MIN) : UINT64_MAX;
+        const narrowed n = narrow<24, -126, 127>();
+        if (n.to_inf)
+            return std::bit_cast<float>(sign | 0x7F800000u);
+        const uint32_t sig = static_cast<uint32_t>(n.sig);
+        if (sig >> 23)
+            return std::bit_cast<float>(sign + (static_cast<uint32_t>(n.lsb + 23 + 127 - 1) << 23) + sig);
+        return std::bit_cast<float>(sign | sig);
+    }
+    /// @}
+
+    /**
+     * @name Conversion to integers
+     *
+     * The C++ conversions truncate towards zero, which is IEEE 754-2008's
+     * convertToIntegerTowardZero. They used to round to nearest for a magnitude of one or more and
+     * truncate below it, which agreed with neither: 0.75 became 0 but 1.75 became 2.
+     *
+     * A value outside the range of the integer type, or a NaN, is the invalid operation. The result
+     * is then defined rather than left undefined as it is for the builtin types: an out of range
+     * value saturates at the nearest limit, and a NaN converts to zero.
+     * @{
+     */
+
+    /**
+     * @brief The integer part of |x|, truncated towards zero.
+     * @param overflow Set when |x| is 2^64 or more, an infinity included
+     * @return The truncated magnitude, or UINT64_MAX on overflow.
+     */
+    [[nodiscard]] FP128_INLINE constexpr uint64_t truncated_magnitude(bool& overflow) const noexcept
+    {
+        uint64_t l = 0, h = 0;
+        int32_t e = 0;
+        uint32_t s = 0;
+        get_components(l, h, e, s);
+        overflow = e > 63;
+        if (overflow)
+            return UINT64_MAX;
         if (e < 0)
             return 0;
-
-        auto shift = static_cast<int>(FRAC_BITS) - e;
-        shift_right128_inplace_safe(l, h, shift);
-        return l;
+        // The units bit is bit 112 - e of the significand, which is between 49 and 112.
+        const int32_t shift = FRAC_BITS - e;
+        return (shift >= 64) ? (h >> (shift - 64)) : ((l >> shift) | (h << (64 - shift)));
     }
+
     /**
-     * @brief operator int64_t converts to a int64_t
+     * @brief Converts to an integer type, truncating towards zero.
+     * @tparam I The integer type
+     * @return The converted value, saturated when out of range, zero for a NaN.
      */
-    [[nodiscard]] FP128_INLINE constexpr operator int64_t() const noexcept
+    template <typename I> [[nodiscard]] FP128_INLINE constexpr I to_integer() const noexcept
     {
-        uint64_t l, h;
-        int32_t e;
-        uint32_t s;
-        get_components(l, h, e, s);
-
-        if (e > 62)
-            return (s) ? INT64_MIN : INT64_MAX;
-        if (e < 0)
+        if (is_nan()) {
+            detail::raise_flags(FE_INVALID);
             return 0;
+        }
 
-        auto shift = static_cast<int>(FRAC_BITS) - e;
-        shift_right128_inplace_safe(l, h, shift);
-        int64_t res = static_cast<int64_t>(l);
-        return (s) ? -res : res;
+        const bool negative = get_sign() != 0;
+        bool overflow = false;
+        const uint64_t magnitude = truncated_magnitude(overflow);
+        if constexpr (std::is_signed_v<I>) {
+            // The negative range reaches one further than the positive one.
+            const uint64_t limit = static_cast<uint64_t>(std::numeric_limits<I>::max()) + (negative ? 1u : 0u);
+            if (overflow || magnitude > limit) {
+                detail::raise_flags(FE_INVALID);
+                return negative ? std::numeric_limits<I>::min() : std::numeric_limits<I>::max();
+            }
+            // Negated in the unsigned domain, which also covers the most negative value.
+            return static_cast<I>(negative ? (0ull - magnitude) : magnitude);
+        } else {
+            // A negative value that truncates to zero converts fine; anything below that does not.
+            if (negative && magnitude != 0) {
+                detail::raise_flags(FE_INVALID);
+                return 0;
+            }
+            if (overflow || magnitude > std::numeric_limits<I>::max()) {
+                detail::raise_flags(FE_INVALID);
+                return std::numeric_limits<I>::max();
+            }
+            return static_cast<I>(magnitude);
+        }
     }
+
     /**
-     * @brief operator uint32_t converts to a uint32_t
+     * @brief operator uint64_t converts to a uint64_t, truncating towards zero
      */
-    [[nodiscard]] FP128_INLINE constexpr operator uint32_t() const noexcept
-    {
-        uint64_t l, h;
-        int32_t e;
-        uint32_t s;
-        get_components(l, h, e, s);
-
-        if (e > 31)
-            return (s) ? static_cast<uint32_t>(INT32_MIN) : UINT32_MAX;
-        if (e < 0)
-            return 0;
-
-        auto shift = static_cast<int>(FRAC_BITS) - e;
-        shift_right128_inplace_safe(l, h, shift);
-        return static_cast<uint32_t>(l);
-    }
+    [[nodiscard]] FP128_INLINE constexpr operator uint64_t() const noexcept { return to_integer<uint64_t>(); }
     /**
-     * @brief operator int32_t converts to a int32_t
+     * @brief operator int64_t converts to a int64_t, truncating towards zero
      */
-    [[nodiscard]] FP128_INLINE constexpr operator int32_t() const noexcept
-    {
-        uint64_t l, h;
-        int32_t e;
-        uint32_t s;
-        get_components(l, h, e, s);
-
-        if (e > 30)
-            return (s) ? INT32_MIN : INT32_MAX;
-        if (e < 0)
-            return 0;
-
-        auto shift = static_cast<int>(FRAC_BITS) - e;
-        shift_right128_inplace_safe(l, h, shift);
-        int32_t res = static_cast<int32_t>(l);
-        return (s) ? -res : res;
-    }
+    [[nodiscard]] FP128_INLINE constexpr operator int64_t() const noexcept { return to_integer<int64_t>(); }
     /**
-     * @brief operator long double - converts to a long double
+     * @brief operator uint32_t converts to a uint32_t, truncating towards zero
+     */
+    [[nodiscard]] FP128_INLINE constexpr operator uint32_t() const noexcept { return to_integer<uint32_t>(); }
+    /**
+     * @brief operator int32_t converts to a int32_t, truncating towards zero
+     */
+    [[nodiscard]] FP128_INLINE constexpr operator int32_t() const noexcept { return to_integer<int32_t>(); }
+    /// @}
+
+    /**
+     * @name long double
+     *
+     * What a long double is depends on the platform: a plain double under MSVC, the x87 80 bit
+     * extended format on x86 under GCC and Clang, and binary128 itself on AArch64 Linux. The two
+     * wider ones are converted through their encoding rather than through double, which would
+     * round away the bits they have over it.
+     * @{
+     */
+#if LDBL_MANT_DIG == 64
+    /// @brief The x87 extended format: an explicit 64 bit significand, then sign and exponent.
+    struct x87_bits {
+        uint64_t mantissa;                                ///< Significand, its leading bit stored
+        uint16_t sign_exponent;                           ///< Sign in bit 15, biased exponent below it
+        unsigned char padding[sizeof(long double) - 10];  ///< Unused, outside the value representation
+    };
+    static_assert(sizeof(x87_bits) == sizeof(long double), "unexpected x87 long double layout");
+#elif LDBL_MANT_DIG == 113
+    /// @brief long double is binary128: the same encoding, in two QWORDs.
+    struct binary128_bits {
+        uint64_t low;   ///< Low QWORD of the encoding
+        uint64_t high;  ///< High QWORD of the encoding
+    };
+    static_assert(sizeof(binary128_bits) == sizeof(long double), "unexpected binary128 long double layout");
+#endif
+
+    /**
+     * @brief Converts a long double wider than a double, exactly.
+     * @param x Value to convert
+     * @return The same value. A signaling NaN is quieted, the conversion being an operation.
+     */
+    [[nodiscard]] static FP128_INLINE constexpr float128 from_long_double(long double x) noexcept
+    {
+#if LDBL_MANT_DIG == 64
+        const x87_bits bits = std::bit_cast<x87_bits>(x);
+        const uint32_t sign = static_cast<uint32_t>(bits.sign_exponent >> 15);
+        const int32_t biased = bits.sign_exponent & 0x7FFF;
+        if (biased == 0x7FFF) {
+            // An infinity has nothing but its leading bit set. Anything else is a NaN, whose
+            // payload and quiet bit move to the top of the fraction.
+            const uint64_t fraction = bits.mantissa & ~(1ull << 63);
+            float128 res(fraction << 49, (static_cast<uint64_t>(sign) << 63) | (static_cast<uint64_t>(INF_EXP_BIASED) << EXP_SHIFT) | (fraction >> 15));
+            if (res.is_signaling()) {
+                detail::raise_flags(FE_INVALID);
+                res = quiet_nan(res);
+            }
+            return res;
+        }
+        // A denormal is scaled like the smallest normal value, it only lacks the leading bit.
+        return norm_round_pack(sign, ((biased == 0) ? 1 : biased) - EXP_BIAS - 63 + FRAC_BITS, bits.mantissa, 0, false);
+#elif LDBL_MANT_DIG == 113
+        const binary128_bits bits = std::bit_cast<binary128_bits>(x);
+        return float128(bits.low, bits.high);
+#else
+        // A format this code does not know, such as the double-double of PowerPC: only the double
+        // nearest to it is converted.
+        return float128(static_cast<double>(x));
+#endif
+    }
+
+    /**
+     * @brief operator long double
+     *
+     * The same as the conversion to double where long double is one. Elsewhere correctly rounded to
+     * the wider format, or exact where long double is binary128.
+     *
      * @return Object value.
      */
-    [[nodiscard]] FP128_FORCE_INLINE constexpr operator long double() const noexcept { return operator double(); }
+    [[nodiscard]] FP128_INLINE constexpr operator long double() const noexcept
+    {
+#if LDBL_MANT_DIG == 64
+        x87_bits bits {};
+        const uint16_t sign = static_cast<uint16_t>(get_sign() << 15);
+        if (is_special()) {
+            bits.sign_exponent = static_cast<uint16_t>(sign | 0x7FFF);
+            bits.mantissa = 1ull << 63;
+            if (is_nan()) {
+                if (is_signaling())
+                    detail::raise_flags(FE_INVALID);
+                bits.mantissa |= (1ull << 62) | nan_payload_top(FRAC_BITS - 1 - 62);
+            }
+        } else if (is_zero()) {
+            bits.sign_exponent = sign;
+        } else {
+            // The exponent range is binary128's own, so only rounding the largest values up can
+            // overflow; the subnormal range is narrower, its last bit being worth 2^-16445.
+            const narrowed n = narrow<64, -16382, 16383>();
+            if (n.to_inf) {
+                bits.sign_exponent = static_cast<uint16_t>(sign | 0x7FFF);
+                bits.mantissa = 1ull << 63;
+            } else {
+                bits.mantissa = n.sig;
+                const int32_t biased = (n.sig >> 63) ? (n.lsb + 63 + EXP_BIAS) : 0;
+                bits.sign_exponent = static_cast<uint16_t>(sign | static_cast<uint16_t>(biased));
+            }
+        }
+        return std::bit_cast<long double>(bits);
+#elif LDBL_MANT_DIG == 113
+        return std::bit_cast<long double>(binary128_bits {low, high});
+#else
+        return operator double();
+#endif
+    }
+    /// @}
     /**
      * @brief Converts to a std::string (slow) string holds all meaningful fraction bits.
      * @return object string representation
@@ -937,39 +1342,55 @@ public:
     //
     // math operators
     //
+    /// @brief Largest scaling a shift or ldexp() ever needs: enough to take the largest finite value
+    ///        below half the smallest subnormal, or the smallest subnormal above the largest finite
+    ///        value. Larger counts are clamped to it, which keeps the exponent arithmetic in range.
+    static constexpr int32_t SCALE_LIMIT = 2 * (EXP_BIAS + FRAC_BITS + 1);
+
     /**
-     * @brief Shift right this object.
+     * @brief Shift right this object, dividing it by a power of two.
      * @param shift Bits to shift. Values less than 1 do nothing, high values can cause the value to reach zero.
      * @return This object.
      */
     FP128_INLINE constexpr float128& operator>>=(int32_t shift) noexcept
     {
-        if (shift < 1 || is_special())
+        if (shift < 1)
             return *this;
+        if (is_special()) {
+            if (is_nan())
+                *this = propagate_nan(*this);
+            return *this;
+        }
 
         uint64_t l, h;
         int32_t e;
         uint32_t s;
         get_components(l, h, e, s);
-        e -= shift;
+        e -= (shift < SCALE_LIMIT) ? shift : SCALE_LIMIT;
+        // A subnormal or zero result is rounded once, here, in the current direction.
         set_components(l, h, e, s);
         return *this;
     }
     /**
-     * @brief Shift left this object.
+     * @brief Shift left this object, multiplying it by a power of two.
      * @param shift Bits to shift. Values less than 1 do nothing, high values can cause the value to reach infinity.
      * @return This object.
      */
     FP128_INLINE constexpr float128& operator<<=(int32_t shift) noexcept
     {
-        if (shift < 1 || is_special())
+        if (shift < 1)
             return *this;
+        if (is_special()) {
+            if (is_nan())
+                *this = propagate_nan(*this);
+            return *this;
+        }
 
         uint64_t l, h;
         int32_t e;
         uint32_t s;
         get_components(l, h, e, s);
-        e += shift;
+        e += (shift < SCALE_LIMIT) ? shift : SCALE_LIMIT;
         set_components(l, h, e, s);
         return *this;
     }
@@ -1014,8 +1435,12 @@ public:
         if (is_special() || rhs.is_special()) {
             // A NaN operand propagates. Adding infinities of opposite signs is the invalid
             // operation and produces a NaN as well.
-            if (is_nan() || rhs.is_nan() || (is_inf() && rhs.is_inf() && get_sign() != rhs.get_sign())) {
-                *this = nan();
+            if (is_nan() || rhs.is_nan()) {
+                *this = propagate_nan(*this, rhs);
+                return *this;
+            }
+            if (is_inf() && rhs.is_inf() && get_sign() != rhs.get_sign()) {
+                *this = invalid_operation();
                 return *this;
             }
 
@@ -1026,74 +1451,85 @@ public:
             return *this;
         }
 
+        // A zero operand leaves the other one exactly. Two zeros of opposite sign make an exact
+        // zero sum, which IEEE 754 makes positive in every rounding direction but downward.
+        if (rhs.is_zero()) {
+            if (is_zero() && get_sign() != rhs.get_sign())
+                set_sign(exact_zero_sign());
+            return *this;
+        }
+        if (is_zero()) {
+            *this = rhs;
+            return *this;
+        }
+
         uint32_t sign, rhs_sign;
         int32_t expo, rhs_expo;
         uint64_t l1, h1, l2, h2;
         get_components(l1, h1, expo, sign);
         rhs.get_components(l2, h2, rhs_expo, rhs_sign);
-        constexpr int32_t shift_left_bits = 127 - 2 - FRAC_BITS;  // move bit 112 left, keep 1 bit for additional exponent and one for the sign
 
-        if (expo > rhs_expo) {
-            int32_t shift = expo - rhs_expo - shift_left_bits;  // how many bits to shift right
-            // exponents are too far apart, result will stay the same
-            if (shift > FRAC_BITS)
+        // Both mantissas are moved up so their leading one sits at bit 125. That leaves the
+        // alignment thirteen bits to shift the smaller operand into before anything falls off,
+        // a bit above for the carry of an addition, and the top bit clear.
+        constexpr int32_t room = 127 - 2 - FRAC_BITS;
+
+        // Exponents this far apart leave the smaller operand below a quarter of the larger one's
+        // last place, so rounding to nearest returns the larger one unchanged. The other
+        // directions can still move the result by one place, so they take the full path.
+        if (detail::current_rounding() == detail::rounding::nearest_even) {
+            if (expo - rhs_expo > FRAC_BITS + room) {
+                detail::raise_flags(FE_INEXACT);
                 return *this;
-
-            shift_left128_inplace_safe(l1, h1, shift_left_bits);
-            if (shift >= 0)
-                shift_right128_inplace_safe(l2, h2, shift);
-            else
-                shift_left128_inplace_safe(l2, h2, -shift);
-
-            // fix the exponent
-            expo -= shift_left_bits;
-        } else if (expo < rhs_expo) {
-            int32_t shift = rhs_expo - expo - shift_left_bits;  // how many bits to shift right
-            // exponents are too far apart, use the other value
-            if (shift > FRAC_BITS) {
+            }
+            if (rhs_expo - expo > FRAC_BITS + room) {
+                detail::raise_flags(FE_INEXACT);
                 *this = rhs;
                 return *this;
             }
-            shift_left128_inplace_safe(l2, h2, shift_left_bits);
-
-            if (shift >= 0)
-                shift_right128_inplace_safe(l1, h1, shift);
-            else
-                shift_left128_inplace_safe(l1, h1, -shift);
-
-            // result base exponent comes from the other value
-            expo = rhs_expo - shift_left_bits;
         }
 
-        // same sign: the simple case
-        if (rhs.get_sign() == get_sign()) {
-            // add the other value
-            const uint8_t carry = addcarryx_u64(0, l1, l2, &l1);
-            addcarryx_u64(carry, h1, h2, &h1);
+        // Make the first operand the one with the larger exponent, so only the second one is
+        // ever shifted right.
+        if (expo < rhs_expo) {
+            std::swap(l1, l2);
+            std::swap(h1, h2);
+            std::swap(expo, rhs_expo);
+            std::swap(sign, rhs_sign);
         }
-        // different sign: invert the sign for rhs and subtract
-        else {
-            // this value is negative
-            if (is_negative())
-                twos_complement128(l1, h1);
-            // rhs value is negative
-            else
-                twos_complement128(l2, h2);
 
-            // add the other value, results stored in l1
+        const int32_t diff = expo - rhs_expo;
+        shift_left128_inplace_safe(l1, h1, room);
+        if (diff <= room) {
+            shift_left128_inplace_safe(l2, h2, room - diff);
+        } else {
+            // What is shifted out is jammed into the lowest bit rather than rounded away. Rounding
+            // here and again after the sum, as this used to, decided the direction from a window
+            // of three bits and misjudged every case the bits further down would have settled.
+            // The jammed bit lands at least eleven places under the guard bit of the sum, which
+            // is enough for it to stand in for everything it replaced.
+            shift_right_jam128(l2, h2, diff - room);
+        }
+
+        if (sign == rhs_sign) {
             const uint8_t carry = addcarryx_u64(0, l1, l2, &l1);
             addcarryx_u64(carry, h1, h2, &h1);
-
-            // bit 63 is high - got a negative result
-            // flip the bits and invert the sign
-            sign = FP128_GET_BIT(h1, 63);
-            if (sign) {
+        } else {
+            uint8_t borrow = subborrow_u64(0, l1, l2, &l1);
+            borrow = subborrow_u64(borrow, h1, h2, &h1);
+            // Only operands with equal exponents can leave a negative difference, in which case
+            // the second operand was the larger and its sign wins.
+            if (borrow != 0) {
                 twos_complement128(l1, h1);
+                sign = rhs_sign;
+            }
+            if ((l1 | h1) == 0) {
+                *this = float128(0, static_cast<uint64_t>(exact_zero_sign()) << 63);
+                return *this;
             }
         }
 
-        norm_fraction(l1, h1, expo);
-        set_components(l1, h1, expo, sign);
+        *this = norm_round_pack(sign, expo - room, l1, h1, false);
         return *this;
     }
     /**
@@ -1123,10 +1559,14 @@ public:
     {
         // check trivial cases
         if (is_special() || rhs.is_special()) {
-            // A NaN operand propagates, and so does the invalid operation inf * zero.
+            // A NaN operand propagates, and inf * zero is the invalid operation.
             // Note the zero tests are only reachable for the operand that is not special.
-            if (is_nan() || rhs.is_nan() || (is_inf() && rhs.is_zero()) || (is_zero() && rhs.is_inf())) {
-                *this = nan();
+            if (is_nan() || rhs.is_nan()) {
+                *this = propagate_nan(*this, rhs);
+                return *this;
+            }
+            if ((is_inf() && rhs.is_zero()) || (is_zero() && rhs.is_inf())) {
+                *this = invalid_operation();
                 return *this;
             }
 
@@ -1196,23 +1636,15 @@ public:
         // extract the bits from res[] keeping the precision the same as this object
         // shift result by F
         constexpr int32_t index = 1;
-        // constexpr int32_t lsb = FRAC_BITS & 63;            // bit within the 64bit data pointed by res[index]
-        constexpr int32_t lsb = (FRAC_BITS & 63) - 1;  // bit within the 64bit data pointed by res[index] minus 1 to improve rounding
-        // constexpr uint64_t half = 1ull << (lsb - 1);       // used for rounding
-        // const bool need_rounding = (res[index] & half) != 0;
+        constexpr int32_t lsb = (FRAC_BITS & 63) - 1;  // bit within the 64bit data pointed by res[index], one short so the guard bit stays
 
         const uint64_t sticky_bits = res[0] | (res[1] & FP128_MAX_VALUE_64(lsb));
         l1 = shift_right128(res[index], res[index + 1], lsb);  // custom function is 20% faster in Mandelbrot than the intrinsic
         h1 = shift_right128(res[index + 1], res[index + 2], lsb);
         --expo;
 
-        // if (need_rounding) {
-        //     ++l1; // low will wrap around to zero if overflowed
-        //     h1 += l1 == 0;
-        // }
-
-        norm_product(l1, h1, expo, sticky_bits != 0);
-        set_components(l1, h1, expo, sign ^ rhs_sign);
+        const uint64_t extra = norm_product(l1, h1, expo, sticky_bits != 0);
+        *this = round_pack(sign ^ rhs_sign, expo, l1, h1, extra);
         return *this;
     }
     /**
@@ -1235,7 +1667,7 @@ public:
         // check trivial cases
         if (is_special()) {
             // a NaN stays a NaN, +/-inf squared is +inf
-            *this = is_nan() ? nan() : inf();
+            *this = is_nan() ? propagate_nan(*this) : inf();
             return *this;
         } else if (is_zero()) {
             *this = 0;
@@ -1286,8 +1718,8 @@ public:
         h = shift_right128(res[index + 1], res[index + 2], lsb);
         --expo;
 
-        norm_product(l, h, expo, sticky_bits != 0);
-        set_components(l, h, expo, 0);
+        const uint64_t extra = norm_product(l, h, expo, sticky_bits != 0);
+        *this = round_pack(0, expo, l, h, extra);
         return *this;
     }
     /**
@@ -1304,9 +1736,13 @@ public:
     FP128_INLINE float128& operator/=(const float128& rhs)
     {
         // check trivial cases
-        // A NaN operand propagates, and so do the invalid operations zero / zero and inf / inf.
-        if (is_nan() || rhs.is_nan() || (is_zero() && rhs.is_zero()) || (is_inf() && rhs.is_inf())) {
-            *this = nan();
+        // A NaN operand propagates, and zero / zero and inf / inf are the invalid operation.
+        if (is_nan() || rhs.is_nan()) {
+            *this = propagate_nan(*this, rhs);
+            return *this;
+        }
+        if ((is_zero() && rhs.is_zero()) || (is_inf() && rhs.is_inf())) {
+            *this = invalid_operation();
             return *this;
         }
 
@@ -1315,8 +1751,11 @@ public:
 
         // An infinite dividend or a zero divisor produce an infinity, a zero dividend or an
         // infinite divisor produce a zero. The combinations where both apply, which are the
-        // two invalid operations, were already handled above.
+        // two invalid operations, were already handled above. Only a finite dividend over a zero
+        // is the division by zero exception; an infinite one is exact.
         if (is_inf() || rhs.is_zero()) {
+            if (!is_inf())
+                detail::raise_flags(FE_DIVBYZERO);
             *this = inf();
             set_sign(res_sign);
             return *this;
@@ -1353,23 +1792,27 @@ public:
         // holds unconditionally here, unlike in fixed_point128 where a tiny divisor has to be routed
         // to div_64bit instead.
         if (div_128bit(q, rem, nom, denom, array_length(nom))) {
-            // 128 bit were added to the dividend, 112 were lost:
-            // need to shift right 16 bit (128 - 112) but we don't go all the way so norm_fraction()
-            //  can produce accurate rounding
-            constexpr int32_t dshift = 127 - FRAC_BITS;
-            // A non zero remainder means the quotient was cut short, and the bits shifted out of
-            // q[0] are lost as well. Both have to reach the rounding step as a sticky bit.
-            const uint64_t sticky_bits = rem[0] | rem[1] | (q[0] & FP128_MAX_VALUE_64(dshift));
-            l1 = shift_right128(q[0], q[1], dshift);
-            h1 = shift_right128(q[1], q[2], dshift);
-            --expo;
-            norm_fraction_sticky(l1, h1, expo, sticky_bits != 0);
+            // The dividend was scaled by 2^128 and both mantissas are in [2^112, 2^113), so the
+            // quotient is in (2^127, 2^129): its leading one is at bit 128 when the dividend's
+            // mantissa is the larger and at bit 127 otherwise. Keeping 113 bits means shifting out
+            // 16 or 15 of them.
+            //
+            // The shift has to follow the quotient. A fixed shift of 15, as this used to have,
+            // left a quotient that led at bit 127 already in place, and the normalization after it
+            // took that as nothing to round: every such quotient was truncated, which made close
+            // to half of all divisions with the smaller mantissa on top come out one place low.
+            const int32_t top = static_cast<int32_t>(q[2] & 1);
+            const int32_t shift = (127 - FRAC_BITS) + top;
+            // What is shifted out leads the extra word; a non zero remainder means the quotient
+            // continues below it and only has to register as a sticky bit.
+            const uint64_t extra = (q[0] << (64 - shift)) | (((rem[0] | rem[1]) != 0) ? 1 : 0);
+            l1 = shift_right128(q[0], q[1], shift);
+            h1 = shift_right128(q[1], q[2], shift);
+            expo += top - 1;
+            *this = round_pack(sign ^ rhs_sign, expo, l1, h1, extra);
         } else {  // error
             *this = inf();
-            return *this;
         }
-
-        set_components(l1, h1, expo, sign ^ rhs_sign);
         return *this;
     }
     /**
@@ -1486,6 +1929,9 @@ public:
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_int() const
     {
+        // An infinity or a NaN has an exponent beyond every integer's, but is not one.
+        if (is_special())
+            return false;
         int32_t expo = get_exponent();
         if (expo < 0)
             return false;
@@ -1603,8 +2049,7 @@ public:
         // inf and Nan
         if (get_exponent_bits() == INF_EXP_BIASED) {
             if (is_nan())
-                // TODO: support signalling NaN
-                return quietNaN;
+                return is_signaling() ? signalingNaN : quietNaN;
             return is_positive() ? positiveInfinity : negativeInfinity;
         }
         if (is_zero()) {
@@ -1644,8 +2089,9 @@ public:
      * itself but the constant folding across it - the exponent and sign arithmetic that follows
      * collapses only once the components are visible. Clang declined the invitation where MSVC
      * accepted it, which is what made this measurable rather than academic: on 2026-08-15 clang-cl
-     * left this and norm_fraction_sticky() out of line in operator/=, and float128 division measured
-     * 13.0 M/s against MSVC's 20.9 M/s. See norm_fraction_sticky() for the other half.
+     * left this and the rounding step after the division (then norm_fraction_sticky(), now
+     * round_pack(), which is forced open for the same reason) out of line in operator/=, and float128
+     * division measured 13.0 M/s against MSVC's 20.9 M/s.
      *
      * @param l Reference to receive the low fraction
      * @param h Reference to receive the high fraction
@@ -1681,21 +2127,238 @@ public:
         }
     }
     /**
-     * @brief Sets the internal components handling al special cases
-     * The fraction is expected to have 113 bits (includes the unity bit)
-     * It will store the float128 value taking into account infinity ands subnormals.
-     * @param l Low part of the fraction
-     * @param h High part of the fraction
-     * @param e Unbiased exponent, can be any value.
-     * @param s Sign (1 is negative)
-     */
-    /**
      * @brief Number of Mercator series terms log2() needs.
      *
      * The reduction leaves |z| <= 2^-6, so term n is bounded by 2^(-6n), and the series is cut off
      * once that is below the last bit of a 113 bit mantissa with eight bits to spare.
      */
     static constexpr int32_t LOG2_TERMS = (FRAC_BITS + 1 + 8 + log2_reduction_bits - 1) / log2_reduction_bits;
+
+    /**
+     * @name Rounding
+     *
+     * Every operation whose exact result may not be representable ends in round_pack(), which is
+     * the one place a result is rounded. IEEE 754 requires each operation to behave as if it first
+     * computed the exact result and then rounded it once, to the destination format, in the
+     * current rounding direction - and the destination format includes its subnormal range, where
+     * fewer than 113 bits are kept. The operations used to round to 113 bits first and then let
+     * set_components() round a second time when the result turned out to be subnormal, which gave
+     * the wrong last bit for about one subnormal result in ten. They also decided the direction
+     * from a window of three bits, which cannot tell a tie from a value just above one when the
+     * bits that settle it lie further down.
+     *
+     * The shape follows Berkeley SoftFloat's roundPackToF128: the caller hands over a 113 bit
+     * significand and a 64 bit word of the bits below it, left aligned, with anything further down
+     * jammed into its lowest bit. The top bit of that word is the first bit dropped, and the word
+     * being non zero means the result is inexact - which is all any rounding direction needs.
+     * @{
+     */
+
+    /**
+     * @brief Shifts a significand and its extra word right, keeping a sticky record of what fell off.
+     *
+     * The bits shifted out of the significand move into the top of @p extra, and whatever drops
+     * out of @p extra is jammed into its lowest bit rather than lost, so the word still tells an
+     * exact result, a tie and a value above the tie apart.
+     *
+     * @param l Low QWORD of the significand
+     * @param h High QWORD of the significand
+     * @param extra Bits below the significand, left aligned
+     * @param dist Bits to shift, at least one
+     */
+    FP128_INLINE static constexpr void shift_right_jam128_extra(uint64_t& l, uint64_t& h, uint64_t& extra, int32_t dist) noexcept
+    {
+        FP128_ASSERT(dist >= 1);
+        uint64_t sticky = extra;
+        if (dist < 64) {
+            extra = l << (64 - dist);
+            l = (l >> dist) | (h << (64 - dist));
+            h >>= dist;
+        } else {
+            if (dist == 64) {
+                extra = l;
+                l = h;
+            } else {
+                sticky |= l;
+                if (dist < 128) {
+                    extra = h << (128 - dist);
+                    l = h >> (dist - 64);
+                } else {
+                    // Everything is gone. At exactly 128 the top bit of h is the first bit dropped,
+                    // further out it is below it and only counts towards the sticky bit.
+                    extra = (dist == 128) ? h : ((h != 0) ? 1 : 0);
+                    l = 0;
+                }
+            }
+            h = 0;
+        }
+        extra |= (sticky != 0) ? 1 : 0;
+    }
+
+    /**
+     * @brief Shifts a 128 bit value right, jamming any set bit that falls off into the lowest bit.
+     *
+     * The alignment step of an addition: the shifted operand only has to be accurate to the bit
+     * below the guard bit of the sum, and a jammed lowest bit is enough to say there was more.
+     *
+     * @param l Low QWORD
+     * @param h High QWORD
+     * @param dist Bits to shift, at least one
+     */
+    FP128_INLINE static constexpr void shift_right_jam128(uint64_t& l, uint64_t& h, int32_t dist) noexcept
+    {
+        FP128_ASSERT(dist >= 1);
+        if (dist < 64) {
+            const uint64_t lost = l << (64 - dist);
+            l = (l >> dist) | (h << (64 - dist)) | ((lost != 0) ? 1 : 0);
+            h >>= dist;
+        } else if (dist < 128) {
+            const uint64_t lost = (dist == 64) ? l : (l | (h << (128 - dist)));
+            l = ((dist == 64) ? h : (h >> (dist - 64))) | ((lost != 0) ? 1 : 0);
+            h = 0;
+        } else {
+            l = ((l | h) != 0) ? 1 : 0;
+            h = 0;
+        }
+    }
+
+    /**
+     * @brief Whether rounding should add one unit in the last place.
+     * @param mode Rounding direction
+     * @param sign Sign of the result
+     * @param extra Bits below the significand, left aligned and jammed
+     * @return True when the magnitude has to be rounded up.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr bool round_increment(detail::rounding mode, uint32_t sign, uint64_t extra) noexcept
+    {
+        if (mode == detail::rounding::nearest_even)
+            return extra >= (1ull << 63);
+        if (mode == detail::rounding::toward_zero)
+            return false;
+        return extra != 0 && mode == ((sign != 0) ? detail::rounding::downward : detail::rounding::upward);
+    }
+
+    /// @brief The largest finite magnitude's significand, high QWORD, with its leading one at bit 48.
+    static constexpr uint64_t MAX_SIG_HIGH = FRAC_UNITY | UPPER_FRAC_MASK;
+
+    /**
+     * @brief The slow half of round_pack(): results that overflow or are subnormal.
+     * @param sign Sign of the result
+     * @param exp Biased exponent less one, as round_pack() computes it
+     * @param l Low QWORD of the significand
+     * @param h High QWORD of the significand
+     * @param extra Bits below the significand, left aligned and jammed
+     * @param mode Rounding direction
+     * @return The rounded result.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr float128 round_pack_edge(uint32_t sign, int32_t exp, uint64_t l, uint64_t h, uint64_t extra,
+                                                                         detail::rounding mode) noexcept
+    {
+        bool increment = round_increment(mode, sign, extra);
+        if (exp < 0) {
+            // Tininess is detected after rounding, the way x86 does it for double: the result is
+            // tiny unless rounding it to 113 bits with an unbounded exponent would have carried it
+            // up to the smallest normal value.
+            const bool tiny = (exp < -1) || !increment || h != MAX_SIG_HIGH || l != UINT64_MAX;
+            shift_right_jam128_extra(l, h, extra, -exp);
+            exp = 0;
+            if (tiny && extra != 0)
+                detail::raise_flags(FE_UNDERFLOW);
+            increment = round_increment(mode, sign, extra);
+        } else if (exp > INF_EXP_BIASED - 2 || (exp == INF_EXP_BIASED - 2 && increment && h == MAX_SIG_HIGH && l == UINT64_MAX)) {
+            detail::raise_flags(FE_OVERFLOW | FE_INEXACT);
+            // Rounding to nearest and rounding away from zero overflow to infinity; the other two
+            // directions stop at the largest finite value.
+            if (mode == detail::rounding::nearest_even || mode == ((sign != 0) ? detail::rounding::downward : detail::rounding::upward))
+                return float128(0, (static_cast<uint64_t>(sign) << 63) | (static_cast<uint64_t>(INF_EXP_BIASED) << EXP_SHIFT));
+            return float128(UINT64_MAX, (static_cast<uint64_t>(sign) << 63) | (static_cast<uint64_t>(INF_EXP_BIASED - 1) << EXP_SHIFT) | UPPER_FRAC_MASK);
+        }
+
+        if (extra != 0)
+            detail::raise_flags(FE_INEXACT);
+        if (increment) {
+            ++l;
+            h += (l == 0) ? 1 : 0;
+            if (mode == detail::rounding::nearest_even && (extra << 1) == 0)
+                l &= ~1ull;  // an exact tie goes to the even neighbour
+        } else if ((l | h) == 0) {
+            exp = 0;
+        }
+        return float128(l, (static_cast<uint64_t>(sign) << 63) + (static_cast<uint64_t>(exp) << EXP_SHIFT) + h);
+    }
+
+    /**
+     * @brief Rounds an exact result once, in the current rounding direction, and encodes it.
+     *
+     * The significand is added to the exponent field rather than merged into it: its leading one
+     * sits on the lowest exponent bit, which is why the exponent is passed in less one. That makes
+     * the carry of a significand that rounds up to the next power of two land in the exponent on
+     * its own, and the carry out of the largest finite value land on infinity.
+     *
+     * @param sign Sign of the result
+     * @param e Unbiased exponent of bit 112 of the significand
+     * @param l Low QWORD of the significand
+     * @param h High QWORD of the significand. The leading one must be at bit 48, unless the whole
+     *        significand and @p extra are zero.
+     * @param extra Bits below the significand, left aligned, with anything further down jammed into
+     *        bit 0. Zero when the significand is exact.
+     * @return The correctly rounded result, including its subnormal and overflow cases.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 round_pack(uint32_t sign, int32_t e, uint64_t l, uint64_t h, uint64_t extra) noexcept
+    {
+        return round_pack(sign, e, l, h, extra, detail::current_rounding());
+    }
+    /// @overload
+    /// @param mode Rounding direction to use instead of the current one
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 round_pack(uint32_t sign, int32_t e, uint64_t l, uint64_t h, uint64_t extra,
+                                                                          detail::rounding mode) noexcept
+    {
+        const int32_t exp = e + (EXP_BIAS - 1);
+        // One unsigned comparison catches both a subnormal result (negative) and one that may
+        // overflow (the top two exponents).
+        if (static_cast<uint32_t>(exp) >= static_cast<uint32_t>(INF_EXP_BIASED - 2))
+            return round_pack_edge(sign, exp, l, h, extra, mode);
+
+        if (extra != 0)
+            detail::raise_flags(FE_INEXACT);
+        if (round_increment(mode, sign, extra)) {
+            ++l;
+            h += (l == 0) ? 1 : 0;
+            if (mode == detail::rounding::nearest_even && (extra << 1) == 0)
+                l &= ~1ull;  // an exact tie goes to the even neighbour
+        } else if ((l | h) == 0) {
+            return float128(0, static_cast<uint64_t>(sign) << 63);
+        }
+        return float128(l, (static_cast<uint64_t>(sign) << 63) + (static_cast<uint64_t>(exp) << EXP_SHIFT) + h);
+    }
+
+    /**
+     * @brief Normalizes an exact non negative 128 bit significand and rounds it once.
+     *
+     * For results whose leading one can be anywhere: a sum after cancellation, a remainder, a
+     * fraction. The value is (h:l) * 2^(e - 112).
+     *
+     * @param sign Sign of the result
+     * @param e Exponent the value would have if its leading one were at bit 112
+     * @param l Low QWORD
+     * @param h High QWORD
+     * @param sticky True when set bits below (h:l) were already dropped
+     * @return The correctly rounded result.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr float128 norm_round_pack(uint32_t sign, int32_t e, uint64_t l, uint64_t h, bool sticky) noexcept
+    {
+        if ((l | h) == 0)
+            return float128(0, static_cast<uint64_t>(sign) << 63);
+
+        const int32_t msb = static_cast<int32_t>(log2(l, h));
+        uint64_t extra = sticky ? 1 : 0;
+        if (msb > FRAC_BITS) {
+            shift_right_jam128_extra(l, h, extra, msb - FRAC_BITS);
+        } else if (msb < FRAC_BITS) {
+            shift_left128_inplace_safe(l, h, FRAC_BITS - msb);
+        }
+        return round_pack(sign, e + msb - FRAC_BITS, l, h, extra);
+    }
 
     /**
      * @brief Builds a float128 from a 128 bit fraction, a value in [0,1).
@@ -1706,60 +2369,92 @@ public:
      *
      * @param low Low QWORD of the fraction.
      * @param high High QWORD of the fraction.
-     * @return The value the fraction stands for, or zero if it is zero.
+     * @return The value the fraction stands for, correctly rounded, or zero if it is zero.
      */
-    [[nodiscard]] static FP128_INLINE float128 from_fraction128(uint64_t low, uint64_t high) noexcept
+    [[nodiscard]] static FP128_INLINE constexpr float128 from_fraction128(uint64_t low, uint64_t high) noexcept
     {
-        if ((low | high) == 0) {
-            return float128();
-        }
-
-        // Bring the leading one to bit 127, then keep the top 113 bits as the mantissa.
-        const int32_t leading_zeros = static_cast<int32_t>(lzcnt128(low, high));
-        shift_left128_inplace_safe(low, high, leading_zeros);
-        shift_right128_inplace_safe(low, high, 127 - FRAC_BITS);
-        int32_t expo = -(leading_zeros + 1);
-
-        // That last shift rounds, and rounding up can carry into a 114th bit.
-        if (high > (FRAC_UNITY | UPPER_FRAC_MASK)) {
-            shift_right128_inplace_safe(low, high, 1);
-            ++expo;
-        }
-
-        float128 res;
-        res.set_components(low, high, expo, 0);
-
-        return res;
+        // Bit 127 of the fraction is worth 2^-1, so a leading one at bit 112 would be worth 2^-16.
+        return norm_round_pack(0, -16, low, high, false);
     }
 
+    /**
+     * @brief Stores a significand and exponent, rounding when the value is subnormal.
+     *
+     * @param l Low part of the significand
+     * @param h High part of the significand, which must have its leading one at bit 48 (bit 112 of
+     *        the whole) unless the significand is zero
+     * @param e Unbiased exponent, can be any value: one past the format's range produces an
+     *        infinity, one below it a subnormal or a zero, rounded once in the current direction.
+     * @param s Sign (1 is negative)
+     */
     FP128_INLINE constexpr void set_components(uint64_t l, uint64_t h, int32_t e, uint32_t s) noexcept
     {
-        // overflow
-        if (e >= INF_EXP_UNBIASED) {
-            *this = inf();
-            set_sign(s);
+        if ((l | h) == 0) {
+            *this = float128(0, static_cast<uint64_t>(s != 0) << 63);
             return;
         }
-        // sub normals
-        if (e <= SUBNORM_EXP_UNBIASED) {
-            // fix the fraction, remove the bits 112+ and shift to the right
-            int32_t shift = SUBNORM_EXP_UNBIASED + 1 - e;
-            // The shift is applied unconditionally. Zeroing the fraction once it reached the
-            // mantissa's width, as this used to, threw away the smallest subnormal itself: its
-            // leading bit sits at bit 112 and a shift of exactly 112 lands it on bit 0 rather than
-            // off the end. The shift helper handles every width, and rounds, which is what decides
-            // whether a value just under half of the smallest subnormal survives as one.
-            shift_right128_inplace_safe(l, h, shift);
-            // override the exponent to mark the value as subnormal
-            e = SUBNORM_EXP_UNBIASED;
-        }
-
-        low = l;
-        set_fraction_bits(h);
-        e += EXP_BIAS;
-        set_exponent_bits(static_cast<uint64_t>(e));
-        set_sign(s != 0);
+        *this = round_pack((s != 0) ? 1u : 0u, e, l, h, 0);
     }
+    /// @}
+
+    /**
+     * @name NaN results
+     * @{
+     */
+    /// @brief x with its quiet bit set. The payload, and the sign, are kept.
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 quiet_nan(const float128& x) noexcept { return float128(x.low, x.high | QUIET_NAN_BIT); }
+
+    /**
+     * @brief The result of an operation with a NaN operand (IEEE 754-2008 6.2).
+     *
+     * A signaling NaN operand is the invalid operation. Either way the result is a quiet NaN, and
+     * the standard recommends it be one of the inputs so that a payload survives the computation:
+     * the first NaN operand is returned, quieted.
+     *
+     * @param a First operand
+     * @param b Second operand
+     * @return The quiet NaN to deliver.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr float128 propagate_nan(const float128& a, const float128& b) noexcept
+    {
+        if (a.is_signaling() || b.is_signaling())
+            detail::raise_flags(FE_INVALID);
+        return quiet_nan(a.is_nan() ? a : b);
+    }
+    /// @overload
+    [[nodiscard]] FP128_INLINE static constexpr float128 propagate_nan(const float128& a, const float128& b, const float128& c) noexcept
+    {
+        if (a.is_signaling() || b.is_signaling() || c.is_signaling())
+            detail::raise_flags(FE_INVALID);
+        return quiet_nan(a.is_nan() ? a : (b.is_nan() ? b : c));
+    }
+    /// @overload
+    [[nodiscard]] FP128_INLINE static constexpr float128 propagate_nan(const float128& a) noexcept
+    {
+        if (a.is_signaling())
+            detail::raise_flags(FE_INVALID);
+        return quiet_nan(a);
+    }
+
+    /**
+     * @brief The result of an invalid operation on non NaN operands, such as inf - inf or 0 / 0.
+     * @return The default quiet NaN, after raising the invalid flag.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 invalid_operation() noexcept
+    {
+        detail::raise_flags(FE_INVALID);
+        return nan();
+    }
+
+    /**
+     * @brief The sign of an exact zero sum of two operands of opposite sign (IEEE 754-2008 6.3).
+     * @return 1 (negative) when rounding downward, 0 in every other direction.
+     */
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr uint32_t exact_zero_sign() noexcept
+    {
+        return (detail::current_rounding() == detail::rounding::downward) ? 1u : 0u;
+    }
+    /// @}
     /**
      * @brief Normalize the fraction so the msb (unity bit) is on bit 112.
      * The fraction value must contain the unity value
@@ -2024,125 +2719,33 @@ public:
     }
     /// @}
     /**
-     * @brief Normalizes the product of two mantissas to bit 112, rounding half to even.
+     * @brief Normalizes the product of two mantissas to bit 112, handing back the bits it drops.
      *
      * The multiply and the square both arrive here with (h:l) equal to their 256 bit product shifted
-     * right by 111. Both operands were normalized to [2^112, 2^113) by get_components(), so the
-     * product is in [2^224, 2^226) and (h:l) is in [2^113, 2^115): its leading one is at bit 113 or
-     * bit 114 and nowhere else, which makes the remaining shift 1 or 2.
+     * right by 111. Both operands were normalized to [2^112, 2^113), so the product is in [2^224, 2^226)
+     * and (h:l) is in [2^113, 2^115): its leading one is at bit 113 or bit 114 and nowhere else, which
+     * makes the remaining shift 1 or 2 and the choice a single bit test.
      *
-     * norm_fraction_sticky() would reach the same answer, but it has to find the leading one with a
-     * count of leading zeros first and then handle a shift that could be anything from negative to
-     * past the end of a QWORD. Here the choice is a single bit test and the two shift widths are
-     * small enough that none of its range handling applies. The rounding is deliberately identical
-     * to it, down to the carry out case, so the two produce the same bits for every input.
+     * Nothing is rounded here. The bits shifted out, and the sticky bit for everything the caller
+     * dropped before them, are returned in the form round_pack() takes, so that the result is
+     * rounded once and to its final width - which for a subnormal product is narrower than 113 bits.
      *
      * @param l Low part of the shifted product, replaced by the normalized fraction
      * @param h High part of the shifted product, replaced by the normalized fraction
      * @param e Unbiased exponent, adjusted to match the normalized fraction
      * @param sticky True when the caller already dropped one or more set bits below l
+     * @return The extra word for round_pack(): the dropped bits left aligned, the sticky bit in bit 0.
      */
-    FP128_INLINE static constexpr void norm_product(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) noexcept
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr uint64_t norm_product(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) noexcept
     {
         // bit 114 of the product decides between the two, and it is bit 50 of the high QWORD
         const int32_t shift = 1 + static_cast<int32_t>(h >> 50);
         e += shift;
 
-        // the highest dropped bit decides the direction, everything under it is sticky
-        const uint64_t guard = (l >> (shift - 1)) & 1;
-        const bool below = sticky || (shift == 2 && (l & 1) != 0);
-
+        const uint64_t extra = (l << (64 - shift)) | (sticky ? 1 : 0);
         l = shift_right128(l, h, shift);
         h >>= shift;
-
-        if (guard && (below || (l & 1))) {
-            if (++l == 0)
-                ++h;
-            // a carry out of the fraction moves to the next power of two
-            if ((h >> 48) != 1)
-                ++e;
-        }
-    }
-    /**
-     * @brief Normalize the fraction to bit 112, rounding half to even.
-     *
-     * The multiply and the divide both produce more bits than the fraction can hold and then throw
-     * the surplus away. Rounding correctly needs two pieces of information about what was
-     * discarded: the highest dropped bit, which chooses the direction, and whether anything below
-     * it was set, which separates an exact tie from a remainder above half. The caller passes the
-     * latter for the words it dropped before calling; this function collects the rest.
-     *
-     * norm_fraction() below rounds from a three bit window instead, which cannot see the discarded
-     * low words at all, so its ties resolve arbitrarily.
-     *
-     * Forced open for the same reason as get_components(), and measured with it: it closes the
-     * multiply and the divide, its shift counts come from the caller's exponent arithmetic, and
-     * leaving it outlined costs the caller the chance to fold the two together.
-     *
-     * @param l Low part of the fraction
-     * @param h High part of the fraction
-     * @param e Unbiased exponent, adjusted to match the normalized fraction
-     * @param sticky True when the caller already dropped one or more set bits below l
-     */
-    FP128_FORCE_INLINE constexpr void norm_fraction_sticky(uint64_t& l, uint64_t& h, int32_t& e, bool sticky) const noexcept
-    {
-        if (l == 0 && h == 0) {
-            e = ZERO_EXP_BIASED;
-            return;
-        }
-        const int32_t msb = static_cast<int32_t>(log2(l, h));
-        const int32_t shift = msb - FRAC_BITS;
-        e += shift;
-        if (shift <= 0) {
-            shift_left128_inplace_safe(l, h, -shift);
-            return;
-        }
-
-        // the highest dropped bit decides the direction, everything under it is sticky
-        const uint64_t guard = (shift <= 64) ? FP128_GET_BIT(l, shift - 1) : FP128_GET_BIT(h, shift - 65);
-        bool below = sticky;
-        if (!below && shift >= 2) {
-            below = (shift <= 64) ? ((l << (65 - shift)) != 0)
-                                  : (l != 0 || (shift >= 66 && (h << (129 - shift)) != 0));
-        }
-
-        const uint64_t new_l = shift_right128(l, h, shift);
-        h = (shift < 64) ? (h >> shift) : 0;
-        l = new_l;
-
-        if (guard && (below || (l & 1))) {
-            if (++l == 0)
-                ++h;
-            // a carry out of the fraction moves to the next power of two
-            if ((h >> 48) != 1)
-                ++e;
-        }
-    }
-    FP128_INLINE constexpr void norm_fraction(uint64_t& l, uint64_t& h, int32_t& e) const noexcept
-    {
-        // l and h are both zero
-        if (l == 0 && h == 0) {
-            e = ZERO_EXP_BIASED;
-            return;
-        }
-
-        // fix the exponent
-        auto msb = static_cast<int32_t>(log2(l, h));
-
-        // if the msb is exactly msb == FRAC_BITS the exponent stays the same
-        auto shift = msb - FRAC_BITS;
-
-        e += shift;
-        if (shift > 0) {
-            shift_right128_inplace_safe(l, h, shift);
-            // rounding up may have happened, expect the upper 16 bit to be exactly 1
-            if ((h >> 48) != 1) {
-                ++e;
-            }
-        } else {
-            // assert(shift == 0);
-            shift_left128_inplace_safe(l, h, -shift);
-        }
+        return extra;
     }
     /**
      * @brief Produces the closest value larger than x
@@ -2157,9 +2760,10 @@ public:
     [[nodiscard]] FP128_INLINE static constexpr float128 nextUp(float128 x)
     {
         switch (x.get_class()) {
-        case positiveInfinity:
         case quietNaN:
         case signalingNaN:
+            return propagate_nan(x);
+        case positiveInfinity:
             break;
         case negativeInfinity:
             return float128(UINT64_MAX, UINT64_MAX, EXP_MASK - 1, 1);
@@ -2193,9 +2797,10 @@ public:
     [[nodiscard]] FP128_INLINE static constexpr float128 nextDown(float128 x)
     {
         switch (x.get_class()) {
-        case negativeInfinity:
         case quietNaN:
         case signalingNaN:
+            return propagate_nan(x);
+        case negativeInfinity:
             break;
         case positiveInfinity:
             return float128(UINT64_MAX, UINT64_MAX, EXP_MASK - 1, 0);
@@ -2365,8 +2970,23 @@ public:
 
     /// @brief Returns false; this type does not conform to IEEE 754-1985.
     static constexpr bool is754version1985(void) { return false; }
-    /// @brief Returns true; this type conforms to IEEE 754-2008 (binary128).
-    static constexpr bool is754version2008(void) { return true; }
+    /**
+     * @brief Whether the type conforms to IEEE 754-2008 (binary128).
+     *
+     * The arithmetic, the conversions and the operations of clause 5 conform in every build, but
+     * the standard also requires the rounding-direction attributes of clause 4 and the status flags
+     * of clause 7, which exist only when FP128_IEEE_ENV is defined.
+     *
+     * @return True when the program is built with FP128_IEEE_ENV, false otherwise.
+     */
+    static constexpr bool is754version2008(void)
+    {
+#ifdef FP128_IEEE_ENV
+        return true;
+#else
+        return false;
+#endif
+    }
     //
     // End of class method implementation
     //
@@ -2470,8 +3090,8 @@ public:
      * builtin type of lhs.
      *
      * The count is rhs converted to int32_t, the same conversion the float128 on the left overload
-     * applies. Note that conversion rounds to nearest rather than truncating, so a count of 3.75
-     * shifts by 4. fixed_point128 truncates in the same place, its conversion being a plain shift.
+     * applies, and that conversion truncates, so a count of 3.75 shifts by 3 - as it does in
+     * fixed_point128, whose conversion is a plain shift.
      *
      * @param lhs Left operand, the value being shifted
      * @param rhs Right operand, the shift count
@@ -2509,9 +3129,13 @@ public:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const float128& lhs, const float128& rhs) noexcept
     {
-        // A NaN compares equal to nothing, not even to another NaN with the same bits.
-        if (lhs.is_nan() || rhs.is_nan())
+        // A NaN compares equal to nothing, not even to another NaN with the same bits. Equality is
+        // a quiet comparison: only a signaling NaN is the invalid operation.
+        if (lhs.is_nan() || rhs.is_nan()) {
+            if (lhs.is_signaling() || rhs.is_signaling())
+                detail::raise_flags(FE_INVALID);
             return false;
+        }
         // Positive and negative zero are numerically equal even though their bits differ.
         if (lhs.is_zero() && rhs.is_zero())
             return true;
@@ -2558,9 +3182,13 @@ public:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const float128& lhs, const float128& rhs) noexcept
     {
-        // A NaN is unordered with everything, so every relational test involving one is false.
-        if (lhs.is_nan() || rhs.is_nan())
+        // A NaN is unordered with everything, so every relational test involving one is false. The
+        // relational operators are IEEE 754's signaling comparisons, so any NaN is the invalid
+        // operation; isless() and the other <cmath> predicates are the quiet ones.
+        if (lhs.is_nan() || rhs.is_nan()) {
+            detail::raise_flags(FE_INVALID);
             return false;
+        }
         // The two zeros are numerically equal, so neither is smaller than the other. Without this
         // the differing sign bits would make -0 compare smaller than +0.
         if (lhs.is_zero() && rhs.is_zero())
@@ -2595,8 +3223,10 @@ public:
     {
         // Not simply !(lhs > rhs): a NaN makes every relational test false, so negating the
         // opposite test would wrongly report that a NaN is less than or equal to everything.
-        if (lhs.is_nan() || rhs.is_nan())
+        if (lhs.is_nan() || rhs.is_nan()) {
+            detail::raise_flags(FE_INVALID);
             return false;
+        }
         return !(lhs > rhs);
     }
     /// @overload
@@ -2613,9 +3243,13 @@ public:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const float128& lhs, const float128& rhs) noexcept
     {
-        // A NaN is unordered with everything, so every relational test involving one is false.
-        if (lhs.is_nan() || rhs.is_nan())
+        // A NaN is unordered with everything, so every relational test involving one is false. The
+        // relational operators are IEEE 754's signaling comparisons, so any NaN is the invalid
+        // operation; isless() and the other <cmath> predicates are the quiet ones.
+        if (lhs.is_nan() || rhs.is_nan()) {
+            detail::raise_flags(FE_INVALID);
             return false;
+        }
         // the two zeros are numerically equal, so neither is larger than the other
         if (lhs.is_zero() && rhs.is_zero())
             return false;
@@ -2648,8 +3282,10 @@ public:
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const float128& lhs, const float128& rhs) noexcept
     {
         // see the note on operator<= about why this is not simply !(lhs < rhs)
-        if (lhs.is_nan() || rhs.is_nan())
+        if (lhs.is_nan() || rhs.is_nan()) {
+            detail::raise_flags(FE_INVALID);
             return false;
+        }
         return !(lhs < rhs);
     }
     /// @overload
@@ -2694,49 +3330,134 @@ public:
         return temp;
     }
     /**
+     * @brief Rounds to an integral value (IEEE 754-2008 roundToIntegral, 5.3.1).
+     *
+     * The shared engine of floor, ceil, trunc, round, rint and nearbyint, which differ only in the
+     * direction they round. It works on the encoding: the fraction bits below the units bit are
+     * cleared, and when the value has to move up one unit is added at the units bit, a carry out of
+     * the fraction landing in the exponent on its own. Nothing is subtracted, so nothing rounds,
+     * and the sign is left alone - a negative value that rounds to zero gives -0.
+     *
+     * The previous implementations subtracted the fraction from the value, which made the zero
+     * results of a negative argument positive, and round() added one half and truncated, which
+     * rounded the largest value below one half up to one and 2^112 + 1 to 2^112 + 2.
+     *
+     * @param x Value to round
+     * @param mode Direction, ignored when @p ties_away is set
+     * @param ties_away Round to nearest with ties away from zero instead, as round() does
+     * @param signal_inexact Raise the inexact exception when the result differs from x, which
+     *        distinguishes roundToIntegralExact (rint) from the other five
+     * @return The integral value. A NaN comes back quieted, an infinity unchanged.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr float128 round_integral(const float128& x, detail::rounding mode, bool ties_away,
+                                                                        bool signal_inexact) noexcept
+    {
+        if (x.is_nan())
+            return propagate_nan(x);
+        const int32_t expo = x.get_exponent();
+        // Infinities, and every finite value from 2^112 up, have no fraction bits.
+        if (expo >= FRAC_BITS || x.is_zero())
+            return x;
+
+        const uint32_t sign = x.get_sign();
+        const uint64_t sign_bit = static_cast<uint64_t>(sign) << 63;
+        const bool round_up_away = (mode == ((sign != 0) ? detail::rounding::downward : detail::rounding::upward));
+        if (expo < 0) {
+            // |x| < 1, subnormals included: the result is zero or one, with the sign of x.
+            bool one = false;
+            if (ties_away)
+                one = expo == -1;
+            else if (mode == detail::rounding::nearest_even)
+                one = expo == -1 && (x.get_fraction_bits() | x.low) != 0;  // one half itself ties to zero
+            else
+                one = round_up_away;
+            if (signal_inexact)
+                detail::raise_flags(FE_INEXACT);
+            return float128(0, sign_bit | (one ? (static_cast<uint64_t>(EXP_BIAS) << EXP_SHIFT) : 0));
+        }
+
+        // The units bit is bit 112 - expo of the encoding. For expo == 0 that is the exponent
+        // field's lowest bit, which is set for the exponent of [1, 2): the implicit one is odd.
+        const int32_t units = FRAC_BITS - expo;
+        const uint64_t mask_low = (units >= 64) ? UINT64_MAX : ((1ull << units) - 1);
+        const uint64_t mask_high = (units >= 64) ? ((1ull << (units - 64)) - 1) : 0;
+        uint64_t l = x.low, h = x.high;
+        if (((l & mask_low) | (h & mask_high)) == 0)
+            return x;
+
+        const int32_t half_index = units - 1;
+        const uint64_t half_low = (half_index < 64) ? (1ull << half_index) : 0;
+        const uint64_t half_high = (half_index < 64) ? 0 : (1ull << (half_index - 64));
+        const bool at_or_above_half = ((l & half_low) | (h & half_high)) != 0;
+        const bool rest = ((l & mask_low & ~half_low) | (h & mask_high & ~half_high)) != 0;
+        const bool odd = ((units < 64) ? (l >> units) : (h >> (units - 64))) & 1;
+
+        bool up = false;
+        if (ties_away)
+            up = at_or_above_half;
+        else if (mode == detail::rounding::nearest_even)
+            up = at_or_above_half && (rest || odd);
+        else
+            up = round_up_away;
+
+        if (signal_inexact)
+            detail::raise_flags(FE_INEXACT);
+        l &= ~mask_low;
+        h &= ~mask_high;
+        if (up) {
+            if (units >= 64) {
+                h += 1ull << (units - 64);
+            } else {
+                const uint64_t unit = 1ull << units;
+                l += unit;
+                h += (l < unit) ? 1 : 0;
+            }
+        }
+        return float128(l, h);
+    }
+
+    /**
+     * @brief Converts an integral value to an integer type, the way the C rounding functions do.
+     * @tparam I The integer type
+     * @param x An integral value, an infinity or a NaN
+     * @return The value, or zero when it is a NaN or out of range for the type, which is the
+     *         invalid operation.
+     */
+    template <typename I> [[nodiscard]] FP128_INLINE static constexpr I integral_to(const float128& x) noexcept
+    {
+        if (x.is_nan() || x > std::numeric_limits<I>::max() || x < std::numeric_limits<I>::min()) {
+            detail::raise_flags(FE_INVALID);
+            return 0;
+        }
+        return x.to_integer<I>();
+    }
+
+    /**
      * @brief Performs the floor() function, similar to libc's floor(), rounds down towards -infinity.
      * @param x Input value
-     * @return A float128 holding the integer value. Overflow is not reported.
+     * @return A float128 holding the integer value.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 floor(const float128& x) noexcept
     {
-        float128 fraction = x.get_fraction();
-        if (fraction.is_zero())
-            return x;
-
-        float128 res = x - fraction;
-        if (fraction.is_negative())
-            return res - 1;
-        return res;
+        return round_integral(x, detail::rounding::downward, false, false);
     }
     /**
      * @brief Performs the ceil() function, similar to libc's ceil(), rounds up towards infinity.
      * @param x Input value
-     * @return A float128 holding the integer value. Overflow is not reported.
+     * @return A float128 holding the integer value. A negative value above -1 gives -0.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 ceil(const float128& x) noexcept
     {
-        float128 fraction = x.get_fraction();
-        if (fraction.is_zero())
-            return x;
-
-        float128 res = x - fraction;
-        if (fraction.is_positive())
-            return res + 1;
-        return res;
+        return round_integral(x, detail::rounding::upward, false, false);
     }
     /**
      * @brief Rounds towards zero
      * @param x Value to truncate
-     * @return Integer value, rounded towards zero.
+     * @return Integer value, rounded towards zero. A negative value above -1 gives -0.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 trunc(const float128& x) noexcept
     {
-        float128 fraction = x.get_fraction();
-        if (fraction.is_zero())
-            return x;
-
-        return x - fraction;
+        return round_integral(x, detail::rounding::toward_zero, false, false);
     }
     /**
      * @brief Rounds towards the nearest integer.
@@ -2746,49 +3467,38 @@ public:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 round(const float128& x) noexcept
     {
-        float128 h = (x.is_positive()) ? half() : -half();
-        return trunc(x + h);
+        return round_integral(x, detail::rounding::nearest_even, true, false);
     }
     /**
-     * @brief Rounds x to the nearest integer and returns the result as int64_t.
+     * @brief Rounds x to an integer in the current rounding direction and returns it as int64_t.
      * @param x Input value
-     * @return Nearest integer as int64_t. Returns 0 on overflow.
+     * @return Nearest integer as int64_t. Returns 0 on overflow or for a NaN, raising invalid.
      */
     // rint rounds ties to even, round() rounds them away from zero, so these cannot forward to
     // llround/lround the way they used to: llrint(2.5) is 2 and llround(2.5) is 3.
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int64_t llrint(const float128& x) noexcept { return static_cast<int64_t>(rint(x)); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int64_t llrint(const float128& x) noexcept { return integral_to<int64_t>(rint(x)); }
     /**
      * @brief Rounds towards the nearest integer.
      * The halfway value (0.5) is rounded away from zero.
      * @param x Value to round
-     * @return Integer value, rounded towards the nearest integer.
+     * @return Integer value, rounded towards the nearest integer. Returns 0 on overflow or for a
+     *         NaN, raising invalid.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int64_t llround(const float128& x) noexcept
-    {
-        float128 res = round(x);
-        if (res.is_special() || res > INT64_MAX || res < INT64_MIN)
-            return 0;
-        return static_cast<int64_t>(res);
-    }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int64_t llround(const float128& x) noexcept { return integral_to<int64_t>(round(x)); }
     /**
-     * @brief Rounds x to the nearest integer and returns the result as int32_t.
+     * @brief Rounds x to an integer in the current rounding direction and returns it as int32_t.
      * @param x Input value
-     * @return Nearest integer as int32_t. Returns 0 on overflow.
+     * @return Nearest integer as int32_t. Returns 0 on overflow or for a NaN, raising invalid.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t lrint(const float128& x) noexcept { return static_cast<int32_t>(rint(x)); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t lrint(const float128& x) noexcept { return integral_to<int32_t>(rint(x)); }
     /**
      * @brief Rounds towards the nearest integer.
      * The halfway value (0.5) is rounded away from zero.
      * @param x Value to round
-     * @return Integer value, rounded towards the nearest integer.
+     * @return Integer value, rounded towards the nearest integer. Returns 0 on overflow or for a
+     *         NaN, raising invalid.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t lround(const float128& x) noexcept
-    {
-        float128 res = round(x);
-        if (res.is_special() || res > INT32_MAX || res < INT32_MIN)
-            return 0;
-        return static_cast<int32_t>(res);
-    }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t lround(const float128& x) noexcept { return integral_to<int32_t>(round(x)); }
 
     /**
      * @brief Retrieves an integer that represents the base-2 exponent of the specified value.
@@ -2835,16 +3545,16 @@ public:
     {
         // a NaN operand propagates
         if (x.is_nan() || y.is_nan())
-            return nan();
-
-        // trivial case, x is zero
-        if (x.is_zero())
-            return x;
+            return propagate_nan(x, y);
 
         // fmod(x, 0) is the invalid operation and produces a NaN, matching the CRT.
         // An infinite dividend is invalid for the same reason.
         if (y.is_zero() || x.is_inf())
-            return nan();
+            return invalid_operation();
+
+        // trivial case, x is zero
+        if (x.is_zero())
+            return x;
 
         // an infinite divisor leaves the dividend untouched
         if (y.is_inf())
@@ -2911,10 +3621,18 @@ public:
         if (iptr == nullptr)
             return 0;
 
-        // fraction
-        float128 res = x.get_fraction();
-        // integer
-        *iptr = x - res;
+        // A NaN splits into two NaNs, an infinity into itself and a zero fraction.
+        if (x.is_nan()) {
+            *iptr = propagate_nan(x);
+            return *iptr;
+        }
+        *iptr = trunc(x);
+        if (x.is_inf())
+            return float128(0, static_cast<uint64_t>(x.get_sign()) << 63);
+
+        // The difference is exact, and a zero one takes the sign of x as C requires.
+        float128 res = x - *iptr;
+        res.set_sign(x.get_sign());
         return res;
     }
     /**
@@ -2926,7 +3644,7 @@ public:
     [[nodiscard]] friend FP128_INLINE constexpr float128 fdim(const float128& x, const float128& y) noexcept
     {
         if (x.is_nan() || y.is_nan())
-            return nan();
+            return propagate_nan(x, y);
         return (x > y) ? x - y : float128();
     }
     /**
@@ -2937,9 +3655,12 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE constexpr float128 fmin(const float128& x, const float128& y) noexcept
     {
-        // A NaN operand is treated as missing rather than as a value, so the other one wins. Every
-        // comparison against a NaN is false, which made the plain conditional return whichever
-        // operand happened to sit on the false branch.
+        // A quiet NaN operand is treated as missing rather than as a value, so the other one wins.
+        // Every comparison against a NaN is false, which made the plain conditional return
+        // whichever operand happened to sit on the false branch. A signaling NaN is the invalid
+        // operation instead, and produces a quiet NaN (IEEE 754-2008 minNum).
+        if (x.is_signaling() || y.is_signaling())
+            return propagate_nan(x, y);
         if (x.is_nan())
             return y;
         if (y.is_nan())
@@ -2958,6 +3679,8 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE constexpr float128 fmax(const float128& x, const float128& y) noexcept
     {
+        if (x.is_signaling() || y.is_signaling())
+            return propagate_nan(x, y);
         if (x.is_nan())
             return y;
         if (y.is_nan())
@@ -2972,7 +3695,29 @@ public:
      * @param y Second value
      * @return sqrt(x^2 + y^2).
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE float128 hypot(const float128& x, const float128& y) noexcept { return sqrt(sqr(x) + sqr(y)); }
+    [[nodiscard]] friend FP128_INLINE float128 hypot(const float128& x, const float128& y) noexcept
+    {
+        // An infinity wins even over a quiet NaN (IEEE 754-2008 9.2.1); a signaling NaN does not.
+        if (x.is_signaling() || y.is_signaling())
+            return propagate_nan(x, y);
+        if (x.is_inf() || y.is_inf())
+            return inf();
+        if (x.is_nan() || y.is_nan())
+            return propagate_nan(x, y);
+
+        // Scaling by the larger side keeps both squares inside the format's range. Squaring the
+        // values as they came, as this used to, overflowed for a side above 2^8192 and lost
+        // everything below 2^-8247 to underflow.
+        const float128 largest = fmax(fabs(x), fabs(y));
+        if (largest.is_zero())
+            return largest;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
+        const int32_t expo = ilogb(largest);
+        const float128 a = ldexp(x, -expo);
+        const float128 b = ldexp(y, -expo);
+        return filter(ldexp(sqrt(sqr(a) + sqr(b)), expo));
+    }
     /**
      * @brief Calculates the square of a value. i.e. x^2
      *
@@ -2983,53 +3728,124 @@ public:
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 sqr(float128 x) noexcept { return x.square(); }
     /**
-     * @brief Calculates the square root using Newton's method.
-     * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw
-     * @param x Value to calculate the root of
-     * @param iterations how many iterations to perform (more is more accurate). Sensible values are 0-5.
-     * @return Square root of (x), zero when x <= 0.
+     * @brief Square of a 113 bit significand compared with a 256 bit value.
+     * @param rl Low QWORD of the significand
+     * @param rh High QWORD of the significand
+     * @param n The value to compare against, n[0] the least significant word
+     * @return Negative, zero or positive as r*r is below, equal to or above n.
      */
-    [[nodiscard]] friend float128 sqrt(const float128& x, uint32_t iterations) noexcept
+    [[nodiscard]] FP128_INLINE static constexpr int32_t square_compare(uint64_t rl, uint64_t rh, const uint64_t n[4]) noexcept
+    {
+        uint64_t sq[4] {};
+        mul128to256(rl, rh, rl, rh, sq);
+        for (int32_t i = 3; i >= 0; --i) {
+            if (sq[i] != n[i])
+                return (sq[i] > n[i]) ? 1 : -1;
+        }
+        return 0;
+    }
+
+    /**
+     * @brief Calculates the square root, correctly rounded.
+     *
+     * IEEE 754 requires the square root to be correctly rounded, the same as the four arithmetic
+     * operations, and Newton's method alone cannot promise that: every step rounds, and the last one
+     * can land a unit either side of the answer. It used to, for a quarter of all arguments.
+     *
+     * So Newton's method only gets close, and the last bit is then settled exactly. The mantissa m
+     * (doubled when the exponent is odd, so that what is left of it halves exactly) is in
+     * [2^112, 2^114), which puts the square root of N = m * 2^112 in [2^112, 2^113) - exactly the
+     * 113 bit significand the result needs. Squaring a candidate r in integer arithmetic and
+     * comparing with N moves it onto floor(sqrt(N)), and the remainder N - r*r then says which way
+     * to round: the root is past the halfway point r + 1/2 exactly when the remainder exceeds r,
+     * and it can never sit on it, because (r + 1/2)^2 is not an integer.
+     *
+     * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw.
+     *
+     * @param x Value to calculate the root of
+     * @param iterations Ignored. The result is correctly rounded whatever its value; the parameter
+     *        is kept so that existing calls still compile.
+     * @return Square root of x. sqrt(-0) is -0, and any other negative argument is the invalid
+     *         operation and returns a NaN.
+     */
+    [[nodiscard]] friend float128 sqrt(const float128& x, [[maybe_unused]] uint32_t iterations) noexcept
     {
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         if (x.is_zero())
             return x;  // sqrt(-0) is -0
         if (x.is_negative())
-            return float128::nan();
+            return invalid_operation();
         if (x.is_inf())
             return x;
 
-        // Split off an even power of two, leaving a mantissa in [1, 4).
-        //
-        // Halving an even exponent is exact, so the result needs no correction factor afterwards.
-        // Normalizing to [0.5, 1) instead, as this used to, leaves an odd exponent half the time
-        // and has to multiply the root by sqrt(2)/2 to make up for it - an irrational factor, and
-        // therefore a rounding, applied to a value that was otherwise correct to the last bit.
-        //
-        // Reading the mantissa through get_components() also normalizes a subnormal argument,
-        // which the previous exponent arithmetic did not account for at all.
+        // Split off an even power of two, leaving a mantissa in [1, 4). Halving an even exponent is
+        // exact. Reading the mantissa through get_components() also normalizes a subnormal
+        // argument.
         uint64_t l = 0, h = 0;
         int32_t expo = 0;
         uint32_t sign = 0;
         x.get_components(l, h, expo, sign);
-        const bool odd = (expo & 1) != 0;
-        const float128 norm_x(l, h, static_cast<uint32_t>(EXP_BIAS + (odd ? 1 : 0)), 0);
-        const int32_t half_expo = (expo - (odd ? 1 : 0)) >> 1;
+        const int32_t odd = expo & 1;
+        const float128 norm_x(l, h, static_cast<uint32_t>(EXP_BIAS + odd), 0);
+        const int32_t half_expo = (expo - odd) / 2;
 
-        // The hardware double gives 53 correct bits to start from, and every Newton step doubles
-        // them, so three passes cover the 113 the mantissa holds several times over.
-        float128 root = ::sqrt(static_cast<double>(norm_x));
-
-        // iterate several times via Newton's method
+        // The hardware double gives 53 correct bits to start from and every Newton step doubles
+        // them, so two passes reach the last bit give or take the rounding of the steps themselves.
         //                  X
         //   Xn+1 = 0.5 * (---- + Xn )
         //                  Xn
-        for (auto i = iterations; i != 0; --i) {
-            root = (norm_x / root + root) >> 1;
+        float128 root;
+        {
+            // The steps are inexact even when the root is not; only the final rounding may say so.
+            const detail::flag_quiet quiet;
+            root = ::sqrt(static_cast<double>(norm_x));
+            for (int32_t i = 0; i < 2; ++i)
+                root = (norm_x / root + root) >> 1;
         }
 
-        return ldexp(root, half_expo);
+        // The candidate as a 113 bit integer. The root of a value below 4 is below 2, so an
+        // exponent of one only arises from rounding up to 2 itself, and the largest significand
+        // stands in for it.
+        uint64_t rl = 0, rh = 0;
+        int32_t root_expo = 0;
+        uint32_t root_sign = 0;
+        root.get_components(rl, rh, root_expo, root_sign);
+        if (root_expo > 0) {
+            rl = UINT64_MAX;
+            rh = MAX_SIG_HIGH;
+        }
+
+        // N = m * 2^112, with m the mantissa shifted up by one for an odd exponent.
+        if (odd != 0)
+            shift_left128_inplace_safe(l, h, 1);
+        const uint64_t n[4] = {0, l << 48, (l >> 16) | (h << 48), h >> 16};
+
+        // Walk the candidate onto floor(sqrt(N)). It starts within a unit or two, so neither loop
+        // runs more than twice.
+        while (square_compare(rl, rh, n) > 0) {
+            if (rl-- == 0)
+                --rh;
+        }
+        for (;;) {
+            uint64_t nl = rl + 1, nh = rh + ((rl == UINT64_MAX) ? 1 : 0);
+            if (square_compare(nl, nh, n) > 0)
+                break;
+            rl = nl;
+            rh = nh;
+        }
+
+        // The remainder N - r*r is below 2r + 1, so it fits in the low 128 bits.
+        uint64_t sq[4] {};
+        mul128to256(rl, rh, rl, rh, sq);
+        uint64_t rem_l = 0, rem_h = 0;
+        const uint8_t borrow = subborrow_u64(0, n[0], sq[0], &rem_l);
+        subborrow_u64(borrow, n[1], sq[1], &rem_h);
+
+        const bool exact = (rem_l | rem_h) == 0;
+        const bool above_half = (rem_h > rh) || (rem_h == rh && rem_l > rl);
+        const uint64_t extra = above_half ? ((1ull << 63) | 1) : (exact ? 0 : 1);
+        return round_pack(0, half_expo, rl, rh, extra);
     }
     /**
      * @brief Calculates the cube root.
@@ -3041,12 +3857,14 @@ public:
     [[nodiscard]] friend FP128_INLINE float128 cbrt(const float128 x, uint32_t iterations) noexcept
     {
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         // The real cube root is defined for a negative argument and is an odd function, which is
         // what the C library's cbrt computes. Returning a NaN, as this used to, made cbrt(-8)
         // undefined where the standard has it equal to -2.
         if (x.is_zero() || x.is_inf())
             return x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         // Split off a power of two whose exponent is a multiple of three, leaving a mantissa in
         // [1, 8). Dividing that exponent by three is exact, so no correction factor is needed.
@@ -3081,7 +3899,7 @@ public:
 
         root = ldexp(root, third_expo);
         root.set_sign(sign);
-        return root;
+        return filter(root);
     }
     /**
      * @brief Calculates the reciprocal of a value. y = 1 / x
@@ -3096,14 +3914,16 @@ public:
         constexpr int debug = false;
         const auto x_sign = x.get_sign();
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         if (x.is_inf()) {
             float128 zero;
             zero.set_sign(x_sign);
             return zero;
         }
-        if (x.is_zero())
+        if (x.is_zero()) {
+            detail::raise_flags(FE_DIVBYZERO);
             return (x_sign) ? -inf() : inf();
+        }
 
         // get_components() normalizes a subnormal, so the mantissa below is always in [1, 2) and
         // the Newton iteration sees the same problem whatever the magnitude of x was. Rebuilding
@@ -3301,17 +4121,19 @@ public:
     [[nodiscard]] friend FP128_INLINE float128 exp(const float128& x) noexcept
     {
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         if (x.is_inf())
             return x.is_negative() ? float128() : x;
         if (x.is_zero())
             return float128::one();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         // log of the largest finite value is 11356.52, log of the smallest subnormal is -11433.46
         if (x > float128(11357))
-            return inf();
+            return filter.inexact(inf());
         if (x < float128(-11434))
-            return float128();
+            return filter.inexact(float128());
 
         // ln2 to 321 bits, in three pieces. The first two have their low 16 mantissa bits zeroed,
         // so multiplying either by a k of up to 2^16 is exact and the products can be removed from
@@ -3331,7 +4153,7 @@ public:
         // other; the others remove quantities far below the last place of the result.
         const float128 r = ((x - kf * ln2_hi) - kf * ln2_mid) - kf * ln2_lo;
 
-        return ldexp(exp_reduced(r), k);
+        return filter(ldexp(exp_reduced(r), k));
     }
     /**
      * @brief Computes 2 to the power of x
@@ -3346,14 +4168,18 @@ public:
         // y = log(2)
         // 2^x = e^(y*x) = exp(y*x)
         //
-        if (x.is_nan() || x.is_inf())
-            return (x.is_inf() && x.is_negative()) ? float128() : x;
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_inf())
+            return x.is_negative() ? float128() : x;
         if (x.is_zero())
             return float128::one();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
         if (x > float128(16384))
-            return inf();
+            return filter.inexact(inf());
         if (x < float128(-16495))
-            return float128();
+            return filter.inexact(float128());
 
         // The integer part scales exactly, so only the fraction reaches exp() and the argument it
         // is handed stays small enough that the rounding of the multiply below is the only error.
@@ -3364,7 +4190,7 @@ public:
         const float128 p = f * float128::ln2();
         const float128 correction = fma(f, float128::ln2(), -p);
 
-        return ldexp(exp(p) * (float128::one() + correction), k);
+        return filter(ldexp(exp(p) * (float128::one() + correction), k));
     }
     /**
      * @brief Calculates the exponent of x and reduces 1 from the result: (e^x) - 1
@@ -3373,10 +4199,14 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 expm1(const float128& x) noexcept
     {
-        if (x.is_nan() || x.is_zero())
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_zero())
             return x;
         if (x.is_inf())
             return x.is_negative() ? -float128::one() : x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         // Half is the point where exp(x) - 1 stops throwing away significant bits: below it the
         // subtraction cancels most of what exp() produced, and at 2^-60 there is nothing left of
@@ -3390,81 +4220,185 @@ public:
                 fact_reciprocal(n + 1, factorial);
                 acc = factorial + x * acc;
             }
-            return x * acc;
+            return filter(x * acc);
         }
 
-        return exp(x) - float128::one();
+        return filter(exp(x) - float128::one());
     }
     /**
-     * @brief Computes x to the power of y
+     * @brief a^n by repeated squaring, for a positive finite a.
+     *
+     * A negative exponent inverts the power, unless the power overflowed or underflowed on its way
+     * there while its reciprocal would not have: then exp() and log() reach it directly.
+     *
+     * @param a Base, positive and finite
+     * @param n Exponent
+     * @return a^n.
+     */
+    [[nodiscard]] FP128_INLINE static float128 pown_magnitude(const float128& a, int32_t n) noexcept
+    {
+        // The magnitude is taken in the unsigned domain: negating the most negative int32_t is
+        // undefined.
+        uint32_t expo = (n < 0) ? (0u - static_cast<uint32_t>(n)) : static_cast<uint32_t>(n);
+        float128 res = float128::one();
+        float128 b = a;
+        while (expo > 0) {
+            if (expo & 1)
+                res *= b;
+            expo >>= 1;
+            if (expo > 0)
+                b.square();
+        }
+        if (n >= 0)
+            return res;
+        if (res.is_inf() || res.is_zero() || res.is_subnormal())
+            return exp(float128(n) * log(a));
+        return float128::one() / res;
+    }
+    /**
+     * @brief Computes x to the power of y (IEEE 754-2008 pown)
      * @param x Base value
      * @param y Exponent value (integer)
      * @return x^y
      */
     [[nodiscard]] friend FP128_INLINE float128 pow(const float128& x, int32_t y) noexcept
     {
-        static const float128 max_exponent = 11355;  // log(16382) / log2
-        float128 res = 1;
-        // check the trivial cases
-        if (y == 1) {
-            return x;
-        } else if (y == 0) {
-            return 1;
-        } else if (x == 1) {
-            return x;
-        }
-        // The magnitude is taken in the unsigned domain: negating the most negative int32_t is
-        // undefined, and the name abs now resolves to this namespace's float128 overload rather
-        // than to the one from <cstdlib>.
-        uint32_t expo = (y < 0) ? (0u - static_cast<uint32_t>(y)) : static_cast<uint32_t>(y);
-        // check if the value isn't too large
-        if (y > max_exponent) {
-            res = inf();
-        }
-        // check if the value isn't too small
-        else if (y < -max_exponent)
-            res = 0;
-        // compute x^y
-        else if (expo > 0) {
-            float128 b = x;  // value of e^1
-            while (expo > 0) {
-                if (expo & 1)
-                    res *= b;
-                expo >>= 1;
-                b.square();
-            }
-        }
-
-        // A negative exponent inverts the result. Unlike fixed_point128 this type has infinities, and
-        // operator/= gives the same answer reciprocal() does for a zero, a NaN or an infinity.
-        return (y >= 0) ? res : (one() / res);
+        // Every int32_t is exact in a float128, so the general function answers this too, with
+        // IEEE 754's pown special cases being the same as its pow ones for an integer exponent.
+        return pow(x, float128(y));
     }
     /**
      * @brief Computes x to the power of y
+     *
+     * The special values follow IEEE 754-2008 9.2.1 throughout. Among those the previous version
+     * got wrong: pow(0.5, inf) and pow(2, -inf) were infinite rather than zero, pow(2, NaN) was
+     * infinite, pow(-0, 0.5) a NaN, and every integer exponent beyond 11355 in magnitude overflowed
+     * whatever the base, so pow(1 + 2^-40, 12000), which is about 1.00000001, came out infinite.
+     *
      * @param x Base value
      * @param y Exponent value
      * @return x^y
      */
     [[nodiscard]] friend FP128_INLINE float128 pow(const float128& x, const float128& y) noexcept
     {
-        //
-        // Based on exponent law: (x^n)^m = x^(m * n)
-        // Convert the exponent y (function parameter) to produce an exponent that will work with exp()
-        // z = log(x)
-        // pow(x, y) = x^y = e^(y * z) = exp(y * z)
-        //
-        if (y.is_int()) {
-            return pow(x, static_cast<int32_t>(y));
-        } else if (x.is_negative()) {
-            return -nan();
+        const float128 one_value = float128::one();
+
+        // IEEE 754-2008 9.2.1, in the order its exceptions to the NaN rule need: x^0 is one and
+        // so is 1^y, for any x and y, quiet NaNs included.
+        if (y.is_zero() || x == one_value) {
+            if (x.is_signaling() || y.is_signaling())
+                return propagate_nan(x, y);
+            return one_value;
+        }
+        if (x.is_nan() || y.is_nan())
+            return propagate_nan(x, y);
+
+        // The sign of a zero or infinite x survives only an odd integer exponent.
+        const bool y_odd = is_odd_int(y);
+        const bool negative_odd = x.is_negative() && y_odd;
+        if (x.is_zero()) {
+            if (y.is_negative()) {
+                // a pole, except that 0^-inf is an exact infinity
+                if (!y.is_inf())
+                    detail::raise_flags(FE_DIVBYZERO);
+                return negative_odd ? -inf() : inf();
+            }
+            return negative_odd ? x : float128();
+        }
+        if (y.is_inf()) {
+            const float128 a = fabs(x);
+            if (a == one_value)
+                return one_value;  // (-1)^+-inf
+            return ((a > one_value) != y.is_negative()) ? inf() : float128();
+        }
+        if (x.is_inf()) {
+            if (y.is_negative())
+                return negative_odd ? -float128() : float128();
+            return negative_odd ? -inf() : inf();
         }
 
-        float128 lan_x = log(x);
-        if (!lan_x)
-            return lan_x;
+        // Both finite and non zero. A negative base has a real power only for an integer exponent.
+        if (x.is_negative() && !y.is_int())
+            return invalid_operation();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
-        return exp(y * lan_x);
+        const float128 a = fabs(x);
+        float128 res;
+        // Repeated multiplication is exact for as long as the powers are, and otherwise loses
+        // about half an ulp per unit of the exponent; exp(y * log(a)) loses about half an ulp per
+        // unit of y * log(a) instead. The multiplication wins for a short exponent, and for any
+        // base outside [1/2, 2) where log(a) is at least about one. It is limited to exponents an
+        // int32_t holds, which is more than any finite result needs at that size.
+        const int32_t a_expo = ilogb(a);
+        if (y.is_int() && fabs(y) <= float128(INT32_MAX) && (fabs(y) <= float128(64) || a_expo >= 1 || a_expo <= -2))
+            res = pown_magnitude(a, static_cast<int32_t>(y));
+        else
+            res = exp(y * log(a));
+
+        return filter(negative_odd ? -res : res);
     }
+    /**
+     * @name Low halves of the logarithm constants
+     *
+     * ln2(), log10_e() and log10_2() are the binary128 values nearest the constants, and each is off
+     * by up to half an ulp. Scaling a logarithm by one of them carries that half ulp into the
+     * result on top of the rounding of the product; mul_split() adds the part these hold back in.
+     * @{
+     */
+    /// @brief ln2 - ln2()
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 ln2_low() noexcept { return float128(0xACE93A4EBE5D148F, 0x2A17E1979B31, 0x3F8A, 1); }
+    /// @brief log10(e) - log10_e()
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log10_e_low() noexcept { return float128(0xD1B2EFEE2E0695D8, 0x1E6E08E5CFED, 0x3F8B, 1); }
+    /// @brief log10(2) - log10_2()
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log10_2_low() noexcept { return float128(0x3D1F3498A5E6F26B, 0x17826AD30C54, 0x3F8A, 0); }
+
+    /**
+     * @brief x times a constant held as high + low, rounded once.
+     * @param x Value to scale
+     * @param high The constant, rounded to binary128
+     * @param low What the rounding left out
+     * @return x * (high + low), to within an ulp of the rounding of the product.
+     */
+    [[nodiscard]] FP128_INLINE static float128 mul_split(const float128& x, const float128& high, const float128& low) noexcept
+    {
+        return fma(x, high, x * low);
+    }
+    /// @}
+
+    /**
+     * @brief The arguments every logarithm treats alike (IEEE 754-2008 9.2.1).
+     *
+     * A NaN propagates, a zero is a pole - the division by zero exception, and -inf - any other
+     * negative argument is the invalid operation, and +inf is its own logarithm. log2() used to
+     * return -inf for a negative argument, a finite value for +inf, and a finite value for a NaN.
+     *
+     * @param x Argument
+     * @param result Receives the answer when there is one
+     * @return True when x was one of these and @p result holds the answer.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr bool log_special(const float128& x, float128& result) noexcept
+    {
+        if (x.is_nan()) {
+            result = propagate_nan(x);
+            return true;
+        }
+        if (x.is_zero()) {
+            detail::raise_flags(FE_DIVBYZERO);
+            result = -inf();
+            return true;
+        }
+        if (x.is_negative()) {
+            result = invalid_operation();
+            return true;
+        }
+        if (x.is_inf()) {
+            result = x;
+            return true;
+        }
+        return false;
+    }
+
     /// @brief Largest |t| the log1p_small() series is used for. Chosen so twelve terms suffice.
     [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log1p_small_limit() noexcept { return float128(0, 0, EXP_BIAS - 4, 0); }
     /// @brief Terms of the log1p_small() series. |s| stays below 2^-4.9, so s^24 is past the last bit.
@@ -3517,13 +4451,19 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 log(float128 x) noexcept
     {
+        float128 special;
+        if (log_special(x, special))
+            return special;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
+
         // Sterbenz guarantees the subtraction is exact over the range the branch covers, so the
         // series below sees the offset from one with every bit it has.
         const float128 t = x - float128::one();
         if (fabs(t) <= log1p_small_limit())
-            return log1p_small(t);
+            return filter(log1p_small(t));
 
-        return log2(x) * float128::ln2();
+        return filter(mul_split(log2(x), float128::ln2(), ln2_low()));
     }
     /**
      * @brief Calculates the Log base 2 of x: y = log2(x)
@@ -3540,28 +4480,30 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 log2(float128 x) noexcept
     {
-        if (x.is_negative() || x.is_zero()) {
-            return -inf();
-        }
+        float128 special;
+        if (log_special(x, special))
+            return special;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         // Calculate the log in 2 steps:
-        // - The integer part is simple and fast via the get_exponent() function.
+        // - The integer part is simple and fast via the exponent.
         // - The fraction part is log2 of the mantissa, by argument reduction and a short series.
         // The result is the sum of the two. Based on the identity:
         // log(x + y) = log(x) + log(y)
-        const int32_t expo = x.get_exponent();
-
-        // x is an exponent of 2, so the mantissa contributes nothing. This also keeps the earlier
-        // handling of infinity, whose fraction bits are zero.
-        if (x.is_exponent_of_2()) {
-            return float128(expo);
-        }
-
+        //
+        // The exponent comes from get_components(), which normalizes a subnormal: the exponent
+        // field of every subnormal is the same and says nothing about its magnitude.
         uint64_t frac_low = 0, frac_high = 0;
-        int32_t mantissa_expo = 0;
+        int32_t expo = 0;
         uint32_t mantissa_sign = 0;
-        x.get_components(frac_low, frac_high, mantissa_expo, mantissa_sign);
+        x.get_components(frac_low, frac_high, expo, mantissa_sign);
         frac_high &= UPPER_FRAC_MASK;  // drop the unity bit, leaving f in [0,1) scaled by 2^112
+
+        // x is a power of 2, so the mantissa contributes nothing.
+        if ((frac_low | frac_high) == 0) {
+            return filter(float128(expo));
+        }
 
         // The leading log2_reduction_bits fraction bits choose the reciprocal to reduce with.
         const size_t j = static_cast<size_t>(frac_high >> (FRAC_BITS - 64 - log2_reduction_bits));
@@ -3663,7 +4605,7 @@ public:
 
             float128 res = from_fraction128(r_low, r_high);
             res.set_sign(1);
-            return res;
+            return filter(res);
         }
 
         // The product is formed in float128 rather than in the fraction arithmetic above. A fraction
@@ -3678,7 +4620,7 @@ public:
         // Taken at one, so the series is the whole answer: neither the exponent nor a table value
         // applies.
         if (just_below_one) {
-            return series;
+            return filter(series);
         }
 
         // -log2(recip), the part of the answer the reduction removed. Zero when nothing was reduced.
@@ -3687,7 +4629,7 @@ public:
         // The two fraction parts are summed before the exponent is added in. Both are below one, so
         // that first addition rounds against a small value; adding the exponent first would round
         // twice against a number as large as 16000 and cost the answer a bit for nothing.
-        return float128(expo) + (table_value + series);
+        return filter(float128(expo) + (table_value + series));
     }
     /**
      * @brief Calculates Log base 10 of x: log10(x)
@@ -3696,11 +4638,17 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 log10(float128 x) noexcept
     {
+        float128 special;
+        if (log_special(x, special))
+            return special;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
+
         const float128 t = x - float128::one();
         if (fabs(t) <= log1p_small_limit())
-            return log1p_small(t) * float128::log10_e();
+            return filter(mul_split(log1p_small(t), float128::log10_e(), log10_e_low()));
 
-        return log2(x) * float128::log10_2();
+        return filter(mul_split(log2(x), float128::log10_2(), log10_2_low()));
     }
     /**
      * @brief Calculates Log base 2 of x as an integer ignoring the sign of x.
@@ -3710,10 +4658,14 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 logb(float128 x) noexcept
     {
-        if (x.is_nan() || x.is_inf())
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_inf())
             return fabs(x);
-        if (x.is_zero())
+        if (x.is_zero()) {
+            detail::raise_flags(FE_DIVBYZERO);
             return -inf();
+        }
 
         // get_components() normalizes a subnormal, whose stored exponent field is the same for
         // every one of them and therefore says nothing about the value.
@@ -3730,17 +4682,23 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 log1p(float128 x) noexcept
     {
-        if (x.is_nan() || x.is_zero() || x.is_inf())
-            return (x.is_inf() && x.is_negative()) ? nan() : x;
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_zero() || (x.is_inf() && x.is_positive()))
+            return x;
 
         const float128 one_value = float128::one();
         if (x < -one_value)
-            return nan();
-        if (x == -one_value)
+            return invalid_operation();
+        if (x == -one_value) {
+            detail::raise_flags(FE_DIVBYZERO);
             return -inf();
+        }
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         if (fabs(x) <= log1p_small_limit())
-            return log1p_small(x);
+            return filter(log1p_small(x));
 
         // Above the series' range but still below one, 1+x rounds and the logarithm of a value
         // that close to one magnifies the error. Both subtractions below are exact - the first by
@@ -3749,10 +4707,10 @@ public:
         if (fabs(x) < one_value) {
             const float128 sum = one_value + x;
             const float128 rounding = (sum - one_value) - x;
-            return log(sum) - rounding / sum;
+            return filter(log(sum) - rounding / sum);
         }
 
-        return log(one_value + x);
+        return filter(log(one_value + x));
     }
 
     //
@@ -3776,8 +4734,11 @@ public:
         const float128 xx = x * x;
         float128 elem_denom, elem_nom = x;
 
-        // compute the rest of the series, starting with: -(x^3 / 3!)
-        for (int i = 3, sign = 1;; i += 2, sign = 1 - sign) {
+        // Compute the rest of the series, starting with: -(x^3 / 3!). The reciprocal factorials stop
+        // at 1/50!, and the argument is reduced long before the terms could need more; the bound
+        // only makes sure an unreduced argument cannot keep the loop alive. One once could: past
+        // 2^321 the powers overflow, inf * 0 is a NaN, and a NaN never compares equal to zero.
+        for (int i = 3, sign = 1; i <= 51; i += 2, sign = 1 - sign) {
             elem_nom *= xx;
             fact_reciprocal(i, elem_denom);
             float128 elem = elem_nom * elem_denom;  // next element in the series
@@ -3858,7 +4819,7 @@ public:
      * sine is not determined by the value in any useful sense. Everything up to there reduces
      * exactly, see reduce_half_pi().
      *
-     * @param x Argument
+     * @param x Argument, below 2^60 in magnitude; reduce_large() takes the larger ones
      * @return Quadrant index, zero for an argument too large to reduce.
      */
     [[nodiscard]] FP128_INLINE static int64_t quadrant_of(const float128& x) noexcept
@@ -3868,6 +4829,176 @@ public:
         if (fabs(scaled) >= ldexp(float128::one(), 62))
             return 0;
         return llround(scaled);
+    }
+
+    /**
+     * @brief Reduces an argument of any size: x = n * pi/2 + r, with |r| <= pi/4 (Payne and Hanek).
+     *
+     * Subtracting multiples of a stored pi/2, as reduce_half_pi() does, needs the multiple n as an
+     * integer and pi/2 to as many bits as n has plus the 226 the residual keeps - out of reach once
+     * n runs to thousands of bits. Here x * 2/pi is formed instead, in integer arithmetic, from the
+     * 113 bit mantissa and a 384 bit window of the binary expansion of 2/pi chosen by the exponent.
+     * The bits of 2/pi above the window only add multiples of four to the product, which leave the
+     * quadrant where it is; the bits below it only reach past the fraction the window keeps.
+     *
+     * That fraction has 380 bits or more, which leaves 226 significant ones even when x is closer
+     * to a multiple of pi/2 than any binary128 argument can be: for a random argument the fraction
+     * leads with about as many zero bits as the logarithm of the count of binary128 values, 127.
+     * Rounded to the nearest quadrant and multiplied by pi/2, it becomes the residual.
+     *
+     * Before this existed sin(), cos() and tan() reduced nothing above 2^62, and returned values
+     * such as 2^3240 for sin(1.5e21). Above 2^321 the series they evaluated never terminated.
+     *
+     * @param x Argument, finite and non zero
+     * @param hi Receives the residual
+     * @param lo Receives what did not fit in hi
+     * @return n mod 4, the quadrant.
+     */
+    FP128_INLINE static int32_t reduce_large(const float128& x, float128& hi, float128& lo) noexcept
+    {
+        constexpr float128 half_pi_hi(0x8469898CC51701B8, 0x921FB54442D1, 0x3FFF, 0);
+        constexpr float128 half_pi_mid(0xA67CC74020BBEA64, 0xCD129024E088, 0x3F8C, 0);
+        constexpr int32_t window_words = 6;
+        constexpr int32_t window_bits = window_words * 64;
+        constexpr int32_t product_words = window_words + 2;
+
+        uint64_t ml = 0, mh = 0;
+        int32_t e = 0;
+        uint32_t sign = 0;
+        x.get_components(ml, mh, e, sign);
+
+        // |x| = m * 2^(e-112) and bit i of 2/pi is worth 2^-i, so bit i times m lands on 2^(e-112-i).
+        // The window starts at the bit that lands on 2^1; the ones above it are multiples of four.
+        const int32_t first = (e - 113 > 1) ? (e - 113) : 1;
+        const int32_t frac_bits = (first + window_bits - 1) - (e - FRAC_BITS);
+
+        // The window, least significant word first.
+        uint64_t window[window_words] {};
+        const int32_t word = (first - 1) >> 6;
+        const int32_t bit = (first - 1) & 63;
+        for (int32_t k = 0; k < window_words; ++k) {
+            const uint64_t w0 = detail::two_over_pi_bits[word + k];
+            const uint64_t w1 = detail::two_over_pi_bits[word + k + 1];
+            window[window_words - 1 - k] = (bit == 0) ? w0 : ((w0 << bit) | (w1 >> (64 - bit)));
+        }
+
+        // The product of the mantissa and the window, scaled by 2^frac_bits.
+        uint64_t p[product_words] {};
+        const uint64_t m[2] = {ml, mh};
+        for (int32_t i = 0; i < 2; ++i) {
+            uint64_t carry = 0;
+            for (int32_t j = 0; j < window_words; ++j) {
+                uint64_t high_word = 0;
+                uint64_t low_word = mulx_u64(m[i], window[j], &high_word);
+                uint8_t c = addcarryx_u64(0, low_word, carry, &low_word);
+                high_word += c;
+                c = addcarryx_u64(0, p[i + j], low_word, &p[i + j]);
+                carry = high_word + c;
+            }
+            p[i + window_words] = carry;
+        }
+
+        // frac_bits is at most 436 for the exponents that reach here, inside the 512 bits of p; the
+        // bound keeps that true for any argument.
+        const auto bit_at = [&p](int32_t index) {
+            return ((index >> 6) < product_words) ? static_cast<uint32_t>((p[index >> 6] >> (index & 63)) & 1) : 0u;
+        };
+        uint32_t quadrant = bit_at(frac_bits) | (bit_at(frac_bits + 1) << 1);
+
+        // Keep the fraction only.
+        for (int32_t i = 0; i < product_words; ++i) {
+            const int32_t lowest = i * 64;
+            if (lowest >= frac_bits)
+                p[i] = 0;
+            else if (lowest + 64 > frac_bits)
+                p[i] &= FP128_MAX_VALUE_64(frac_bits - lowest);
+        }
+
+        // A fraction of one half or more belongs to the next quadrant, as a negative residual.
+        const bool negative = bit_at(frac_bits - 1) != 0;
+        if (negative) {
+            ++quadrant;
+            uint8_t borrow = 0;
+            for (int32_t i = 0; i < product_words; ++i)
+                borrow = subborrow_u64(borrow, 0, p[i], &p[i]);
+            for (int32_t i = 0; i < product_words; ++i) {
+                const int32_t lowest = i * 64;
+                if (lowest >= frac_bits)
+                    p[i] = 0;
+                else if (lowest + 64 > frac_bits)
+                    p[i] &= FP128_MAX_VALUE_64(frac_bits - lowest);
+            }
+        }
+
+        int32_t msb = -1;
+        for (int32_t i = product_words - 1; i >= 0 && msb < 0; --i) {
+            if (p[i] != 0)
+                msb = i * 64 + 63 - static_cast<int32_t>(lzcnt64(p[i]));
+        }
+
+        hi = float128();
+        lo = float128();
+        if (msb >= 0) {
+            // 128 bits of the fraction starting at bit pos, zeros below bit 0.
+            const auto extract = [&p](int32_t pos, uint64_t& l, uint64_t& h) {
+                const int32_t from = (pos > 0) ? pos : 0;
+                const int32_t w = from >> 6;
+                const int32_t b = from & 63;
+                const uint64_t p0 = (w < product_words) ? p[w] : 0;
+                const uint64_t p1 = (w + 1 < product_words) ? p[w + 1] : 0;
+                const uint64_t p2 = (w + 2 < product_words) ? p[w + 2] : 0;
+                l = (b == 0) ? p0 : ((p0 >> b) | (p1 << (64 - b)));
+                h = (b == 0) ? p1 : ((p1 >> b) | (p2 << (64 - b)));
+                if (pos < 0)
+                    shift_left128_inplace_safe(l, h, -pos);
+                h &= MAX_SIG_HIGH;  // 113 bits
+            };
+
+            // The top 113 bits of the fraction and the 113 below them, both exact.
+            uint64_t l = 0, h = 0;
+            extract(msb - FRAC_BITS, l, h);
+            float128 f_hi;
+            f_hi.set_components(l, h, msb - frac_bits, 0);
+            extract(msb - 2 * FRAC_BITS - 1, l, h);
+            const float128 f_lo = norm_round_pack(0, msb - FRAC_BITS - 1 - frac_bits, l, h, false);
+
+            // r = f * pi/2, with the error of the leading product recovered exactly.
+            const float128 product = f_hi * half_pi_hi;
+            const float128 product_err = fma(f_hi, half_pi_hi, -product);
+            quick_two_sum(product, product_err + (f_hi * half_pi_mid + f_lo * half_pi_hi), hi, lo);
+            if (negative) {
+                hi = -hi;
+                lo = -lo;
+            }
+        }
+
+        // sin and cos of -x follow from the reduction of x mirrored.
+        if (sign != 0) {
+            hi = -hi;
+            lo = -lo;
+            quadrant = 0u - quadrant;
+        }
+        return static_cast<int32_t>(quadrant & 3);
+    }
+
+    /**
+     * @brief Reduces x to [-pi/4, pi/4], as an unevaluated sum, and returns the quadrant.
+     * @param x Argument, finite
+     * @param hi Receives the residual
+     * @param lo Receives what did not fit in hi
+     * @return n mod 4, where x = n * pi/2 + hi + lo.
+     */
+    FP128_INLINE static int32_t reduce_trig(const float128& x, float128& hi, float128& lo) noexcept
+    {
+        // Up to 2^60 the multiple fits the integer reduce_half_pi() counts with, and its 342 bits
+        // of pi/2 leave the residual 226 good bits. Beyond that the multiple is formed in integer
+        // arithmetic instead.
+        if (x.get_exponent() < 60) {
+            const int64_t n = quadrant_of(x);
+            reduce_half_pi(x, n, hi, lo);
+            return static_cast<int32_t>(n & 3);
+        }
+        return reduce_large(x, hi, lo);
     }
 
     /**
@@ -3917,59 +5048,66 @@ public:
 
     [[nodiscard]] friend float128 sin(float128 x) noexcept
     {
-        if (x.is_nan() || x.is_zero())
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_zero())
             return x;
         if (x.is_inf())
-            return nan();
+            return invalid_operation();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
-        const int64_t n = quadrant_of(x);
         float128 hi, lo;
-        reduce_half_pi(x, n, hi, lo);
+        const int32_t n = reduce_trig(x, hi, lo);
 
-        switch (n & 3) {
+        switch (n) {
         case 0:  // [-45-45) degrees
-            return sin1(hi) + cos1(hi) * lo;
+            return filter(sin1(hi) + cos1(hi) * lo);
         case 1:  // [45-135) degrees
-            return cos1(hi) - sin1(hi) * lo;
+            return filter(cos1(hi) - sin1(hi) * lo);
         case 2:  // [135-225) degrees
-            return -(sin1(hi) + cos1(hi) * lo);
+            return filter(-(sin1(hi) + cos1(hi) * lo));
         case 3:  // [225-315) degrees
         default:
-            return -(cos1(hi) - sin1(hi) * lo);
+            return filter(-(cos1(hi) - sin1(hi) * lo));
         }
     }
     /**
      * @brief Calculate the inverse sine function
-     * Uses Newton's method to converge quickly.
-     * @param x value in radians in the range [-1,1]
-     * @return Inverse sine of x
+     *
+     * asin(x) = atan(x / sqrt((1-x)(1+x))). The Newton iteration on sin() this replaced divided by
+     * cos(), the derivative, which vanishes at the ends of the domain: it converged slowly there,
+     * to about 58 correct bits at asin(1). Near the ends 1-x is exact, so the argument of atan()
+     * keeps its accuracy however close to one x gets.
+     *
+     * @param x value in the range [-1,1]
+     * @return Inverse sine of x. Outside the domain the result is a NaN, the invalid operation.
      */
     [[nodiscard]] friend float128 asin(float128 x) noexcept
     {
-        constexpr int max_iterations = 6;
-        if (x < -1 || x > 1)
-            return 0;
+        if (x.is_nan())
+            return propagate_nan(x);
+        const float128 one_value = float128::one();
+        const float128 a = fabs(x);
+        if (a > one_value)
+            return invalid_operation();
+        if (x.is_zero())
+            return x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
-        //              sin(Xn) - a
-        // Xn+1 = Xn - -------------
-        //                cos(Xn)
-        // where 'a' is the argument, each iteration will converge on the result if the initial
-        //  estimate is close enough.
-        auto sign = x.get_sign();
-        x.set_sign(0);
-
-        // initial estimate using the standard library
-        float128 res = ::asin(static_cast<double>(x));
-        const float128 eps = fabs(res >> 110);
-        for (int i = 0; i < max_iterations; ++i) {
-            float128 e = (sin(res) - x) / cos(res);
-            res -= e;
-            if (fabs(e) <= eps)
-                break;
+        float128 res;
+        if (a == one_value)
+            res = float128::half_pi();
+        else if (a < ldexp(one_value, -57)) {
+            res = a;  // the cubic term is below half an ulp
+            detail::raise_flags(FE_INEXACT);
         }
+        else
+            res = atan(a / sqrt((one_value - a) * (one_value + a)));
 
-        res.set_sign(sign);
-        return res;
+        res.set_sign(x.get_sign());
+        return filter(res);
     }
     /**
      * @brief Calculate the cosine function
@@ -3981,55 +5119,53 @@ public:
     [[nodiscard]] friend float128 cos(float128 x) noexcept
     {
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         if (x.is_inf())
-            return nan();
+            return invalid_operation();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
-        const int64_t n = quadrant_of(x);
         float128 hi, lo;
-        reduce_half_pi(x, n, hi, lo);
+        const int32_t n = reduce_trig(x, hi, lo);
 
-        switch (n & 3) {
+        switch (n) {
         case 0:  // [-45-45) degrees
-            return cos1(hi) - sin1(hi) * lo;
+            return filter(cos1(hi) - sin1(hi) * lo);
         case 1:  // [45-135) degrees
-            return -(sin1(hi) + cos1(hi) * lo);
+            return filter(-(sin1(hi) + cos1(hi) * lo));
         case 2:  // [135-225) degrees
-            return -(cos1(hi) - sin1(hi) * lo);
+            return filter(-(cos1(hi) - sin1(hi) * lo));
         case 3:  // [225-315) degrees
         default:
-            return sin1(hi) + cos1(hi) * lo;
+            return filter(sin1(hi) + cos1(hi) * lo);
         }
     }
     /**
      * @brief Calculate the inverse cosine function
-     * Uses Newton's method to converge quickly.
-     * @param x value in radians in the range [-1,1]
-     * @return Inverse cosine of x
+     *
+     * acos(x) = 2 * atan(sqrt((1-x)/(1+x))). The Newton iteration this replaced divided by sin(),
+     * which is zero at acos(1): that returned a NaN, and so did acos(1 - 2^-100). Near x = 1 the
+     * difference 1-x is exact, and near x = -1 the sum 1+x is, so the quotient keeps its accuracy
+     * at both ends.
+     *
+     * @param x value in the range [-1,1]
+     * @return Inverse cosine of x. Outside the domain the result is a NaN, the invalid operation.
      */
     [[nodiscard]] friend float128 acos(float128 x) noexcept
     {
-        constexpr int max_iterations = 6;
-        if (x < -1 || x > 1)
-            return 0;
-        //              cos(Xn) - a           a - cos(Xn)
-        // Xn+1 = Xn - ------------- = Xn -  ------------
-        //                -sin(Xn)              sin(Xn)
-        // where 'a' is the argument, each iteration will converge on the result if the initial
-        //  estimate is close enough.
-        float128 res = ::acos(static_cast<double>(x));
-        const float128 eps = fabs(res >> 110);
+        if (x.is_nan())
+            return propagate_nan(x);
+        const float128 one_value = float128::one();
+        if (fabs(x) > one_value)
+            return invalid_operation();
+        if (x == one_value)
+            return float128();
+        if (x == -one_value)
+            return float128::pi();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
-        for (int i = 0; i < max_iterations; ++i) {
-            float128 cos_xn = cos(res);
-            float128 sin_xn = sin(res);
-            float128 e = (x - cos_xn) / sin_xn;
-            res -= e;
-            if (fabs(e) <= eps)
-                break;
-        }
-
-        return res;
+        return filter(atan(sqrt((one_value - x) / (one_value + x))) << 1);
     }
     /**
      * @brief Calculate the tangent function
@@ -4045,6 +5181,13 @@ public:
      */
     [[nodiscard]] friend float128 atan(float128 x) noexcept
     {
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_zero())
+            return x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
+
         // constants for segmentation
         constexpr float128 half_pi = float128::half_pi();  // pi / 2
         bool comp = false;
@@ -4083,32 +5226,44 @@ public:
             res = half_pi - res;
         // restore sign if needed
         res.set_sign(sign);
-        return res;
+        return filter(res);
     }
     /**
      * @brief Calculate the inverse tangent function of the ratio y / x
      * @param y value
      * @param x value
-     * @return Arctangent of y / x in the range [-pi, pi]
+     * @return Arctangent of y / x in the range [-pi, pi]. The zeros and infinities follow
+     *         IEEE 754-2008 9.2.1: the sign of a zero y is kept, a negative x (-0 included) puts
+     *         the result at +-pi, and two infinities give +-pi/4 or +-3pi/4.
      */
     [[nodiscard]] friend float128 atan2(float128 y, float128 x) noexcept
     {
         // constants for segmentation
         constexpr float128 pi = float128::pi();
         constexpr float128 half_pi = float128::half_pi();  // pi / 2
+        constexpr float128 three_quarter_pi(0x234F272993D1414A, 0x2D97C7F3321D, 0x4000, 0);
 
-        // x == 0
-        if (!x) {
-            if (!y)
-                return 0;
+        if (x.is_nan() || y.is_nan())
+            return propagate_nan(y, x);
 
-            return (y.is_negative()) ? -half_pi : half_pi;
-        }
-        // y == 0
-        if (!y)
-            return (x.is_negative()) ? -pi : pi;
-
+        // The zeros and the infinities. Each result takes the sign of y, a zero y included; the
+        // previous code returned pi for atan2(0, 1) and lost the sign of every zero.
         float128 res;
+        if (y.is_zero() || x.is_zero() || y.is_inf() || x.is_inf()) {
+            if (y.is_zero())
+                res = x.is_negative() ? pi : float128();  // on the axis, the left half including -0
+            else if (y.is_inf())
+                res = x.is_inf() ? (x.is_negative() ? three_quarter_pi : float128::quarter_pi()) : half_pi;
+            else if (x.is_zero())
+                res = half_pi;
+            else
+                res = x.is_negative() ? pi : float128();  // y finite, x infinite
+            res.set_sign(y.get_sign());
+            return res;
+        }
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
+
         // save the signs of x, y
         bool comp = fabs(y) > fabs(x);
         float128 ratio;
@@ -4121,10 +5276,10 @@ public:
             res = (res.is_negative()) ? -half_pi - res : half_pi - res;
 
         if (x > 0)
-            return res;
+            return filter(res);
 
         // x < 0
-        return (y < 0) ? res - pi : res + pi;
+        return filter((y < 0) ? res - pi : res + pi);
     }
     /**
      * @brief Calculate the hyperbolic sine function
@@ -4137,8 +5292,12 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 sinh(const float128 x) noexcept
     {
-        if (x.is_nan() || x.is_inf() || x.is_zero())
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_inf() || x.is_zero())
             return x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         const float128 a = fabs(x);
         float128 res;
@@ -4148,11 +5307,16 @@ public:
         if (a < float128::one()) {
             const float128 t = expm1(a);
             res = (t + t / (t + float128::one())) >> 1;
-        } else {
+        } else if (a < float128(11350)) {
             res = (exp(a) - exp(-a)) >> 1;
+        } else {
+            // exp(a) overflows before sinh(a), which is half of it, does. Squaring exp(a/2) reaches
+            // the same value without the intermediate overflow; exp(-a) is far below its last place.
+            const float128 half_power = exp(a >> 1);
+            res = half_power * (half_power >> 1);
         }
 
-        return (x.is_negative()) ? -res : res;
+        return filter((x.is_negative()) ? -res : res);
     }
     /**
      * @brief Calculates the inverse hyperbolic sine
@@ -4164,8 +5328,12 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 asinh(const float128 x) noexcept
     {
-        if (x.is_nan() || x.is_inf() || x.is_zero())
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_inf() || x.is_zero())
             return x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         const float128 one_value = float128::one();
         const float128 a = fabs(x);
@@ -4185,6 +5353,7 @@ public:
         // result needs.
         if (a < ldexp(one_value, -57)) {
             res = a;
+            detail::raise_flags(FE_INEXACT);  // asinh(a) is a hair below a, not equal to it
         } else if (a > ldexp(one_value, 57)) {
             res = log(a) + float128::ln2();
         } else {
@@ -4192,7 +5361,7 @@ public:
             res = log1p(a + a2 / (one_value + sqrt(one_value + a2)));
         }
 
-        return (x.is_positive()) ? res : -res;
+        return filter((x.is_positive()) ? res : -res);
     }
     /**
      * @brief Calculate the hyperbolic cosine function over a limited range [-0.5pi, 0.5pi]
@@ -4202,7 +5371,22 @@ public:
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Sine of x
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE float128 cosh(const float128 x) noexcept { return (exp(x) + exp(-x)) >> 1; }
+    [[nodiscard]] friend FP128_INLINE float128 cosh(const float128 x) noexcept
+    {
+        if (x.is_nan())
+            return propagate_nan(x);
+        const float128 a = fabs(x);
+        if (a.is_inf())
+            return a;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
+        // As in sinh(): exp(a) overflows a little before cosh(a) = exp(a)/2 does.
+        if (a > float128(11350)) {
+            const float128 half_power = exp(a >> 1);
+            return filter(half_power * (half_power >> 1));
+        }
+        return filter((exp(a) + exp(-a)) >> 1);
+    }
     /**
      * @brief Calculates the inverse hyperbolic cosine
      * For x >= 1:
@@ -4214,27 +5398,29 @@ public:
     [[nodiscard]] friend FP128_INLINE float128 acosh(const float128 x) noexcept
     {
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         // Outside the domain the result is undefined rather than zero, which is what the previous
         // version returned for every argument below one.
         const float128 one_value = float128::one();
         if (x < one_value)
-            return nan();
+            return invalid_operation();
         if (x.is_inf())
             return x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         // Near one, x*x-1 cancels: at x = 1+2^-100 the square rounds back to one and the root
         // comes out zero. The argument of log1p below is built from t = x-1, which is exact over
         // that range, so the answer keeps its significant bits.
         if (x < float128(2)) {
             const float128 t = x - one_value;
-            return log1p(t + sqrt((t << 1) + sqr(t)));
+            return filter(log1p(t + sqrt((t << 1) + sqr(t))));
         }
         // Beyond 2^57 the square overflows before the argument does and acosh(x) is log(2x).
         if (x > ldexp(one_value, 57))
-            return log(x) + float128::ln2();
+            return filter(log(x) + float128::ln2());
 
-        return log(x + sqrt(sqr(x) - one_value));
+        return filter(log(x + sqrt(sqr(x) - one_value)));
     }
     /**
      * @brief Calculates the hyperbolic tangent
@@ -4246,8 +5432,12 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 tanh(const float128 x) noexcept
     {
-        if (x.is_nan() || x.is_zero())
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_zero())
             return x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         const float128 a = fabs(x);
         float128 res;
@@ -4266,7 +5456,7 @@ public:
             res = t / (t + float128(2));
         }
 
-        return (x.is_negative()) ? -res : res;
+        return filter((x.is_negative()) ? -res : res);
     }
     /**
      * @brief Calculates the inverse hyperbolic tangent
@@ -4278,7 +5468,9 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 atanh(const float128 x) noexcept
     {
-        if (x.is_nan() || x.is_zero())
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_zero())
             return x;
 
         constexpr auto one_value = float128::one();
@@ -4286,9 +5478,13 @@ public:
         // The endpoints are poles and outside them the function is undefined. Returning zero for
         // all three, as this used to, gave atanh(1) a finite value and atanh(2) a defined one.
         if (a > one_value)
-            return nan();
-        if (a == one_value)
+            return invalid_operation();
+        if (a == one_value) {
+            detail::raise_flags(FE_DIVBYZERO);
             return x.is_negative() ? -inf() : inf();
+        }
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         // 2*atanh(a) = log1p(2a/(1-a)). Splitting the argument as below keeps the numerator from
         // rounding away for a small a, where the answer is proportional to it: the previous form,
@@ -4300,7 +5496,7 @@ public:
         else
             res = log1p((a << 1) / (one_value - a)) >> 1;
 
-        return (x.is_negative()) ? -res : res;
+        return filter((x.is_negative()) ? -res : res);
     }
     /**
      * @brief Calculates the Maclaurin series constants for the erf function.
@@ -4329,8 +5525,12 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 erf(float128 x) noexcept
     {
-        if (x.is_nan() || x.is_zero())
+        if (x.is_nan())
+            return propagate_nan(x);
+        if (x.is_zero())
             return x;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         const uint32_t sign = x.get_sign();
         const float128 a = fabs(x);
@@ -4379,7 +5579,7 @@ public:
         }
 
         res.set_sign(sign);
-        return res;
+        return filter(res);
     }
     /**
      * @brief Computes the complementary error function, 1 - erf(x).
@@ -4403,22 +5603,24 @@ public:
     [[nodiscard]] friend FP128_INLINE float128 erfc(float128 x) noexcept
     {
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         if (x.is_inf())
             return x.is_negative() ? float128(2) : float128();
         if (x.is_zero())
             return float128::one();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         const float128 one_value = float128::one();
         // erfc is symmetric about one: the negative half is where the answer approaches two and
         // keeps every bit, so it is the reflection that is well conditioned there.
         if (x.is_negative())
-            return float128(2) - erfc(-x);
+            return filter(float128(2) - erfc(-x));
         if (x < one_value)
-            return one_value - erf(x);
+            return filter(one_value - erf(x));
         // exp(-x*x) reaches the smallest subnormal at 106.9
         if (x > float128(107))
-            return float128();
+            return filter.inexact(float128());
 
         constexpr int32_t max_iterations = 4096;
         const float128 tiny = ldexp(one_value, -16000);
@@ -4448,7 +5650,7 @@ public:
         const float128 xx = sqr(x);
         const float128 xx_err = fma(x, x, -xx);
         const float128 gaussian = exp(-xx) * (one_value - xx_err);
-        return gaussian * float128::inv_sqrt_pi() * f;
+        return filter(gaussian * float128::inv_sqrt_pi() * f);
     }
     /**
      * @brief Tests whether x is finite (not infinite and not NaN).
@@ -4479,17 +5681,22 @@ public:
     {
         const uint32_t product_sign = x.get_sign() ^ y.get_sign();
 
-        // A NaN operand propagates, and so does the invalid product of a zero and an infinity.
+        // The product of a zero and an infinity is the invalid operation even when the addend is a
+        // quiet NaN (IEEE 754-2008 7.2 leaves that case to the implementation; signaling it is what
+        // x86 does). Otherwise a NaN operand propagates.
+        if ((x.is_inf() && y.is_zero()) || (y.is_inf() && x.is_zero())) {
+            if (z.is_nan())
+                detail::raise_flags(FE_INVALID);
+            return z.is_nan() ? quiet_nan(z) : invalid_operation();
+        }
         if (x.is_nan() || y.is_nan() || z.is_nan())
-            return nan();
-        if ((x.is_inf() && y.is_zero()) || (y.is_inf() && x.is_zero()))
-            return nan();
+            return propagate_nan(x, y, z);
 
         // An infinite product decides the result on its own, unless the addend is the opposite
         // infinity and the sum is undefined.
         if (x.is_inf() || y.is_inf()) {
             if (z.is_inf() && z.get_sign() != product_sign)
-                return nan();
+                return invalid_operation();
             float128 res = inf();
             res.set_sign(product_sign);
             return res;
@@ -4498,12 +5705,12 @@ public:
             return z;
 
         // A zero product leaves the addend. Two zeros give a zero that is negative only when both
-        // of them are, which is what round to nearest requires of a sum of opposite signs.
+        // of them are, or, rounding downward, when either is: the sign rule for an exact zero sum.
         if (x.is_zero() || y.is_zero()) {
             if (!z.is_zero())
                 return z;
             float128 res;
-            res.set_sign((z.get_sign() == product_sign) ? product_sign : 0);
+            res.set_sign((z.get_sign() == product_sign) ? product_sign : exact_zero_sign());
             return res;
         }
         // A zero addend leaves the product, which the multiply already rounds correctly.
@@ -4546,7 +5753,7 @@ public:
             // Equal accumulators mean equal values: a dropped tail puts its operand more than 157
             // bits below the other one, which no accumulator of the larger one can match.
             if (cmp == 0)
-                return float128();
+                return float128(0, static_cast<uint64_t>(exact_zero_sign()) << 63);
 
             if (cmp > 0) {
                 wide_sub(product_acc, addend_acc);
@@ -4597,20 +5804,9 @@ public:
                 sticky = sticky || (acc[(lsb - 1) >> 6] & FP128_MAX_VALUE_64(below)) != 0;
         }
 
-        // round half to even
-        if (guard != 0 && (sticky || (l & 1) != 0)) {
-            if (++l == 0)
-                ++h;
-            // Rounding up out of the mantissa lands on the next power of two.
-            if ((h >> EXP_SHIFT) != 1) {
-                h >>= 1;
-                ++expo;
-            }
-        }
-
-        float128 res;
-        res.set_components(l, h, expo, sign);
-        return res;
+        // The single rounding, to the final width: a subnormal result keeps fewer than 113 bits, and
+        // rounding to 113 first would round it twice.
+        return round_pack(sign, expo, l, h, (guard << 63) | (sticky ? 1 : 0));
     }
     /**
      * @brief Gets the mantissa and exponent of a floating-point number.
@@ -4644,11 +5840,12 @@ public:
         if (x.is_zero())
             return x;
         if (x.is_special())
-            return x;
+            return x.is_nan() ? propagate_nan(x) : x;
 
+        // Clamped before it is negated, which INT_MIN cannot be.
         if (exp > 0)
-            return x << exp;
-        return x >> -exp;
+            return x << ((exp < SCALE_LIMIT) ? exp : SCALE_LIMIT);
+        return x >> ((exp > -SCALE_LIMIT) ? -exp : SCALE_LIMIT);
     }
 
     /**
@@ -4708,6 +5905,94 @@ public:
     /// @}
 
     /**
+     * @name IEEE 754-2008 operations beyond <cmath>
+     *
+     * Operations clause 5 requires that the C library of the time did not name. They are spelled
+     * the way ISO/IEC TS 18661-1, and after it C23, binds them to C.
+     * @{
+     */
+
+    /**
+     * @brief The encoding as a key whose unsigned order is the total order of IEEE 754-2008 5.10.
+     *
+     * Positive encodings already ascend with their value, NaNs above infinity and quiet NaNs above
+     * signaling ones; negative encodings descend. Flipping every bit of a negative encoding and
+     * only the sign bit of a positive one puts the whole range in one ascending sequence.
+     */
+    FP128_FORCE_INLINE constexpr void total_order_key(uint64_t& l, uint64_t& h) const noexcept
+    {
+        const uint64_t flip = (get_sign() != 0) ? UINT64_MAX : 0;
+        l = low ^ flip;
+        h = high ^ (flip | SIGN_MASK);
+    }
+
+    /**
+     * @brief totalOrder(x, y): true when x precedes y, or equals it, in the IEEE 754 total order.
+     *
+     * The order every value takes part in, NaNs included: -NaN < -inf < negative values < -0 <
+     * +0 < positive values < +inf < +NaN, a signaling NaN before a quiet one of the same sign, and
+     * NaNs of the same kind ordered by payload. It never signals, even for a signaling NaN.
+     *
+     * @param x First value
+     * @param y Second value
+     * @return True when x is ordered before or the same as y.
+     */
+    [[nodiscard]] friend FP128_INLINE constexpr bool totalorder(const float128& x, const float128& y) noexcept
+    {
+        uint64_t xl = 0, xh = 0, yl = 0, yh = 0;
+        x.total_order_key(xl, xh);
+        y.total_order_key(yl, yh);
+        return (xh != yh) ? (xh < yh) : (xl <= yl);
+    }
+    /// @brief totalOrderMag(x, y): totalorder() of the absolute values.
+    [[nodiscard]] friend FP128_INLINE constexpr bool totalordermag(const float128& x, const float128& y) noexcept
+    {
+        return totalorder(fabs(x), fabs(y));
+    }
+
+    /**
+     * @brief maxNumMag: whichever of x and y has the larger magnitude, or fmax() when they tie.
+     * @param x First value
+     * @param y Second value
+     * @return The larger magnitude. A quiet NaN is treated as missing; a signaling one is the
+     *         invalid operation and gives a quiet NaN.
+     */
+    [[nodiscard]] friend FP128_INLINE constexpr float128 fmaxmag(const float128& x, const float128& y) noexcept
+    {
+        if (!x.is_nan() && !y.is_nan()) {
+            const float128 ax = fabs(x), ay = fabs(y);
+            if (ax > ay)
+                return x;
+            if (ay > ax)
+                return y;
+        }
+        return fmax(x, y);
+    }
+    /// @brief minNumMag: whichever of x and y has the smaller magnitude, or fmin() when they tie.
+    /// @copydetails fmaxmag
+    [[nodiscard]] friend FP128_INLINE constexpr float128 fminmag(const float128& x, const float128& y) noexcept
+    {
+        if (!x.is_nan() && !y.is_nan()) {
+            const float128 ax = fabs(x), ay = fabs(y);
+            if (ax < ay)
+                return x;
+            if (ay < ax)
+                return y;
+        }
+        return fmin(x, y);
+    }
+
+    /// @brief isCanonical: always true, every binary128 encoding is canonical.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool iscanonical(const float128&) noexcept { return true; }
+    /// @brief isSignaling: true for a signaling NaN.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool issignaling(const float128& x) noexcept { return x.is_signaling(); }
+    /// @brief isSubnormal: true for a subnormal value, which zero is not.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool issubnormal(const float128& x) noexcept { return x.is_subnormal() && !x.is_zero(); }
+    /// @brief isZero: true for either zero.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool iszero(const float128& x) noexcept { return x.is_zero(); }
+    /// @}
+
+    /**
      * @brief A quiet NaN carrying the payload spelled out in the argument.
      *
      * Mirrors the C library's nan(): the string is read as an unsigned integer, decimal by
@@ -4750,31 +6035,23 @@ public:
     /**
      * @name Rounding to the current mode
      *
-     * The library rounds to nearest with ties to even and offers no way to change that, so
-     * nearbyint and rint are the same function and neither can raise the inexact exception rint is
-     * otherwise allowed to. round() differs from both: it breaks a tie away from zero.
+     * Both round in the current rounding direction, which is to nearest with ties to even unless
+     * FP128_IEEE_ENV is defined and fesetround() chose another. They differ in one respect:
+     * rint is IEEE 754's roundToIntegralExact and raises the inexact exception when the result
+     * differs from its argument, nearbyint never does. round() differs from both: it breaks a tie
+     * away from zero whatever the rounding direction.
      * @{
      */
+    /// @brief x rounded to an integral value in the current direction, raising inexact when that changes it.
     [[nodiscard]] friend FP128_INLINE constexpr float128 rint(const float128& x) noexcept
     {
-        if (x.is_special() || x.is_zero() || x.is_int())
-            return x;
-
-        const float128 truncated = trunc(x);
-        const float128 fraction = fabs(x - truncated);  // exact
-        const float128 half_value = float128::half();
-        if (fraction < half_value)
-            return truncated;
-
-        float128 step = float128::one();
-        step.set_sign(x.get_sign());
-        if (fraction > half_value)
-            return truncated + step;
-
-        // Exactly halfway: the tie goes to the even neighbour.
-        return is_odd_int(truncated) ? truncated + step : truncated;
+        return round_integral(x, detail::current_rounding(), false, true);
     }
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 nearbyint(const float128& x) noexcept { return rint(x); }
+    /// @brief x rounded to an integral value in the current direction.
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 nearbyint(const float128& x) noexcept
+    {
+        return round_integral(x, detail::current_rounding(), false, false);
+    }
     /// @}
 
     /**
@@ -4788,7 +6065,7 @@ public:
     {
         // Anything past the format's range saturates the same way the shift itself would, and
         // clamping keeps the conversion to int well defined.
-        constexpr long limit = 2 * (EXP_BIAS + FRAC_BITS);
+        constexpr long limit = SCALE_LIMIT;
         const long clamped = (n > limit) ? limit : ((n < -limit) ? -limit : n);
         return ldexp(x, static_cast<int>(clamped));
     }
@@ -4803,7 +6080,7 @@ public:
     [[nodiscard]] friend FP128_INLINE constexpr float128 nextafter(const float128& x, const float128& y) noexcept
     {
         if (x.is_nan() || y.is_nan())
-            return nan();
+            return propagate_nan(x, y);
         if (x == y)
             return y;  // the sign of y is what the standard hands back here
         return (y > x) ? nextUp(x) : nextDown(x);
@@ -4899,8 +6176,10 @@ public:
     {
         if (quo != nullptr)
             *quo = 0;
-        if (x.is_nan() || y.is_nan() || x.is_inf() || y.is_zero())
-            return nan();
+        if (x.is_nan() || y.is_nan())
+            return propagate_nan(x, y);
+        if (x.is_inf() || y.is_zero())
+            return invalid_operation();
         if (y.is_inf() || x.is_zero())
             return x;
 
@@ -4937,22 +6216,26 @@ public:
      */
     [[nodiscard]] friend FP128_INLINE float128 hypot(const float128& x, const float128& y, const float128& z) noexcept
     {
+        if (x.is_signaling() || y.is_signaling() || z.is_signaling())
+            return propagate_nan(x, y, z);
         if (x.is_inf() || y.is_inf() || z.is_inf())
             return inf();
         if (x.is_nan() || y.is_nan() || z.is_nan())
-            return nan();
+            return propagate_nan(x, y, z);
 
         // Scaling by the largest term keeps every square inside the format's range, which squaring
         // the values as they came would not: a side above 2^8192 overflows on its own.
         const float128 largest = fmax(fabs(x), fmax(fabs(y), fabs(z)));
         if (largest.is_zero())
             return largest;
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         const int32_t expo = ilogb(largest);
         const float128 a = ldexp(x, -expo);
         const float128 b = ldexp(y, -expo);
         const float128 c = ldexp(z, -expo);
-        return ldexp(sqrt(sqr(a) + sqr(b) + sqr(c)), expo);
+        return filter(ldexp(sqrt(sqr(a) + sqr(b) + sqr(c)), expo));
     }
 
     /// @brief Terms of the Stirling series lgamma() runs. Sixteen reach 2^-119 for an argument of 40.
@@ -4973,17 +6256,21 @@ public:
     [[nodiscard]] friend FP128_INLINE float128 lgamma(float128 x) noexcept
     {
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         if (x.is_inf())
             return inf();
         // The non positive integers are the poles of the gamma function
-        if (x.is_zero() || (x.is_negative() && x.is_int()))
+        if (x.is_zero() || (x.is_negative() && x.is_int())) {
+            detail::raise_flags(FE_DIVBYZERO);
             return inf();
+        }
         // gamma(1) and gamma(2) are both one. The recurrence and the series below would reach the
         // logarithm of 31! and subtract it from itself, which cancels to a small non zero value
         // rather than to the exact answer.
         if (x == float128::one() || x == float128(2))
             return float128();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
 
         constexpr float128 coefficients[STIRLING_TERMS] = {
             float128(0x5555555555555555, 0x555555555555, 0x3FFB, 0),  // B2 / (2*1)
@@ -5010,7 +6297,7 @@ public:
         // where the series lives.
         if (x.is_negative()) {
             const float128 reflected = sin(float128::pi() * x);
-            return log(float128::pi() / fabs(reflected)) - lgamma(float128::one() - x);
+            return filter(log(float128::pi() / fabs(reflected)) - lgamma(float128::one() - x));
         }
 
         // Walk up to where the asymptotic series is accurate, remembering what to divide out.
@@ -5026,7 +6313,7 @@ public:
             series = (series + coefficients[i]) * inv_xx;
         series = (series + coefficients[0]) / x;
 
-        return (x - float128::half()) * log(x) - x + half_log_two_pi + series - scale_log;
+        return filter((x - float128::half()) * log(x) - x + half_log_two_pi + series - scale_log);
     }
 
     /**
@@ -5042,17 +6329,21 @@ public:
     [[nodiscard]] friend FP128_INLINE float128 tgamma(float128 x) noexcept
     {
         if (x.is_nan())
-            return x;
+            return propagate_nan(x);
         if (x.is_inf())
-            return x.is_negative() ? nan() : x;
+            return x.is_negative() ? invalid_operation() : x;
         // The poles, and the two zeros of 1/gamma that a signed zero argument picks out
-        if (x.is_zero())
+        if (x.is_zero()) {
+            detail::raise_flags(FE_DIVBYZERO);
             return x.is_negative() ? -inf() : inf();
+        }
         if (x.is_negative() && x.is_int())
-            return nan();
+            return invalid_operation();
+        // From here on only the flags the result justifies reach the caller.
+        detail::flag_filter filter;
         // gamma(1756) overflows
         if (x > float128(1756))
-            return inf();
+            return filter.inexact(inf());
 
         // 34! is the largest factorial a binary128 holds exactly, so every integer argument up to
         // 35 comes back with no rounding at all.
@@ -5060,17 +6351,17 @@ public:
             float128 result = float128::one();
             for (float128 i = float128(2); i < x; i += float128::one())
                 result *= i;
-            return result;
+            return filter(result);
         }
 
         const float128 magnitude = exp(lgamma(x));
         if (x.is_positive())
-            return magnitude;
+            return filter(magnitude);
 
         // Between two poles the gamma function keeps one sign, alternating with every step: it is
         // negative on (-1, 0), positive on (-2, -1), and so on, which is the parity of floor(x).
         const float128 floor_x = floor(x);
-        return is_odd_int(floor_x) ? -magnitude : magnitude;
+        return filter(is_odd_int(floor_x) ? -magnitude : magnitude);
     }
 
     /// @brief Absolute value, the name `<cmath>` gives the floating point overload alongside fabs.
@@ -5132,13 +6423,21 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
  * more digits is at least as close to the value as one with fewer, so if some length reads back
  * correctly then every longer one does too.
  *
- * @param low Low QWORD of the mantissa
- * @param high High QWORD of the mantissa
- * @param exponent Unbiased exponent of the value
+ * @param value Finite, non zero value
  * @return Digit count in [1, 36].
  */
-[[nodiscard]] inline int32_t shortest_digit_count(uint64_t low, uint64_t high, int32_t exponent)
+[[nodiscard]] inline int32_t shortest_digit_count(const float128& value)
 {
+    uint64_t low = 0, high = 0;
+    int32_t exponent = 0;
+    uint32_t sign = 0;
+    value.get_components(low, high, exponent, sign);
+    uint64_t want_low = 0, want_high = 0;
+    value.get_bits(want_low, want_high);
+    want_high &= ~(1ull << 63);
+
+    // The trial conversions raise exceptions that belong to none of the caller's operations.
+    const flag_quiet quiet;
     char digits[40];
     int32_t lower = 1;
     int32_t upper = 36;  // max_digits10, which always reads back
@@ -5147,10 +6446,19 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
         const int32_t middle = (lower + upper) / 2;
         const int32_t exponent10 = to_decimal_digits(low, high, exponent, middle, digits);
 
-        uint64_t back_low = 0, back_high = 0;
+        // Read back the way from_chars() reads, rounded once to the final width, which for a
+        // subnormal is fewer than 113 bits: comparing 113 bit mantissas instead demanded more
+        // digits than a subnormal needs.
+        uint64_t back_low = 0, back_high = 0, extra = 0;
         int32_t back_exponent = 0;
-        const bool parsed = from_decimal_digits(digits, middle, exponent10 - middle, back_low, back_high, back_exponent);
-        if (parsed && back_low == low && back_high == high && back_exponent == exponent)
+        bool same = false;
+        if (from_decimal_digits(digits, middle, exponent10 - middle, back_low, back_high, back_exponent, &extra)) {
+            const float128 back = float128::round_pack(0, back_exponent, back_low, back_high, extra, rounding::nearest_even);
+            uint64_t got_low = 0, got_high = 0;
+            back.get_bits(got_low, got_high);
+            same = got_low == want_low && got_high == want_high;
+        }
+        if (same)
             upper = middle;
         else
             lower = middle + 1;
@@ -5230,11 +6538,25 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
         int32_t kept = (precision >= 0) ? precision : 28;
         if (kept > 28)
             kept = 28;
-        // Rounding a shortened fraction: the first dropped digit decides, ties go up. A carry can
-        // run through the fraction and into the leading one, which is the next power of two.
+        // Rounding a shortened fraction, in the current direction: to nearest the first dropped
+        // digit decides and a tie goes to the even digit (it used to go up). A carry can run
+        // through the fraction and into the leading one, which is the next power of two.
         bool leading_two = false;
         if (precision >= 0 && precision < 28) {
-            if (hex_value(fraction[precision]) >= 8) {
+            const int32_t first_dropped = hex_value(fraction[precision]);
+            bool rest = false;
+            for (int32_t i = precision + 1; i < 28; ++i)
+                rest = rest || fraction[i] != '0';
+            const int32_t last_kept = (precision > 0) ? hex_value(fraction[precision - 1]) : 1;
+            bool up = false;
+            switch (digit_rounding_for(sign)) {
+            case digit_rounding::nearest_even: up = first_dropped > 8 || (first_dropped == 8 && (rest || (last_kept & 1) != 0)); break;
+            case digit_rounding::away_from_zero: up = first_dropped != 0 || rest; break;
+            default: break;
+            }
+            if (first_dropped != 0 || rest)
+                raise_flags(FE_INEXACT);
+            if (up) {
                 int32_t index = precision - 1;
                 while (index >= 0) {
                     const int32_t digit = hex_value(fraction[index]);
@@ -5291,26 +6613,29 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
     char digits[MAX_OUTPUT_DIGITS];
     int32_t significant = 0;
     int32_t exponent10 = 0;
+    // The digits are rounded in the current direction, except for the shortest form, which is
+    // defined by reading back to nearest. Either way a conversion that drops something is inexact.
+    const digit_rounding direction = digit_rounding_for(sign);
+    bool exact = false;
 
     if (style == '\0') {
-        significant = shortest_digit_count(low, high, exponent);
-        exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+        significant = shortest_digit_count(value);
+        exponent10 = to_decimal_digits(low, high, exponent, significant, digits, &exact);
     } else if (style == 'e') {
         significant = ((precision >= 0) ? precision : DEFAULT_PRECISION) + 1;
         if (significant > MAX_OUTPUT_DIGITS)
             significant = MAX_OUTPUT_DIGITS;
-        exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+        exponent10 = to_decimal_digits(low, high, exponent, significant, digits, &exact, direction);
     } else if (style == 'g') {
         significant = (precision > 0) ? precision : ((precision == 0) ? 1 : DEFAULT_PRECISION);
         if (significant > MAX_OUTPUT_DIGITS)
             significant = MAX_OUTPUT_DIGITS;
-        exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+        exponent10 = to_decimal_digits(low, high, exponent, significant, digits, &exact, direction);
     } else {
         // Fixed notation asks for a count of digits after the point rather than significant ones,
         // and how many that is depends on where the value sits. One digit is generated first to
         // find that out, then the real request is made.
         const int32_t after_point = (precision >= 0) ? precision : DEFAULT_PRECISION;
-        bool exact = false;
         int32_t probe_exponent10 = to_decimal_digits(low, high, exponent, 1, digits, &exact);
         significant = probe_exponent10 + after_point;
 
@@ -5319,7 +6644,7 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
         // digits reveals the true exponent, and one retry with it is always enough because the
         // rounding can only move the exponent by one.
         if (significant > 0 && significant <= MAX_OUTPUT_DIGITS) {
-            const int32_t actual_exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+            const int32_t actual_exponent10 = to_decimal_digits(low, high, exponent, significant, digits, nullptr, direction);
             if (actual_exponent10 != probe_exponent10) {
                 probe_exponent10 = actual_exponent10;
                 significant = actual_exponent10 + after_point;
@@ -5327,9 +6652,15 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
         }
 
         if (significant <= 0) {
-            // The value is below half of the last place asked for, or exactly on it. A tie goes to
-            // the even digit, which is the zero already there.
-            const bool round_up = (significant == 0) && (digits[0] > '5' || (digits[0] == '5' && !exact));
+            // Every digit asked for is zero, and the value lies below the last of them. To nearest,
+            // it rounds up only from above half a place - a tie goes to the even digit, the zero
+            // already there; away from zero it always does.
+            raise_flags(FE_INEXACT);
+            bool round_up = false;
+            if (direction == digit_rounding::away_from_zero)
+                round_up = true;
+            else if (direction == digit_rounding::nearest_even)
+                round_up = (significant == 0) && (digits[0] > '5' || (digits[0] == '5' && !exact));
             out += '0';
             if (after_point > 0 || alternate) {
                 out += '.';
@@ -5344,7 +6675,9 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
             // the request is filled with zeros. The expansion of a subnormal runs to 16494 places
             // after the point; the cap is set at what writing the widest finite value out in full
             // needs, which is 4933.
-            exponent10 = to_decimal_digits(low, high, exponent, MAX_OUTPUT_DIGITS, digits);
+            exponent10 = to_decimal_digits(low, high, exponent, MAX_OUTPUT_DIGITS, digits, &exact, direction);
+            if (!exact)
+                raise_flags(FE_INEXACT);
             const int32_t padding = significant - MAX_OUTPUT_DIGITS;
             significant = MAX_OUTPUT_DIGITS;
             std::string body(digits, static_cast<size_t>(significant));
@@ -5362,8 +6695,10 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
             return out;
         }
 
-        exponent10 = to_decimal_digits(low, high, exponent, significant, digits);
+        exponent10 = to_decimal_digits(low, high, exponent, significant, digits, &exact, direction);
     }
+    if (!exact)
+        raise_flags(FE_INEXACT);
 
     const int32_t scientific_exponent = exponent10 - 1;
 
@@ -5449,34 +6784,23 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
     return detail::render(value, '\0', -1, false, false, '-');
 }
 
-/**
- * @brief Converts text to a float128, in the shape of std::from_chars.
- *
- * Reads the longest prefix of [first, last) that forms a number: an optional sign, decimal digits
- * with an optional point and an optional exponent, or one of inf, infinity and nan. The result is
- * the representable value nearest the one the text names, correctly rounded.
- *
- * @param first Start of the text
- * @param last One past the end of the text
- * @param value Receives the parsed value, untouched when nothing was parsed
- * @return ptr points past what was consumed; ec is invalid_argument when no number was found and
- *         result_out_of_range when the value is beyond the format's range.
- */
-inline std::from_chars_result from_chars(const char* first, const char* last, float128& value)
+namespace detail
 {
-    std::from_chars_result result {first, std::errc {}};
-    const char* cursor = first;
-    if (cursor == last) {
-        result.ec = std::errc::invalid_argument;
-        return result;
-    }
-
-    bool negative = false;
-    if (*cursor == '-' || *cursor == '+') {
-        negative = (*cursor == '-');
-        ++cursor;
-    }
-
+/**
+ * @brief Reads one of the special values: inf, infinity, nan, nan(n-char-sequence) or snan.
+ *
+ * Case is ignored, as IEEE 754-2008 5.12.1 asks. A payload in parentheses is read the way
+ * fp128::nan() reads one, and the parentheses are only consumed when they are closed. "snan" reads
+ * as a signaling NaN, which the standard recommends and strtod() does not offer.
+ *
+ * @param cursor Start of the text, past any sign
+ * @param last End of the text
+ * @param negative The sign that came before it
+ * @param value Receives the value
+ * @return Past what was read, or nullptr when the text is none of these.
+ */
+inline const char* parse_special_value(const char* cursor, const char* last, bool negative, float128& value)
+{
     const auto lower = [](char c) { return static_cast<char>((c >= 'A' && c <= 'Z') ? (c - 'A' + 'a') : c); };
     const auto matches = [&](const char* word, size_t length) {
         if (static_cast<size_t>(last - cursor) < length)
@@ -5493,14 +6817,180 @@ inline std::from_chars_result from_chars(const char* first, const char* last, fl
         if (matches("inity", 5))
             cursor += 5;
         value = negative ? -float128::inf() : float128::inf();
-        result.ptr = cursor;
-        return result;
+        return cursor;
+    }
+    if (matches("snan", 4)) {
+        value = float128::signaling_nan();
+        value.set_sign(negative ? 1 : 0);
+        return cursor + 4;
     }
     if (matches("nan", 3)) {
         cursor += 3;
         value = float128::nan();
+        if (cursor < last && *cursor == '(') {
+            const char* close = cursor + 1;
+            while (close < last && (isalnum(static_cast<unsigned char>(*close)) || *close == '_'))
+                ++close;
+            if (close < last && *close == ')') {
+                value = fp128::nan(std::string(cursor + 1, close).c_str());
+                cursor = close + 1;
+            }
+        }
         value.set_sign(negative ? 1 : 0);
-        result.ptr = cursor;
+        return cursor;
+    }
+    return nullptr;
+}
+
+/**
+ * @brief Reads a hexadecimal significand with an optional binary exponent, such as 1.8p1.
+ *
+ * The form printf's %a writes, without its 0x prefix, as std::from_chars reads it for
+ * chars_format::hex. IEEE 754-2008 5.12.3 requires it, correctly rounded. Every digit is four bits
+ * of the significand, so the first 32 significant digits are collected exactly and any further
+ * non zero digit only counts towards the sticky bit; the value is then rounded once.
+ *
+ * @param first Start of the text
+ * @param last One past its end
+ * @param value Receives the parsed value, untouched when nothing was parsed
+ * @return As from_chars().
+ */
+inline std::from_chars_result from_hex_chars(const char* first, const char* last, float128& value)
+{
+    std::from_chars_result result {first, std::errc {}};
+    const char* cursor = first;
+    if (cursor == last) {
+        result.ec = std::errc::invalid_argument;
+        return result;
+    }
+
+    bool negative = false;
+    if (*cursor == '-' || *cursor == '+') {
+        negative = (*cursor == '-');
+        ++cursor;
+    }
+    if (const char* end = parse_special_value(cursor, last, negative, value)) {
+        result.ptr = end;
+        return result;
+    }
+
+    const auto hex_digit = [](char c) -> int32_t {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
+        return -1;
+    };
+
+    // The value is (h:l) * 2^binary_exponent, plus something below that when sticky is set.
+    uint64_t l = 0, h = 0;
+    int32_t bits = 0;
+    int64_t binary_exponent = 0;
+    bool sticky = false, any_digit = false, nonzero = false;
+    const auto take = [&](int32_t digit, bool after_point) {
+        any_digit = true;
+        if (!nonzero && digit == 0) {
+            // a leading zero: nothing to keep, but after the point it still moves the exponent
+            if (after_point)
+                binary_exponent -= 4;
+            return;
+        }
+        nonzero = true;
+        if (bits <= 124) {
+            h = (h << 4) | (l >> 60);
+            l = (l << 4) | static_cast<uint64_t>(digit);
+            bits += 4;
+            if (after_point)
+                binary_exponent -= 4;
+        } else {
+            sticky = sticky || digit != 0;
+            if (!after_point)
+                binary_exponent += 4;
+        }
+    };
+
+    while (cursor < last && hex_digit(*cursor) >= 0)
+        take(hex_digit(*cursor++), false);
+    if (cursor < last && *cursor == '.') {
+        ++cursor;
+        while (cursor < last && hex_digit(*cursor) >= 0)
+            take(hex_digit(*cursor++), true);
+    }
+    if (!any_digit) {
+        result.ec = std::errc::invalid_argument;
+        return result;
+    }
+    result.ptr = cursor;
+
+    // The binary exponent is only consumed when it is well formed, so that "1p" reads as 1.
+    if (cursor < last && (*cursor == 'p' || *cursor == 'P')) {
+        const char* probe = cursor + 1;
+        bool exponent_negative = false;
+        if (probe < last && (*probe == '-' || *probe == '+')) {
+            exponent_negative = (*probe == '-');
+            ++probe;
+        }
+        if (probe < last && *probe >= '0' && *probe <= '9') {
+            int64_t magnitude = 0;
+            while (probe < last && *probe >= '0' && *probe <= '9') {
+                if (magnitude < 1000000)
+                    magnitude = magnitude * 10 + (*probe - '0');
+                ++probe;
+            }
+            binary_exponent += exponent_negative ? -magnitude : magnitude;
+            result.ptr = probe;
+        }
+    }
+
+    if (!nonzero) {
+        value = float128();
+        value.set_sign(negative ? 1 : 0);
+        return result;
+    }
+
+    // Far outside the format's range only an overflow or a zero can come of it, whatever the exact
+    // exponent; clamping keeps the arithmetic below in range without changing which.
+    const int64_t clamped = (binary_exponent < -100000) ? -100000 : ((binary_exponent > 100000) ? 100000 : binary_exponent);
+    value = float128::norm_round_pack(negative ? 1u : 0u, static_cast<int32_t>(clamped) + 112, l, h, sticky);
+    if (value.is_inf() || value.is_zero())
+        result.ec = std::errc::result_out_of_range;
+    return result;
+}
+}  // namespace detail
+
+/**
+ * @brief Converts text to a float128, in the shape of std::from_chars.
+ *
+ * Reads the longest prefix of [first, last) that forms a number: an optional sign, decimal digits
+ * with an optional point and an optional exponent, or one of inf, infinity, nan, nan(payload) and
+ * snan. The result is the representable value nearest the one the text names, rounded once in the
+ * current rounding direction - including when it is subnormal, where fewer than 113 bits are kept.
+ *
+ * @param first Start of the text
+ * @param last One past the end of the text
+ * @param value Receives the parsed value, untouched when nothing was parsed
+ * @return ptr points past what was consumed; ec is invalid_argument when no number was found and
+ *         result_out_of_range when the value is beyond the format's range, in which case value is
+ *         set to the infinity or zero it rounded to.
+ */
+inline std::from_chars_result from_chars(const char* first, const char* last, float128& value)
+{
+    std::from_chars_result result {first, std::errc {}};
+    const char* cursor = first;
+    if (cursor == last) {
+        result.ec = std::errc::invalid_argument;
+        return result;
+    }
+
+    bool negative = false;
+    if (*cursor == '-' || *cursor == '+') {
+        negative = (*cursor == '-');
+        ++cursor;
+    }
+    if (const char* end = detail::parse_special_value(cursor, last, negative, value)) {
+        result.ptr = end;
         return result;
     }
 
@@ -5573,23 +7063,48 @@ inline std::from_chars_result from_chars(const char* first, const char* last, fl
         }
     }
 
-    uint64_t low = 0, high = 0;
+    const uint32_t sign = negative ? 1u : 0u;
+    uint64_t low = 0, high = 0, extra = 0;
     int32_t exponent = 0;
-    if (!detail::from_decimal_digits(digits, count, exponent10, low, high, exponent)) {
-        if (exponent > 100000) {
-            value = negative ? -float128::inf() : float128::inf();
-            result.ec = std::errc::result_out_of_range;
-        } else {
+    if (!detail::from_decimal_digits(digits, count, exponent10, low, high, exponent, &extra)) {
+        if (exponent == 0) {
+            // the digits were all zeros
             value = float128();
-            value.set_sign(negative ? 1 : 0);
-            if (exponent < -100000)
-                result.ec = std::errc::result_out_of_range;
+            value.set_sign(sign);
+            return result;
         }
+        // Far beyond the range in one direction or the other. A value of the right size and a
+        // sticky bit let the rounding decide the result, which depends on the direction: an
+        // overflow can stop at the largest finite value, an underflow at the smallest subnormal.
+        value = float128::round_pack(sign, (exponent > 0) ? 20000 : -20000, 0, 1ull << 48, 1);
+        result.ec = std::errc::result_out_of_range;
         return result;
     }
 
-    value.set_components(low, high, exponent, negative ? 1u : 0u);
+    // The mantissa comes back unrounded, so a subnormal result is rounded once, to its own width.
+    value = float128::round_pack(sign, exponent, low, high, extra);
+    if (value.is_inf() || value.is_zero())
+        result.ec = std::errc::result_out_of_range;
     return result;
+}
+
+/**
+ * @brief Converts text to a float128 in a given format, in the shape of std::from_chars.
+ *
+ * chars_format::hex reads a hexadecimal significand and a binary exponent without the 0x prefix,
+ * as std::from_chars does; every other format reads the decimal forms from_chars() above accepts.
+ *
+ * @param first Start of the text
+ * @param last One past the end of the text
+ * @param value Receives the parsed value, untouched when nothing was parsed
+ * @param fmt The format to read
+ * @return As from_chars() above.
+ */
+inline std::from_chars_result from_chars(const char* first, const char* last, float128& value, std::chars_format fmt)
+{
+    if (fmt == std::chars_format::hex)
+        return detail::from_hex_chars(first, last, value);
+    return from_chars(first, last, value);
 }
 
 /**
@@ -5740,10 +7255,13 @@ public:
     static constexpr bool has_signaling_NaN = true;
     static constexpr bool is_bounded = true;
     static constexpr bool is_modulo = false;
-    /// @brief The format is binary128 exactly as IEEE 754-2008 defines it.
-    static constexpr bool is_iec559 = true;
-    /// @brief No floating point status word exists, so nothing can trap or be flagged.
+    /// @brief True only with FP128_IEEE_ENV, which adds the rounding directions and the exception
+    ///        flags IEEE 754 requires; the format and the default arithmetic conform either way.
+    ///        See float128::is754version2008().
+    static constexpr bool is_iec559 = fp128::float128::is754version2008();
+    /// @brief Exceptions raise flags (with FP128_IEEE_ENV) but never trap.
     static constexpr bool traps = false;
+    /// @brief Tininess is detected after rounding, as x86 does for double.
     static constexpr bool tinyness_before = false;
     static constexpr float_round_style round_style = round_to_nearest;
 

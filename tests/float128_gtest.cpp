@@ -1824,10 +1824,10 @@ TEST(float128, ScalarOnTheLeftHandSideShifts)
     EXPECT_DOUBLE_EQ(static_cast<double>(-1 << float128(3)), -8.0);
     EXPECT_DOUBLE_EQ(static_cast<double>(2.5 << float128(2)), 10.0);
 
-    // A fractional shift count goes through operator int32_t, which rounds to nearest here rather
-    // than truncating, so 3.75 shifts by 4. The same overload picked with the float128 on the left
-    // has to agree, both reaching the count the same way.
-    EXPECT_TRUE((1 << float128(3.75)) == (1 << float128(4)));
+    // A fractional shift count goes through operator int32_t, which truncates towards zero as the
+    // builtin conversions do, so 3.75 shifts by 3. The same overload picked with the float128 on the
+    // left has to agree, both reaching the count the same way.
+    EXPECT_TRUE((1 << float128(3.75)) == (1 << float128(3)));
     EXPECT_TRUE((1 << float128(3.25)) == (1 << float128(3)));
     EXPECT_TRUE((1 << float128(3.75)) == (float128(1) << float128(3.75)));
 
@@ -2055,7 +2055,9 @@ TEST(float128, NumericLimits)
 {
     using limits = std::numeric_limits<float128>;
 
-    static_assert(limits::is_specialized && limits::is_signed && limits::is_iec559);
+    static_assert(limits::is_specialized && limits::is_signed);
+    // binary128 throughout, but conformance also needs the environment FP128_IEEE_ENV provides
+    static_assert(limits::is_iec559 == float128::is754version2008());
     static_assert(!limits::is_integer && !limits::is_exact && !limits::is_modulo);
     static_assert(limits::digits == 113 && limits::digits10 == 33 && limits::max_digits10 == 36);
     static_assert(limits::radix == 2);

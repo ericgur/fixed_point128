@@ -78,9 +78,9 @@ endif()
 ##
 # The tools are added unconditionally so the target exists and can be built on demand, but they are
 # excluded from the default build unless FP128_BUILD_TOOLS is on. They are run by hand when log2()
-# changes, and there is no reason to pay for them on an ordinary build.
+# or the float128 arithmetic changes, and there is no reason to pay for them on an ordinary build.
 ##
 add_subdirectory(tools EXCLUDE_FROM_ALL)
 if(FP128_BUILD_TOOLS)
-    set_target_properties(log2_ulp_dump PROPERTIES EXCLUDE_FROM_ALL OFF)
+    set_target_properties(log2_ulp_dump ieee_probe ieee_probe_env PROPERTIES EXCLUDE_FROM_ALL OFF)
 endif()

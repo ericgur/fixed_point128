@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  fixed_point128_tests.vcxproj
+  fixed_point128_env_tests.vcxproj
 
-  The GoogleTest suite, built through MSBuild. The CMake equivalent is tests/CMakeLists.txt; the two
-  are kept in step by hand and the source list below is the thing to update when a test file is added.
+  The tests of float128's opt in floating point environment, built through MSBuild with
+  FP128_IEEE_ENV defined. The macro changes the definitions of inline functions, so these cannot be
+  linked into the program fixed_point128_tests.vcxproj builds and are a program of their own. The
+  CMake equivalent is the fixed_point128_env_tests target in tests/CMakeLists.txt.
 
   Set this as the solution startup project to run the tests under the debugger. The ProjectReference
   to googletest.vcxproj builds and links the static library automatically, and the natvis item below
@@ -34,8 +36,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{6468231d-bbb6-4478-a65c-2a26d1e667c3}</ProjectGuid>
-    <RootNamespace>fixedpoint128tests</RootNamespace>
+    <ProjectGuid>{8f0e3c1a-5b2d-4e7f-9a61-3d4c2b1e0f75}</ProjectGuid>
+    <RootNamespace>fixedpoint128envtests</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -92,7 +94,7 @@
         The string round-trip tests copy between fixed size buffers they own with strcpy/strlen, which
         the Windows CRT marks deprecated in favour of its non-portable _s variants.
       -->
-      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>FP128_IEEE_ENV=1;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <!--
@@ -114,13 +116,7 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="$(FP128Root)tests\fixed_point128_gtest.cpp" />
-    <ClCompile Include="$(FP128Root)tests\float128_gtest.cpp" />
-    <ClCompile Include="$(FP128Root)tests\float128_accuracy_gtest.cpp" />
-    <ClCompile Include="$(FP128Root)tests\float128_format_gtest.cpp" />
-    <ClCompile Include="$(FP128Root)tests\float128_ieee_gtest.cpp" />
-    <ClCompile Include="$(FP128Root)tests\int128_t_gtest.cpp" />
-    <ClCompile Include="$(FP128Root)tests\uint128_t_gtest.cpp" />
+    <ClCompile Include="$(FP128Root)tests\float128_env_gtest.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(FP128Root)tests\gtest_shared.h" />

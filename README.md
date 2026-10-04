@@ -19,7 +19,11 @@
  - Supports conversions from one template instance to another (2 instances with different **\<I\>** parameter).
 
 ## float128 class Highlights
- - Based on the IEEE 754 binary128 format.
+ - The IEEE 754-2008 binary128 format, with the arithmetic the standard requires: addition,
+   subtraction, multiplication, division, square root, fused multiply-add and the conversions are
+   correctly rounded, the subnormal range included, and checked bit for bit against exact references.
+ - Opt in IEEE 754 rounding directions and exception flags (`FP128_IEEE_ENV`), which compile away
+   entirely when not enabled.
  - The whole of `<cmath>` as it exists for `double`, and the accuracy of every function is measured
    against correctly rounded references and stated as a ulp bound.
  - `std::numeric_limits`, `std::formatter`, `std::hash`, the stream operators and `to_chars`/`from_chars`,
@@ -265,9 +269,16 @@ IEEE 754-2008 binary128 (quadruple-precision) floating-point type, aligned to 16
 **Data layout:** `uint64_t low` + `uint64_t high`.
 
 **Features:**
-- Full IEEE 754 special-value handling: NaN propagation, infinity arithmetic, subnormals.
+- IEEE 754-2008 arithmetic: `+`, `-`, `*`, `/`, `sqrt`, `fma`, the conversions to and from `float`,
+  `double`, `long double`, the integer types and text, and the rounding to an integral value are all
+  correctly rounded, results in the subnormal range included. NaNs propagate their payload and a
+  signaling NaN is quieted; zeros keep their sign; infinities behave as the standard says.
 - Classification queries: `is_zero`, `is_finite`, `is_normal`, `is_subnormal`, `is_nan`, `is_signaling`, `is_inf`, `is_special`, `is_int`, `is_negative`, `is_positive`, `is_exponent_of_2`.
-- Construction from `float`, `double`, integer types, and C strings (including scientific notation and special values).
+- Construction from `float`, `double`, `long double` (exactly, also where it is the x87 80 bit
+  format or binary128 itself), integer types, and C strings: decimal, hexadecimal (`0x1.8p1`),
+  `inf`, `infinity`, `nan`, `nan(payload)` and `snan`.
+- Conversion to the integer types truncates towards zero, as the builtin conversions do. A value out
+  of range saturates and a NaN converts to zero, both raising the invalid exception.
 - Arithmetic operators: `+`, `-`, `*`, `/`, `<<`, `>>`. A builtin scalar may appear on either side, and the result is a `float128` either way.
 - The complete `<cmath>` surface, the same set of functions that exists for `double`:
   - **Basic:** `fabs`, `abs`, `floor`, `ceil`, `trunc`, `round`, `copysign`, `fmod`, `remainder`,
@@ -281,6 +292,11 @@ IEEE 754-2008 binary128 (quadruple-precision) floating-point type, aligned to 16
   - **Manipulation:** `frexp`, `ldexp`, `scalbn`, `scalbln`, `nextafter`, `nexttoward`.
   - **Classification:** `fpclassify`, `isfinite`, `isinf`, `isnan`, `isnormal`, `signbit`, `nan`.
   - **Comparison:** `isgreater`, `isgreaterequal`, `isless`, `islessequal`, `islessgreater`, `isunordered`.
+  - **IEEE 754 operations beyond `<cmath>`**, named as ISO/IEC TS 18661-1 and C23 name them:
+    `totalorder`, `totalordermag`, `fmaxmag`, `fminmag`, `iscanonical`, `issignaling`,
+    `issubnormal`, `iszero`.
+  - **Floating point environment:** `fp128::fegetround`, `fesetround`, `fetestexcept`,
+    `feclearexcept`, `feraiseexcept`, `fegetexceptflag`, `fesetexceptflag`. See below.
   - **Non-standard extras:** `reciprocal`, `double_factorial`.
 - Built-in constants mirroring `<numbers>`: `pi()`, `two_pi()`, `half_pi()`, `quarter_pi()`, `inv_pi()`,
   `inv_sqrt_pi()`, `e()`, `log2_e()`, `log10_e()`, `ln2()`, `ln10()`, `log10_2()`, `sqrt_2()`,
@@ -289,18 +305,56 @@ IEEE 754-2008 binary128 (quadruple-precision) floating-point type, aligned to 16
   `std::common_type`, `operator<<`, `operator>>`, and `fp128::to_chars` / `fp128::from_chars`.
 - User-defined literal: `_f128` (e.g. `3.14_f128`).
 
+#### IEEE 754-2008 conformance and `FP128_IEEE_ENV`
+
+Every build gets the arithmetic of IEEE 754-2008 clause 5 - the operations, conversions and
+comparisons, correctly rounded - with round to nearest, ties to even. The standard also requires
+the rounding directions of clause 4 (towards zero, upward, downward) and the exception flags of
+clause 7 (invalid, division by zero, overflow, underflow, inexact). Those are opt in: define
+`FP128_IEEE_ENV` in every translation unit of the program, and float128 gets a per thread
+environment, controlled with the `<cfenv>` names in the `fp128` namespace:
+
+```cpp
+fp128::fesetround(FE_UPWARD);
+const float128 upper = a / b;                // rounded towards +inf
+if (fp128::fetestexcept(FE_INEXACT)) { ... }  // the quotient was not exact
+fp128::feclearexcept(FE_ALL_EXCEPT);
+```
+
+The environment is float128's own: it does not change how `double` rounds, and the hardware flags
+`std::fetestexcept()` reads are not touched. Without the macro the functions still exist, so the
+same source builds either way; they report round to nearest, refuse any other direction and never
+show a flag, and the code that would maintain the environment compiles away - the arithmetic is as
+fast as it was before the environment existed. `std::numeric_limits<float128>::is_iec559` and
+`float128::is754version2008()` are `true` only with the macro.
+
+Constant evaluation always rounds to nearest and raises nothing, whatever the environment of the
+thread that compiles it.
+
+The functions of clause 9 (`exp`, `sin`, `pow` and the rest) follow the special values the standard
+gives them, but are not correctly rounded, which the standard recommends rather than requires; the
+next section states how close each comes. With `FP128_IEEE_ENV` they raise the flags their result
+justifies - inexact, and overflow or underflow when the result did - rather than whatever their
+intermediate steps raised.
+
+Decimal input is correctly rounded for up to 40 significant digits, more than the 39 the standard
+requires of binary128; digits past the fortieth only count as a sticky bit.
+
 #### Accuracy
 
 Every math function is checked against binary128 references computed by mpmath at 240 bits and
 rounded to the format, so all 113 mantissa bits are verified rather than the 53 a comparison
 against a `double` can reach. `tests/float128_accuracy_gtest.cpp` states the bound each function
-meets; run the suite with `FP128_PRINT_ULP` set in the environment to see the error measured.
+meets; run the suite with `FP128_PRINT_ULP` set in the environment to see the error measured. The
+correctly rounded operations are checked bit for bit by `tests/float128_ieee_gtest.cpp`, and
+`tools/ieee_check.py` runs a much larger differential check of them by hand.
 
-`fma` and `fmod` are exact. `sqrt`, `hypot`, `exp`, `exp2`, `expm1`, `log1p`, `asinh` and `cosh`
-are within 1 ulp, and most of the rest within 2 to 8. Three are looser and say something about the
-implementation rather than about rounding: `erf` and `erfc` accumulate the roundings of a long
-series, and `pow` is `exp(y*log(x))`, where an exponent large enough to reach the top of the range
-turns the relative error of `log` into an absolute one.
+`sqrt`, `fma`, `fmod` and `remainder` are exact, and so is `hypot` over its tables. `cbrt`, `exp`,
+`exp2`, `expm1`, `log2`, `log1p` and `cosh` are within 1 ulp, and most of the rest within 2 to 4,
+`sin`, `cos` and `tan` included at any argument up to the top of the range. Two are looser and say
+something about the implementation rather than about rounding: `erf` accumulates the roundings of a
+long series, and `pow` is `exp(y*log(x))`, where an exponent large enough to reach the top of the
+range turns the relative error of `log` into an absolute one.
 
 `tools/gen_ref_vectors.py` regenerates the reference tables; the seed is fixed, so an unchanged
 configuration reproduces an identical file.

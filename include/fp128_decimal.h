@@ -339,6 +339,13 @@ inline constexpr int32_t MAX_OUTPUT_DIGITS = 5000;
 /// @brief Limbs of the fraction buffer. 16640 bits reaches below the smallest subnormal's last bit.
 inline constexpr int32_t FRACTION_LIMBS = 520;
 
+/// @brief How to_decimal_digits() rounds the last digit it keeps.
+enum class digit_rounding : uint8_t {
+    nearest_even,   ///< to the nearest digit, a tie to the even one
+    toward_zero,    ///< truncate
+    away_from_zero  ///< up whenever anything was discarded
+};
+
 /**
  * @brief Correctly rounded decimal digits of a finite, non zero binary128 value.
  *
@@ -353,10 +360,13 @@ inline constexpr int32_t FRACTION_LIMBS = 520;
  * @param requested Significant digits wanted, clamped to MAX_SIGNIFICANT_DIGITS
  * @param digits Output buffer, receives `requested` digits as characters with no terminator
  * @param exact Optional, set to true when the digits are the whole value and nothing was discarded
+ * @param direction How the last digit is rounded: digit_rounding::nearest_even, the default, or
+ *        towards zero or away from it, which is what the directed rounding modes come down to once
+ *        the sign of the value is known
  * @return The decimal exponent: the value is `0.<digits>` * 10^result.
  */
 inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, int32_t exponent, int32_t requested, char* digits,
-                                 bool* exact = nullptr) noexcept
+                                 bool* exact = nullptr, digit_rounding direction = digit_rounding::nearest_even) noexcept
 {
     if (requested > MAX_OUTPUT_DIGITS)
         requested = MAX_OUTPUT_DIGITS;
@@ -449,12 +459,16 @@ inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, 
     if (exact != nullptr)
         *exact = !rest_nonzero && (!have_rounding_digit || rounding_digit == '0');
 
-    // Round half to even against the exact remainder.
+    // Round against the exact remainder: half to even, or in the direction asked for.
     bool round_up = false;
-    if (rounding_digit > '5')
-        round_up = true;
-    else if (rounding_digit == '5')
-        round_up = rest_nonzero || ((digits[requested - 1] - '0') % 2 != 0);
+    if (direction == digit_rounding::nearest_even) {
+        if (rounding_digit > '5')
+            round_up = true;
+        else if (rounding_digit == '5')
+            round_up = rest_nonzero || ((digits[requested - 1] - '0') % 2 != 0);
+    } else if (direction == digit_rounding::away_from_zero) {
+        round_up = rest_nonzero || (have_rounding_digit && rounding_digit != '0');
+    }
 
     if (round_up) {
         int32_t index = requested - 1;
@@ -485,12 +499,16 @@ inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, 
  * @param mantissa_low Receives the low QWORD of the 113 bit mantissa
  * @param mantissa_high Receives the high QWORD
  * @param exponent Receives the unbiased exponent, so the value is mantissa * 2^(exponent-112)
+ * @param extra Optional. When given, the mantissa is not rounded: it receives the top 113 bits,
+ *        truncated, and this receives the bits below them in the form float128::round_pack() takes,
+ *        the first one dropped in bit 63 and anything below it jammed into bit 0. A result that
+ *        turns out subnormal keeps fewer than 113 bits, so only the caller can round it once.
  * @return False when the value is zero, or too large or too small for the format to hold, in which
  *         case the exponent says which: below -100000 for an underflow, above 100000 for an
  *         overflow.
  */
 inline bool from_decimal_digits(const char* digits, int32_t count, int32_t exponent10, uint64_t& mantissa_low, uint64_t& mantissa_high,
-                                int32_t& exponent) noexcept
+                                int32_t& exponent, uint64_t* extra = nullptr) noexcept
 {
     mantissa_low = mantissa_high = 0;
     exponent = 0;
@@ -506,8 +524,12 @@ inline bool from_decimal_digits(const char* digits, int32_t count, int32_t expon
         ++exponent10;
     }
 
-    // More digits than this cannot change which binary128 is nearest: the format separates
-    // neighbours by one part in 2^112, and 40 digits resolve one part in 10^40.
+    // Digits past the fortieth are read as a sticky bit only: they say the value lies strictly
+    // above the forty digit prefix, not how far. That is exact for every input of up to 40
+    // significant digits, which is more than the 39 IEEE 754-2008 5.12.2 requires to be correctly
+    // rounded for binary128 (H = M + 3, M being the 36 digits it takes to tell every binary128
+    // apart). A longer input whose prefix lies just below a halfway point between two binary128
+    // values, and whose later digits carry it past that point, is still rounded as the prefix is.
     int32_t kept = count - first;
     bool sticky = false;
     if (kept > MAX_SIGNIFICANT_DIGITS) {
@@ -577,8 +599,11 @@ inline bool from_decimal_digits(const char* digits, int32_t count, int32_t expon
             value.divmod_small(2);
         binary_exponent += drop;
 
+        if (extra != nullptr) {
+            *extra = (static_cast<uint64_t>(guard) << 63) | (sticky ? 1u : 0u);
+        }
         // round half to even
-        if (guard != 0 && (sticky || (value.at(0) & 1u) != 0)) {
+        else if (guard != 0 && (sticky || (value.at(0) & 1u) != 0)) {
             value.add_small(1u);
             // A carry out of 113 bits lands on the next power of two.
             if (value.bit_length() > 113) {
@@ -586,9 +611,13 @@ inline bool from_decimal_digits(const char* digits, int32_t count, int32_t expon
                 ++binary_exponent;
             }
         }
-    } else if (drop < 0) {
-        value.shift_left(-drop);
-        binary_exponent += drop;
+    } else {
+        if (drop < 0) {
+            value.shift_left(-drop);
+            binary_exponent += drop;
+        }
+        if (extra != nullptr)
+            *extra = sticky ? 1u : 0u;
     }
 
     mantissa_low = static_cast<uint64_t>(value.at(0)) | (static_cast<uint64_t>(value.at(1)) << 32);

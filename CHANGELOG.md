@@ -9,6 +9,75 @@ exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants 
 
 ## [Unreleased]
 
+### Fixed
+
+`float128` now conforms to IEEE 754-2008. An audit against exact references found the following,
+each now checked by `tests/float128_ieee_gtest.cpp` and `tools/ieee_check.py`:
+
+- **Division truncated** whenever the dividend's mantissa was the smaller of the two: 29% of random
+  quotients came out one ulp low. The quotient's normalization assumed a fixed position for its
+  leading bit and so skipped the rounding.
+- **Addition and subtraction** decided the rounding from a three bit window, without a sticky bit
+  for the rest: about 5% of results were an ulp off.
+- **Every result in the subnormal range was rounded twice** - multiplication, division, `fma`,
+  `ldexp`, the shifts and decimal input - and about one in ten came out an ulp off. Every operation
+  now ends in a single rounding step that knows the destination's width.
+- **`sqrt`** is correctly rounded; a quarter of its results used to be an ulp off.
+- **Conversions:**
+  - to `double` and `float`: correctly rounded (`float` used to round twice, through `double`);
+  - overflow and underflow keep their sign;
+  - 2^-1074 no longer converts to zero;
+  - NaNs keep their sign and payload;
+  - `float128(-0.0)` is negative zero;
+  - a quiet NaN from a `double` stays quiet, where it used to become a signaling one;
+  - `long double` converts exactly where it is wider than `double`.
+- **Rounding to integral:** `ceil`, `trunc`, `round`, `rint`, `nearbyint` and `modf` keep the sign
+  of a zero result. `round(0.5 - 2^-114)` is 0 rather than 1, and `round(2^112 + 1)` is itself.
+- **NaNs:** every operation quiets a signaling NaN and delivers the payload of its first NaN
+  operand. `get_class()` reports `signalingNaN`, and `fmin`/`fmax` treat a signaling NaN as invalid.
+- **Math functions:**
+  - `log`, `log2` and `log10` of a negative argument are NaN rather than -inf, of +inf are +inf,
+    and of a NaN are NaN (they were finite);
+  - `log2` of a subnormal uses its real exponent;
+  - `pow` follows every special case of IEEE 754-2008 9.2.1 and no longer overflows for an integer
+    exponent above 11355 (`pow(1 + 2^-40, 12000)` was infinite);
+  - `atan2(0, 1)` is 0 rather than pi, and every zero and infinity follows the standard;
+  - `asin`/`acos` outside [-1, 1] are NaN rather than 0, `acos(1)` is 0 rather than NaN, and both
+    are accurate near the ends of the domain (they were off by up to 2^54 ulp);
+  - `sin`, `cos` and `tan` reduce arguments of any size (they returned garbage above 2^62, and
+    never returned at all above 2^321);
+  - `hypot` scales instead of overflowing, and an infinity wins over a quiet NaN;
+  - `cosh` and `sinh` no longer overflow just below their own overflow point.
+- **Hexadecimal text:** `0x1.8p1` is read correctly (it used to read as 1), with correct rounding;
+  `from_chars` accepts `chars_format::hex`. Shortened hexadecimal output rounds ties to even.
+- **`inf / 0`** no longer counts as a division by zero.
+
+### Added
+
+- **`FP128_IEEE_ENV`**: opt in IEEE 754 rounding directions and exception flags, through
+  `fp128::fegetround`, `fesetround`, `fetestexcept`, `feclearexcept`, `feraiseexcept`,
+  `fegetexceptflag` and `fesetexceptflag`. Without the macro nothing changes in speed.
+- `totalorder`, `totalordermag`, `fmaxmag`, `fminmag`, `iscanonical`, `issignaling`,
+  `issubnormal` and `iszero`, as named in ISO/IEC TS 18661-1.
+- Text input reads `snan` and `nan(payload)`.
+- `tools/ieee_check.py` with `tools/ieee_probe.cpp`, a differential check of the correctly rounded
+  operations in every rounding direction, and `tools/gen_two_over_pi.py` for the trigonometric
+  reduction table.
+- A test program of its own for the environment, `fixed_point128_env_tests`.
+
+### Changed
+
+- **Conversion from `float128` to the integer types truncates towards zero** at every magnitude, as
+  the builtin conversions do. It used to round to nearest from one up and truncate below one, so
+  `(int)float128(1.75)` was 2 and `(int)float128(0.75)` was 0. A value out of range saturates and a
+  NaN converts to zero (a NaN used to saturate). `llrint`/`lrint` return 0 when out of range, as
+  their documentation always said.
+- **`std::numeric_limits<float128>::is_iec559` and `float128::is754version2008()`** are `true` only
+  with `FP128_IEEE_ENV`, since the standard requires the environment the macro adds.
+- `sqrt()`'s `iterations` argument no longer has an effect: the root is correctly rounded either way.
+- The relational operators raise the invalid exception for a NaN operand, as IEEE 754's signaling
+  comparisons do; `==`, `!=` and `isless()` and friends raise it only for a signaling NaN.
+
 ## [0.12.0.0] - 2026-10-03
 
 ### Fixed
