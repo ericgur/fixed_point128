@@ -2166,7 +2166,7 @@ public:
      * @param extra Bits below the significand, left aligned
      * @param dist Bits to shift, at least one
      */
-    FP128_INLINE static constexpr void shift_right_jam128_extra(uint64_t& l, uint64_t& h, uint64_t& extra, int32_t dist) noexcept
+    FP128_FORCE_INLINE static constexpr void shift_right_jam128_extra(uint64_t& l, uint64_t& h, uint64_t& extra, int32_t dist) noexcept
     {
         FP128_ASSERT(dist >= 1);
         uint64_t sticky = extra;
@@ -2201,11 +2201,16 @@ public:
      * The alignment step of an addition: the shifted operand only has to be accurate to the bit
      * below the guard bit of the sum, and a jammed lowest bit is enough to say there was more.
      *
+     * Forced open, as are shift_right_jam128_extra() and norm_round_pack(), which addition reaches
+     * through. Offered for inlining only, Clang kept all three out of line, the three outputs went
+     * through memory on every call, and float128 addition measured 95 M/s against 174 M/s inlined
+     * (P-core, 2026-10-05). MSVC inlined them either way.
+     *
      * @param l Low QWORD
      * @param h High QWORD
      * @param dist Bits to shift, at least one
      */
-    FP128_INLINE static constexpr void shift_right_jam128(uint64_t& l, uint64_t& h, int32_t dist) noexcept
+    FP128_FORCE_INLINE static constexpr void shift_right_jam128(uint64_t& l, uint64_t& h, int32_t dist) noexcept
     {
         FP128_ASSERT(dist >= 1);
         if (dist < 64) {
@@ -2298,8 +2303,8 @@ public:
      * @param sign Sign of the result
      * @param e Unbiased exponent of bit 112 of the significand
      * @param l Low QWORD of the significand
-     * @param h High QWORD of the significand. The leading one must be at bit 48, unless the whole
-     *        significand and @p extra are zero.
+     * @param h High QWORD of the significand. The leading one must be at bit 48: a zero significand
+     *        is not accepted, the callers deal with an exact zero themselves.
      * @param extra Bits below the significand, left aligned, with anything further down jammed into
      *        bit 0. Zero when the significand is exact.
      * @return The correctly rounded result, including its subnormal and overflow cases.
@@ -2321,14 +2326,13 @@ public:
 
         if (extra != 0)
             detail::raise_flags(FE_INEXACT);
-        if (round_increment(mode, sign, extra)) {
-            ++l;
-            h += (l == 0) ? 1 : 0;
-            if (mode == detail::rounding::nearest_even && (extra << 1) == 0)
-                l &= ~1ull;  // an exact tie goes to the even neighbour
-        } else if ((l | h) == 0) {
-            return float128(0, static_cast<uint64_t>(sign) << 63);
-        }
+        // Without a branch: whether to round up depends on the bits being dropped, which is as good
+        // as random, and a mispredicted branch here costs more than the arithmetic it would skip.
+        const uint64_t increment = round_increment(mode, sign, extra) ? 1 : 0;
+        h += addcarryx_u64(0, l, increment, &l);
+        // an exact tie that was rounded up goes back down to the even neighbour
+        if (mode == detail::rounding::nearest_even)
+            l &= ~(((extra << 1) == 0) ? increment : 0);
         return float128(l, (static_cast<uint64_t>(sign) << 63) + (static_cast<uint64_t>(exp) << EXP_SHIFT) + h);
     }
 
@@ -2345,7 +2349,7 @@ public:
      * @param sticky True when set bits below (h:l) were already dropped
      * @return The correctly rounded result.
      */
-    [[nodiscard]] FP128_INLINE static constexpr float128 norm_round_pack(uint32_t sign, int32_t e, uint64_t l, uint64_t h, bool sticky) noexcept
+    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 norm_round_pack(uint32_t sign, int32_t e, uint64_t l, uint64_t h, bool sticky) noexcept
     {
         if ((l | h) == 0)
             return float128(0, static_cast<uint64_t>(sign) << 63);
@@ -4339,34 +4343,6 @@ public:
         return filter(negative_odd ? -res : res);
     }
     /**
-     * @name Low halves of the logarithm constants
-     *
-     * ln2(), log10_e() and log10_2() are the binary128 values nearest the constants, and each is off
-     * by up to half an ulp. Scaling a logarithm by one of them carries that half ulp into the
-     * result on top of the rounding of the product; mul_split() adds the part these hold back in.
-     * @{
-     */
-    /// @brief ln2 - ln2()
-    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 ln2_low() noexcept { return float128(0xACE93A4EBE5D148F, 0x2A17E1979B31, 0x3F8A, 1); }
-    /// @brief log10(e) - log10_e()
-    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log10_e_low() noexcept { return float128(0xD1B2EFEE2E0695D8, 0x1E6E08E5CFED, 0x3F8B, 1); }
-    /// @brief log10(2) - log10_2()
-    [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 log10_2_low() noexcept { return float128(0x3D1F3498A5E6F26B, 0x17826AD30C54, 0x3F8A, 0); }
-
-    /**
-     * @brief x times a constant held as high + low, rounded once.
-     * @param x Value to scale
-     * @param high The constant, rounded to binary128
-     * @param low What the rounding left out
-     * @return x * (high + low), to within an ulp of the rounding of the product.
-     */
-    [[nodiscard]] FP128_INLINE static float128 mul_split(const float128& x, const float128& high, const float128& low) noexcept
-    {
-        return fma(x, high, x * low);
-    }
-    /// @}
-
-    /**
      * @brief The arguments every logarithm treats alike (IEEE 754-2008 9.2.1).
      *
      * A NaN propagates, a zero is a pole - the division by zero exception, and -inf - any other
@@ -4463,7 +4439,7 @@ public:
         if (fabs(t) <= log1p_small_limit())
             return filter(log1p_small(t));
 
-        return filter(mul_split(log2(x), float128::ln2(), ln2_low()));
+        return filter(log2(x) * float128::ln2());
     }
     /**
      * @brief Calculates the Log base 2 of x: y = log2(x)
@@ -4646,9 +4622,9 @@ public:
 
         const float128 t = x - float128::one();
         if (fabs(t) <= log1p_small_limit())
-            return filter(mul_split(log1p_small(t), float128::log10_e(), log10_e_low()));
+            return filter(log1p_small(t) * float128::log10_e());
 
-        return filter(mul_split(log2(x), float128::log10_2(), log10_2_low()));
+        return filter(log2(x) * float128::log10_2());
     }
     /**
      * @brief Calculates Log base 2 of x as an integer ignoring the sign of x.

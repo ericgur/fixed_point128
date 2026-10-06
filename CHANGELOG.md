@@ -77,6 +77,11 @@ each now checked by `tests/float128_ieee_gtest.cpp` and `tools/ieee_check.py`:
 - `sqrt()`'s `iterations` argument no longer has an effect: the root is correctly rounded either way.
 - The relational operators raise the invalid exception for a NaN operand, as IEEE 754's signaling
   comparisons do; `==`, `!=` and `isless()` and friends raise it only for a signaling NaN.
+- **float128 is faster.** Rounding once, branch free, and the reformulated functions measure ahead of
+  1.0.0.0's start on 31 of the 32 float128 benchmarks with MSVC and 30 with Clang (P-core; median
+  +31% and +18%): addition +22% / +28%, multiplication +29% / +3%, division +18% / +14%,
+  `sqrt` +15% / +21%, `exp` +41% / +23%, `sin` +56% / +36%, Mandelbrot +7% / +4% (MSVC / Clang).
+  The exception is Clang on an E-core, where addition and subtraction measure 23-24% slower.
 
 ## [0.12.0.0] - 2026-10-03
 
