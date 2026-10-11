@@ -8,71 +8,374 @@
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
+#include <array>
+#include <bit>
 #include <ostream>
 #include <ctime>
 #include <cfloat>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <limits>
+#include <string>
+#include <type_traits>
 #include "gtest_shared.h"
+
+namespace
+{
+/**
+ * @brief Two's complement negation of a QWORD pair in native 64 bit arithmetic.
+ * @param l Low QWORD, negated in place
+ * @param h High QWORD, negated in place
+ */
+void NegateQwords(uint64_t& l, uint64_t& h)
+{
+    l = ~l + 1ull;
+    h = ~h + ((l == 0) ? 1ull : 0ull);
+}
+
+/**
+ * @brief Reads the sign and the magnitude of a value straight from its QWORDs.
+ *
+ * The magnitude of -2^127 is 2^127, which needs the unsigned type: that is the one value whose
+ * negation int128_t cannot represent.
+ *
+ * @param x Value to split
+ * @param negative Receives true when x is below zero
+ * @return |x|
+ */
+[[nodiscard]] uint128_t MagnitudeOf(const int128_t& x, bool& negative)
+{
+    uint64_t l = 0, h = 0;
+    x.get_components(l, h);
+    negative = (h >> 63) != 0;
+    if (negative) {
+        NegateQwords(l, h);
+    }
+    return uint128_t(l, h);
+}
+
+/**
+ * @brief Builds an int128_t from a sign and a magnitude. A magnitude of 2^127 with a positive sign
+ *        wraps to -2^127, as the type itself does.
+ * @param negative True for a negative result
+ * @param l Low QWORD of the magnitude
+ * @param h High QWORD of the magnitude
+ * @return The signed value.
+ */
+[[nodiscard]] int128_t FromSignAndMagnitude(bool negative, uint64_t l, uint64_t h)
+{
+    if (negative) {
+        NegateQwords(l, h);
+    }
+    return int128_t(l, h);
+}
+
+/**
+ * @brief The 128 bit value a signed 64 bit integer sign extends to, assembled from QWORDs.
+ * @param x Value to extend
+ * @return x as an int128_t.
+ */
+[[nodiscard]] int128_t FromInt64(int64_t x)
+{
+    return int128_t(static_cast<uint64_t>(x), SignExtension(x));
+}
+
+/**
+ * @brief Reference truncating division: restoring shift and subtract over the magnitudes.
+ *
+ * One quotient bit per step, in native 64 bit arithmetic on the QWORDs, so it shares nothing with
+ * div_64bit(), div_128bit() or the power of two shortcut of the operator under test. The signs are
+ * applied the way the builtin types do: the quotient is negative when exactly one operand is, and the
+ * remainder takes the sign of the dividend. -2^127 / -1 wraps back to -2^127.
+ *
+ * @param a Dividend
+ * @param b Divisor, non zero
+ * @param q Receives the quotient
+ * @param r Receives the remainder
+ */
+void ReferenceDivide(const int128_t& a, const int128_t& b, int128_t& q, int128_t& r)
+{
+    bool aNegative = false, bNegative = false;
+    uint64_t al = 0, ah = 0, bl = 0, bh = 0;
+    MagnitudeOf(a, aNegative).get_components(al, ah);
+    MagnitudeOf(b, bNegative).get_components(bl, bh);
+
+    uint64_t ql = 0, qh = 0, rl = 0, rh = 0;
+    for (int32_t bit = 127; bit >= 0; --bit) {
+        // The partial remainder is below |b| <= 2^127 before the shift, so it still fits afterwards.
+        const uint64_t next = (bit >= 64) ? ((ah >> (bit - 64)) & 1ull) : ((al >> bit) & 1ull);
+        rh = (rh << 1) | (rl >> 63);
+        rl = (rl << 1) | next;
+        if (rh > bh || (rh == bh && rl >= bl)) {
+            const uint64_t borrow = (rl < bl) ? 1ull : 0ull;
+            rl -= bl;
+            rh -= bh + borrow;
+            if (bit >= 64) {
+                qh |= 1ull << (bit - 64);
+            } else {
+                ql |= 1ull << bit;
+            }
+        }
+    }
+    q = FromSignAndMagnitude(aNegative != bNegative, ql, qh);
+    r = FromSignAndMagnitude(aNegative, rl, rh);
+}
+
+/**
+ * @brief Checks that q and r are exactly the truncated quotient and remainder of a / b.
+ *
+ * q * b + r == a in 128 bit arithmetic only pins q down modulo 2^128 / gcd(b, 2^128), and for this
+ * type it holds for any q at all, because operator%= derives the remainder from the quotient. The
+ * identity is therefore checked on the magnitudes over the integers: |q| * |b| is taken 256 bits
+ * wide and must not reach past 128 bits, and adding |r| must give |a| without a carry out. The signs
+ * follow truncation towards zero. Not valid for -2^127 / -1, whose quotient wraps.
+ *
+ * @param a Dividend
+ * @param b Divisor, non zero
+ * @param q Quotient to check
+ * @param r Remainder to check
+ * @return Success when |a| = |q| * |b| + |r| with |r| < |b| and the signs are right.
+ */
+[[nodiscard]] testing::AssertionResult IsExactSignedDivision(const int128_t& a, const int128_t& b, const int128_t& q, const int128_t& r)
+{
+    bool aNegative = false, bNegative = false, qNegative = false, rNegative = false;
+    const uint128_t ma = MagnitudeOf(a, aNegative), mb = MagnitudeOf(b, bNegative);
+    const uint128_t mq = MagnitudeOf(q, qNegative), mr = MagnitudeOf(r, rNegative);
+
+    uint128_t high;
+    const uint128_t low = ReferenceMultiplyWide(mq, mb, high);
+    if (!high.is_zero()) {
+        return testing::AssertionFailure() << "|q| * |b| overflows 128 bits, q=" << static_cast<std::string>(q);
+    }
+
+    uint64_t productLow = 0, productHigh = 0, rLow = 0, rHigh = 0, aLow = 0, aHigh = 0, bLow = 0, bHigh = 0;
+    low.get_components(productLow, productHigh);
+    mr.get_components(rLow, rHigh);
+    ma.get_components(aLow, aHigh);
+    mb.get_components(bLow, bHigh);
+
+    // |q| * |b| + |r|, with the carries made explicit
+    const uint64_t sumLow = productLow + rLow;
+    const uint64_t carry = (sumLow < productLow) ? 1ull : 0ull;
+    const uint64_t partial = productHigh + rHigh;
+    const uint64_t sumHigh = partial + carry;
+    const bool carryOut = (partial < productHigh) || (sumHigh < partial);
+    if (carryOut || sumLow != aLow || sumHigh != aHigh) {
+        return testing::AssertionFailure() << "|q| * |b| + |r| != |a|, q=" << static_cast<std::string>(q) << ", r=" << static_cast<std::string>(r);
+    }
+    if (!(rHigh < bHigh || (rHigh == bHigh && rLow < bLow))) {
+        return testing::AssertionFailure() << "|r| not below |b|, r=" << static_cast<std::string>(r);
+    }
+    if (!mq.is_zero() && qNegative != (aNegative != bNegative)) {
+        return testing::AssertionFailure() << "quotient has the wrong sign, q=" << static_cast<std::string>(q);
+    }
+    if (!mr.is_zero() && rNegative != aNegative) {
+        return testing::AssertionFailure() << "remainder does not take the sign of the dividend, r=" << static_cast<std::string>(r);
+    }
+    return testing::AssertionSuccess();
+}
+
+/**
+ * @brief Reference shift of a 128 bit value, built one bit at a time from its QWORDs.
+ *
+ * Follows the documented contract of the shift operators: a count of zero or below leaves the value
+ * unchanged, the right shift is arithmetic and fills with copies of the sign bit, and a count of 128
+ * or more shifts every bit out (leaving zero, or -1 for a negative value shifted right).
+ *
+ * @param x Value to shift
+ * @param shift Bit count
+ * @param left True for a left shift, false for an arithmetic right shift
+ * @return The shifted value.
+ */
+[[nodiscard]] int128_t ReferenceShift(const int128_t& x, int32_t shift, bool left)
+{
+    uint64_t in[2] {};
+    x.get_components(in[0], in[1]);
+    if (shift <= 0) {
+        return int128_t(in[0], in[1]);
+    }
+
+    const uint64_t sign = in[1] >> 63;
+    uint64_t out[2] {};
+    for (int32_t bit = 0; bit < 128; ++bit) {
+        // 64 bit arithmetic, so that a huge count cannot overflow
+        const int64_t source = left ? static_cast<int64_t>(bit) - shift : static_cast<int64_t>(bit) + shift;
+        uint64_t value = 0;
+        if (source > 127) {
+            value = sign;
+        } else if (source >= 0) {
+            value = (in[source >> 6] >> (source & 63)) & 1ull;
+        }
+        if (value != 0) {
+            out[bit >> 6] |= 1ull << (bit & 63);
+        }
+    }
+    return int128_t(out[0], out[1]);
+}
+
+/**
+ * @brief The value the double constructor has to produce, built from the IEEE fields.
+ *
+ * The significand and exponent come from frexp() and are placed with native 64 bit shifts, so the
+ * reference shares no code with the constructor or the shift operators. Fractions truncate towards
+ * zero; NaN, the infinities and every magnitude of 2^127 or more saturate to the end of the range
+ * with the sign of the input, as documented.
+ *
+ * @param value Any double
+ * @return The expected int128_t.
+ */
+[[nodiscard]] int128_t ExpectedFromDouble(double value)
+{
+    const int128_t max(~0ull, 0x7FFFFFFFFFFFFFFFull);
+    const int128_t min(0ull, 0x8000000000000000ull);
+    if (std::isnan(value)) {
+        return std::signbit(value) ? min : max;
+    }
+    if (value >= 0x1p127) {
+        return max;
+    }
+    if (value <= -0x1p127) {
+        return min;
+    }
+
+    const double magnitude = std::fabs(value);
+    if (magnitude < 1.0) {
+        return int128_t();
+    }
+    int exponent = 0;
+    const double fraction = std::frexp(magnitude, &exponent);  // magnitude = fraction * 2^exponent, fraction in [0.5, 1)
+    const uint64_t significand = static_cast<uint64_t>(std::ldexp(fraction, 53));
+    const int32_t shift = exponent - 53;  // magnitude = significand * 2^shift, and shift >= -52
+    uint64_t l = 0, h = 0;
+    if (shift <= 0) {
+        l = significand >> -shift;  // drops the fraction, truncating the magnitude
+    } else if (shift < 64) {
+        l = significand << shift;
+        h = significand >> (64 - shift);
+    } else {
+        h = significand << (shift - 64);
+    }
+    if (std::signbit(value)) {
+        NegateQwords(l, h);
+    }
+    return int128_t(l, h);
+}
+
+/**
+ * @brief The integer powers of ten that fit in an int128_t, 10^0 to 10^38.
+ *
+ * Built with ReferenceMultiply() rather than the operator under test, so log10() is checked against
+ * values it did not compute itself.
+ *
+ * @return The table, index k holding 10^k.
+ */
+[[nodiscard]] std::array<int128_t, 39> PowersOfTen()
+{
+    std::array<int128_t, 39> table;
+    table[0] = int128_t(1ull, 0ull);
+    for (size_t k = 1; k < table.size(); ++k) {
+        table[k] = ReferenceMultiply(table[k - 1], int128_t(10ull, 0ull));
+    }
+    return table;
+}
+
+/**
+ * @brief Orders two non negative values by their QWORDs, independently of the comparison operators.
+ * @param a Left operand, not negative
+ * @param b Right operand, not negative
+ * @return True when a <= b.
+ */
+[[nodiscard]] bool NonNegativeLessOrEqual(const int128_t& a, const int128_t& b)
+{
+    uint64_t al = 0, ah = 0, bl = 0, bh = 0;
+    a.get_components(al, ah);
+    b.get_components(bl, bh);
+    return ah < bh || (ah == bh && al <= bl);
+}
+
+/// @brief Satisfied when a * b compiles. A concept rather than a bare requires-expression, which
+///        MSVC rejects outside a template.
+template <class A, class B>
+concept Multipliable = requires(A a, B b) { a * b; };
+
+/// @brief Satisfied when a *= b compiles.
+template <class A, class B>
+concept MultiplyAssignable = requires(A& a, B b) { a *= b; };
+}  // namespace
 
 /**********************************************************************
  * int128_t tests
  ***********************************************************************/
 // Construct fixed_point128 and convert back to/from various elements.
+// Both QWORDs are checked: reading the value back through int64_t only ever looked at the low one.
 TEST(int128_t, DefaultConstructor)
 {
-    int128_t i;
-    EXPECT_EQ(static_cast<int64_t>(i), 0ull);
+    const int128_t i;
+    uint64_t low = 1, high = 1;
+    i.get_components(low, high);
+    EXPECT_EQ(low, 0ull);
+    EXPECT_EQ(high, 0ull);
+    EXPECT_TRUE(i.is_zero());
 }
+// The previous version converted the result back to a double and compared with EXPECT_DOUBLE_EQ, a
+// round trip with a 4 ulp tolerance that cannot see any bit below the 53 a double holds: a
+// constructor leaving junk in bit 0 of every value above 2^64 passed it. Its operands were also
+// floor()ed doubles in [2, 2^127), so fractions, magnitudes below one, zero and the saturation were
+// never reached. The result is now compared bit for bit with a value built from the IEEE fields, on
+// operands that keep their fraction.
 TEST(int128_t, ConstructorFromDouble)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = floor(get_double_random(1, 127));
-        int128_t f = value;
-        if (check_overflow_int128(value)) {
-            continue;
-        }
-        double f_value = static_cast<double>(f);
-        EXPECT_DOUBLE_EQ(f_value, value) << "value=" << value;
+        const double value = get_double_random(-3, 127);
+        const int128_t f = value;
+        EXPECT_TRUE(f == ExpectedFromDouble(value)) << "value=" << std::hexfloat << value << ", f=" << (std::string)f;
     }
 }
 TEST(int128_t, ConstructorFromFloat)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        float value = (float)floor(get_double_random(1, 127));
-        int128_t f = value;
-        if (check_overflow_int128(value)) {
-            continue;
-        }
-        EXPECT_FLOAT_EQ(static_cast<float>(f), value) << "value=" << value;
+        // rounding to float can carry a value just below 2^127 up to 2^127, which saturates
+        const float value = static_cast<float>(get_double_random(-3, 127));
+        const int128_t f = value;
+        EXPECT_TRUE(f == ExpectedFromDouble(value)) << "value=" << std::hexfloat << value << ", f=" << (std::string)f;
     }
 }
+// Reading the value back through int32_t only checked the low 32 bits, so a constructor that zero
+// extended a negative operand passed. The whole 128 bit pattern is compared now.
 TEST(int128_t, ConstructorFromInt32)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        int32_t value = get_int32_random();
-        int128_t f = value;
+        const int32_t value = get_int32_random();
+        const int128_t f = value;
         EXPECT_EQ(static_cast<int32_t>(f), value);
+        EXPECT_TRUE(f == FromInt64(value)) << "value=" << value;
+        EXPECT_EQ(f.is_negative(), value < 0) << "value=" << value;
     }
 }
 TEST(int128_t, ConstructorFromUnsignedInt32)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        uint32_t value = get_uint32_random();
-        int128_t f = value;
+        const uint32_t value = get_uint32_random();
+        const int128_t f = value;
         EXPECT_EQ(static_cast<uint32_t>(f), value);
+        // zero extended, a value with its msb set stays positive
+        EXPECT_TRUE(f == int128_t(static_cast<uint64_t>(value), 0ull)) << "value=" << value;
     }
 }
 TEST(int128_t, ConstructorFromInt64)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        int64_t value = get_int64_random();
-        int128_t f = value;
+        const int64_t value = get_int64_random();
+        const int128_t f = value;
         EXPECT_EQ(static_cast<int64_t>(f), value);
+        EXPECT_TRUE(f == FromInt64(value)) << "value=" << value;
+        EXPECT_EQ(f.is_negative(), value < 0) << "value=" << value;
     }
 }
 // The previous version used get_int64_random() and int64_t throughout, making it a verbatim copy
@@ -118,51 +421,63 @@ TEST(int128_t, ConstructorFromString)
     // every value round trips through its own decimal string, both signs, full width
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const int128_t v(get_uint64_random(), get_uint64_random());
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        const int128_t v(low, high);
         const std::string s = (std::string)v;
         EXPECT_TRUE(int128_t(s) == v) << "s=" << s;
     }
 }
+// The copy and move tests used to compare the two objects through EXPECT_DOUBLE_EQ of their double
+// conversions, which cannot see anything below the top 53 bits. Every QWORD is compared now, against
+// the pattern the source was built from rather than against the source alone.
 TEST(int128_t, CopyConstructor)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(1, 127);
-        int128_t f1 = value;
-        int128_t f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        const int128_t f1(low, high);
+        const int128_t f2 = f1;
+        EXPECT_TRUE(f2 == int128_t(low, high)) << "f1=" << (std::string)f1;
     }
 }
 TEST(int128_t, MoveConstructor)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(1, 127);
-        int128_t f1 = value;
-        int128_t f2(std::move(f1));
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        int128_t f1(low, high);
+        const int128_t f2(std::move(f1));
+        EXPECT_TRUE(f2 == int128_t(low, high)) << "f2=" << (std::string)f2;
+        // documented to leave the source untouched
+        EXPECT_TRUE(f1 == int128_t(low, high)) << "f1=" << (std::string)f1;
     }
 }
 TEST(int128_t, AssignmentOperator)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(1, 127);
-        int128_t f1 = value;
-        int128_t f2;
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        const int128_t f1(low, high);
+        int128_t f2(~low, ~high);
         f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        EXPECT_TRUE(f2 == int128_t(low, high)) << "f1=" << (std::string)f1;
     }
 }
 TEST(int128_t, MoveAssignmentOperator)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(1, 127);
-        int128_t f1 = value;
-        int128_t f2;
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        int128_t f1(low, high);
+        int128_t f2(~low, ~high);
         f2 = std::move(f1);
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2));
+        EXPECT_TRUE(f2 == int128_t(low, high)) << "f2=" << (std::string)f2;
+        EXPECT_TRUE(f1 == int128_t(low, high)) << "f1=" << (std::string)f1;
     }
 }
 // Operands are raw QWORD pairs rather than values converted from a double. A double carries 53
@@ -226,8 +541,14 @@ TEST(int128_t, AddDifferentSign)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const int128_t positive(get_uint64_random(), get_uint64_random() >> 1);
-        const int128_t magnitude(get_uint64_random(), get_uint64_random() >> 1);
+        // one draw per statement: the order in which a call's arguments are evaluated is unspecified,
+        // and MSVC and clang-cl would otherwise test different operands
+        const uint64_t positiveLow = get_uint64_random();
+        const uint64_t positiveHigh = get_uint64_random() >> 1;
+        const uint64_t magnitudeLow = get_uint64_random();
+        const uint64_t magnitudeHigh = get_uint64_random() >> 1;
+        const int128_t positive(positiveLow, positiveHigh);
+        const int128_t magnitude(magnitudeLow, magnitudeHigh);
         const int128_t negative = -magnitude;
 
         uint64_t pl = 0, ph = 0, nl = 0, nh = 0;
@@ -363,8 +684,14 @@ TEST(int128_t, SubtractDifferentSign)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const int128_t positive(get_uint64_random(), get_uint64_random() >> 1);
-        const int128_t magnitude(get_uint64_random(), get_uint64_random() >> 1);
+        // one draw per statement: the order in which a call's arguments are evaluated is unspecified,
+        // and MSVC and clang-cl would otherwise test different operands
+        const uint64_t positiveLow = get_uint64_random();
+        const uint64_t positiveHigh = get_uint64_random() >> 1;
+        const uint64_t magnitudeLow = get_uint64_random();
+        const uint64_t magnitudeHigh = get_uint64_random() >> 1;
+        const int128_t positive(positiveLow, positiveHigh);
+        const int128_t magnitude(magnitudeLow, magnitudeHigh);
         const int128_t negative = -magnitude;
 
         uint64_t pl = 0, ph = 0, nl = 0, nh = 0;
@@ -436,8 +763,14 @@ TEST(int128_t, MultiplyByint128)
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         // shifting the high QWORDs by independent random amounts mixes products that overflow with
         // products that stay in range, and both operands take either sign
-        int128_t a(get_uint64_random(), get_uint64_random() >> (get_uint32_random() % 64));
-        int128_t b(get_uint64_random(), get_uint64_random() >> (get_uint32_random() % 64));
+        const uint64_t aLow = get_uint64_random();
+        const uint64_t aHigh = get_uint64_random();
+        const uint32_t aShift = get_uint32_random() % 64;
+        const uint64_t bLow = get_uint64_random();
+        const uint64_t bHigh = get_uint64_random();
+        const uint32_t bShift = get_uint32_random() % 64;
+        int128_t a(aLow, aHigh >> aShift);
+        int128_t b(bLow, bHigh >> bShift);
         if (get_uint32_random() & 1)
             a = -a;
         if (get_uint32_random() & 1)
@@ -520,19 +853,26 @@ TEST(int128_t, SqrEdgeCases)
 // values needs more than the 53 bits a double holds, so the old oracle was wrong rather than the
 // implementation, and is_similar_double() hid the difference on all 65536 iterations.
 //
-// The defining property of truncating integer division needs no reference implementation: with
-// q*b + r == a, |r| < |b| and r taking the sign of a, the pair is unique. Magnitudes stay below
-// 2^127 so that negation and abs() are exact.
+// With q*b + r == a, |r| < |b| and r taking the sign of a, the pair is unique - but only when the
+// identity holds over the integers. Evaluated in 128 bit arithmetic it holds for ANY quotient here,
+// because operator%= derives the remainder from the quotient, and a quotient off by 2^126 with a
+// divisor divisible by four kept every other check green as well. IsExactSignedDivision() checks the
+// identity on the magnitudes without the wrap, and ReferenceDivide() supplies the exact pair.
+// Magnitudes stay below 2^127 so that negation and abs() are exact.
 TEST(int128_t, DivideByint128)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        int128_t a(get_uint64_random(), get_uint64_random() >> 1);
+        const uint64_t aLow = get_uint64_random();
+        const uint64_t aHigh = get_uint64_random() >> 1;
+        int128_t a(aLow, aHigh);
 
         // spread the divisor over the whole magnitude range so all three paths in operator/= are
         // reached: the power of two shift, the 64 bit divisor shortcut and the 128 bit long division
         const int32_t shift = static_cast<int32_t>(get_uint32_random() % 127);
-        int128_t b = int128_t(get_uint64_random(), get_uint64_random() >> 1) >> shift;
+        const uint64_t bLow = get_uint64_random();
+        const uint64_t bHigh = get_uint64_random() >> 1;
+        int128_t b = int128_t(bLow, bHigh) >> shift;
         if ((get_uint32_random() & 7) == 0)
             b = int128_t(1ll) << static_cast<int32_t>(get_uint32_random() % 126);
         if (b.is_zero())
@@ -545,14 +885,12 @@ TEST(int128_t, DivideByint128)
         const int128_t q = a / b;
         const int128_t r = a % b;
 
-        EXPECT_TRUE(q * b + r == a) << "a=" << (std::string)a << ", b=" << (std::string)b;
+        EXPECT_TRUE(IsExactSignedDivision(a, b, q, r)) << "a=" << (std::string)a << ", b=" << (std::string)b;
+        int128_t expectedQ, expectedR;
+        ReferenceDivide(a, b, expectedQ, expectedR);
+        EXPECT_TRUE(q == expectedQ) << "a=" << (std::string)a << ", b=" << (std::string)b << ", q=" << (std::string)q;
+        EXPECT_TRUE(r == expectedR) << "a=" << (std::string)a << ", b=" << (std::string)b << ", r=" << (std::string)r;
         EXPECT_TRUE(abs(r) < abs(b)) << "a=" << (std::string)a << ", b=" << (std::string)b;
-        // truncation towards zero puts the remainder's sign on the dividend's side
-        if (!r.is_zero())
-            EXPECT_EQ(r.is_negative(), a.is_negative()) << "a=" << (std::string)a << ", b=" << (std::string)b;
-        // and makes the quotient's sign the product of the operand signs
-        if (!q.is_zero())
-            EXPECT_EQ(q.is_negative(), a.is_negative() != b.is_negative()) << "a=" << (std::string)a << ", b=" << (std::string)b;
 
         int128_t c = a;
         c /= b;
@@ -613,10 +951,11 @@ TEST(int128_t, ModuloByint128)
         const int128_t f1 = value1, f2 = value2;
         EXPECT_EQ(static_cast<int64_t>(f1 % f2), value1 % value2) << "value1=" << value1 << ", value2=" << value2;
         EXPECT_EQ(static_cast<int64_t>(f1 / f2), value1 / value2) << "value1=" << value1 << ", value2=" << value2;
-        // the 128 bit result has to be the sign extension of the 64 bit one, not merely equal in
-        // its low QWORD
-        EXPECT_TRUE(f1 % f2 == int128_t(value1 % value2)) << "value1=" << value1 << ", value2=" << value2;
-        EXPECT_TRUE((f1 / f2) * f2 + (f1 % f2) == f1) << "value1=" << value1 << ", value2=" << value2;
+        // the 128 bit results have to be the sign extension of the 64 bit ones, not merely equal in
+        // their low QWORD: an error in the high QWORD of the quotient is invisible to the two above
+        EXPECT_TRUE(f1 % f2 == FromInt64(value1 % value2)) << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(f1 / f2 == FromInt64(value1 / value2)) << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_TRUE(IsExactSignedDivision(f1, f2, f1 / f2, f1 % f2)) << "value1=" << value1 << ", value2=" << value2;
     }
 }
 TEST(int128_t, Compareint128)
@@ -657,7 +996,9 @@ TEST(int128_t, OperatorPlusPlus)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const int128_t f1(get_uint64_random(), get_uint64_random());
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        const int128_t f1(low, high);
         const int128_t expected = f1 + int128_t(1ll);
 
         int128_t f2 = f1;
@@ -675,7 +1016,9 @@ TEST(int128_t, OperatorMinusMinus)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const int128_t f1(get_uint64_random(), get_uint64_random());
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        const int128_t f1(low, high);
         const int128_t expected = f1 - int128_t(1ll);
 
         int128_t f2 = f1;
@@ -788,18 +1131,22 @@ TEST(int128_t, OperatorEqualEdgeCases)
     EXPECT_TRUE(int128_t(5ull, 0ull) == 5ll);
     EXPECT_FALSE(int128_t(5ull, 1ull) == 5ll);
 }
+// The reference used to be floor(log10(value1)) in double, which is not exact: for k = 23, 24, 28, 29,
+// 31, 33, 34, 35, 37 and 38 the double nearest 10^k lies below 10^k, yet log10() of it returns k. No
+// random draw happened to land there. The reference is now the exact power of ten table.
 TEST(int128_t, log10)
 {
+    const auto powers = PowersOfTen();
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = floor(1.0 + fabs(get_double_random(1, 127)));
-        int64_t res = (int64_t)floor(log10(value1));  // double doesn't lose any bits with this operation!
-        if (check_overflow_int128(value1)) {
-            continue;
+        const double value1 = floor(1.0 + fabs(get_double_random(1, 127)));
+        const int128_t i1 = value1;
+
+        uint64_t expected = 0;
+        while (expected + 1 < powers.size() && NonNegativeLessOrEqual(powers[expected + 1], i1)) {
+            ++expected;
         }
-        int128_t i1 = value1;
-        int64_t i_res = log10(i1);
-        EXPECT_EQ(i_res, res) << "double value1=" << value1;
+        EXPECT_EQ(log10(i1), expected) << "value=" << (std::string)i1;
     }
 }
 TEST(int128_t, log)
@@ -855,10 +1202,11 @@ TEST(int128_t, pow)
 
         EXPECT_TRUE(pow(x, expo) == reference) << "base=" << base << ", expo=" << expo;
         // an even power of a negative base is positive and matches the power of its magnitude
-        if (base != INT64_MIN && (expo & 1) == 0)
+        if ((expo & 1) == 0) {
             EXPECT_TRUE(pow(x, expo) == pow(-x, expo)) << "base=" << base << ", expo=" << expo;
-        else if (base != INT64_MIN)
+        } else {
             EXPECT_TRUE(pow(x, expo) == -pow(-x, expo)) << "base=" << base << ", expo=" << expo;
+        }
     }
 }
 TEST(int128_t, powEdgeCases)
@@ -901,12 +1249,13 @@ TEST(int128_t, DivideTruncatesTowardsZero)
         int64_t a, b, q, r;
     } cases[] = {{-7, 2, -3, -1}, {7, -2, -3, 1}, {-7, -2, 3, -1}, {7, 2, 3, 1},
                  {-100, 7, -14, -2}, {-1, 2, 0, -1}, {-9, 3, -3, 0}, {-10, 4, -2, -2}};
+    // The results are compared at full width: static_cast<int64_t> reads the low QWORD only, and
+    // (a / b) * b + (a % b) == a holds for any quotient, the remainder being derived from it.
     for (const auto& c : cases) {
         const int128_t a(c.a), b(c.b);
-        EXPECT_EQ(static_cast<int64_t>(a / b), c.q) << c.a << " / " << c.b;
-        EXPECT_EQ(static_cast<int64_t>(a % b), c.r) << c.a << " % " << c.b;
-        // the quotient and the remainder must agree with each other
-        EXPECT_TRUE((a / b) * b + (a % b) == a) << c.a << ", " << c.b;
+        EXPECT_TRUE(a / b == FromInt64(c.q)) << c.a << " / " << c.b;
+        EXPECT_TRUE(a % b == FromInt64(c.r)) << c.a << " % " << c.b;
+        EXPECT_TRUE(IsExactSignedDivision(a, b, a / b, a % b)) << c.a << ", " << c.b;
     }
 
     // every sign combination, cross checked against int64_t
@@ -917,9 +1266,8 @@ TEST(int128_t, DivideTruncatesTowardsZero)
         if (b == 0)
             continue;
         const int128_t f1(a), f2(b);
-        EXPECT_EQ(static_cast<int64_t>(f1 / f2), a / b) << "a=" << a << ", b=" << b;
-        EXPECT_EQ(static_cast<int64_t>(f1 % f2), a % b) << "a=" << a << ", b=" << b;
-        EXPECT_TRUE((f1 / f2) * f2 + (f1 % f2) == f1) << "a=" << a << ", b=" << b;
+        EXPECT_TRUE(f1 / f2 == FromInt64(a / b)) << "a=" << a << ", b=" << b;
+        EXPECT_TRUE(f1 % f2 == FromInt64(a % b)) << "a=" << a << ", b=" << b;
     }
 }
 // The 64 bit fast path shortcut small numerators with a signed comparison, so any negative value
@@ -927,13 +1275,13 @@ TEST(int128_t, DivideTruncatesTowardsZero)
 TEST(int128_t, DivideByScalarWithNegativeNumerator)
 {
     const int128_t a(static_cast<int64_t>(-100));
-    EXPECT_EQ(static_cast<int64_t>(a / 7), -14);
-    EXPECT_EQ(static_cast<int64_t>(a / 7ull), -14);
-    EXPECT_EQ(static_cast<int64_t>(a / 7u), -14);
-    EXPECT_EQ(static_cast<int64_t>(a % 7), -2);
+    EXPECT_TRUE(a / 7 == FromInt64(-14));
+    EXPECT_TRUE(a / 7ull == FromInt64(-14));
+    EXPECT_TRUE(a / 7u == FromInt64(-14));
+    EXPECT_TRUE(a % 7 == FromInt64(-2));
     // a power of two divisor takes a different branch and must truncate too, not shift
-    EXPECT_EQ(static_cast<int64_t>(int128_t(static_cast<int64_t>(-7)) / 2), -3);
-    EXPECT_EQ(static_cast<int64_t>(int128_t(static_cast<int64_t>(-8)) / 2), -4);
+    EXPECT_TRUE(int128_t(static_cast<int64_t>(-7)) / 2 == FromInt64(-3));
+    EXPECT_TRUE(int128_t(static_cast<int64_t>(-8)) / 2 == FromInt64(-4));
 }
 // A divisor whose magnitude needs more than 64 bit exercises the 128 bit division path.
 TEST(int128_t, DivideByWideInt128)
@@ -942,15 +1290,20 @@ TEST(int128_t, DivideByWideInt128)
     // which the old rounding correction could not see
     const int128_t big(0ull, 4ull);          // 2^66
     const int128_t divisor(0ull, 3ull);      // 3 * 2^64
-    EXPECT_EQ(static_cast<int64_t>(big / divisor), 1);
-    EXPECT_EQ(static_cast<int64_t>((-big) / divisor), -1);
-    EXPECT_TRUE((big / divisor) * divisor + (big % divisor) == big);
-    EXPECT_TRUE(((-big) / divisor) * divisor + ((-big) % divisor) == -big);
+    EXPECT_TRUE(big / divisor == int128_t(1ll));
+    EXPECT_TRUE((-big) / divisor == int128_t(-1ll));
+    EXPECT_TRUE(big % divisor == int128_t(0ull, 1ull));      // 2^64
+    EXPECT_TRUE((-big) % divisor == -int128_t(0ull, 1ull));  // -2^64
 
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        int128_t a(get_uint64_random(), get_uint64_random() >> 1);
-        int128_t b(get_uint64_random(), get_uint64_random() >> (get_uint32_random() % 63));
+        const uint64_t aLow = get_uint64_random();
+        const uint64_t aHigh = get_uint64_random() >> 1;
+        const uint64_t bLow = get_uint64_random();
+        const uint64_t bHigh = get_uint64_random();
+        const uint32_t bShift = get_uint32_random() % 63;
+        int128_t a(aLow, aHigh);
+        int128_t b(bLow, bHigh >> bShift);
         if (b.is_zero())
             continue;
         if (get_uint32_random() & 1)
@@ -958,11 +1311,10 @@ TEST(int128_t, DivideByWideInt128)
         if (get_uint32_random() & 1)
             b = -b;
         const int128_t q = a / b, r = a % b;
-        EXPECT_TRUE(q * b + r == a) << "a=" << (std::string)a << ", b=" << (std::string)b;
-        // the remainder takes the sign of the dividend and stays smaller in magnitude
-        EXPECT_TRUE(abs(r) < abs(b)) << "a=" << (std::string)a << ", b=" << (std::string)b;
-        if (!r.is_zero())
-            EXPECT_EQ(r.is_negative(), a.is_negative()) << "a=" << (std::string)a;
+        EXPECT_TRUE(IsExactSignedDivision(a, b, q, r)) << "a=" << (std::string)a << ", b=" << (std::string)b;
+        int128_t expectedQ, expectedR;
+        ReferenceDivide(a, b, expectedQ, expectedR);
+        EXPECT_TRUE(q == expectedQ && r == expectedR) << "a=" << (std::string)a << ", b=" << (std::string)b;
     }
 }
 // sqrt only rejected negatives, then called log2, which throws on zero. sqrt is noexcept, so a
@@ -1018,7 +1370,9 @@ TEST(int128_t, ToStringLargeValues)
     // full round trip over the whole 128 bit range, both signs
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const int128_t v(get_uint64_random(), get_uint64_random());
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        const int128_t v(low, high);
         const std::string s = (std::string)v;
         EXPECT_TRUE(int128_t(s) == v) << "s=" << s;
     }
@@ -1029,7 +1383,10 @@ TEST(int128_t, ConversionToFloatingPointIsCorrectlyRounded)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        int128_t v(get_uint64_random(), get_uint64_random() >> (get_uint32_random() % 64));
+        const uint64_t low = get_uint64_random();
+        const uint64_t high = get_uint64_random();
+        const uint32_t shift = get_uint32_random() % 64;
+        int128_t v(low, high >> shift);
         if (v.is_zero())
             continue;
         if (get_uint32_random() & 1)
@@ -1310,7 +1667,11 @@ TEST(int128_t, UserDefinedLiteral)
     // the operator takes the raw characters, so digit grouping survives
     EXPECT_TRUE(1'000'000_int128 == int128_t(1000000ll));
 }
-// The compound bitwise and shift assignments, and the scalar forms of the bitwise operators.
+// The compound bitwise and shift assignments. They used to be compared with the binary operators,
+// which are implemented by calling them, so the random half checked a function against itself: an
+// arithmetic right shift that went logical for counts 11 to 62 passed the whole file. Both forms are
+// now compared with references built from the QWORDs. The scalar operands are covered by
+// BitwiseWithScalarOperandsExtendTheScalar.
 TEST(int128_t, CompoundBitwiseAndShiftOperators)
 {
     srand(RANDOM_SEED);
@@ -1321,22 +1682,26 @@ TEST(int128_t, CompoundBitwiseAndShiftOperators)
 
         int128_t c = a;
         c &= b;
-        EXPECT_TRUE(c == (a & b)) << "a=" << (std::string)a << ", b=" << (std::string)b;
+        EXPECT_TRUE(c == int128_t(al & bl, ah & bh)) << "a=" << (std::string)a << ", b=" << (std::string)b;
         c = a;
         c |= b;
-        EXPECT_TRUE(c == (a | b)) << "a=" << (std::string)a << ", b=" << (std::string)b;
+        EXPECT_TRUE(c == int128_t(al | bl, ah | bh)) << "a=" << (std::string)a << ", b=" << (std::string)b;
         c = a;
         c ^= b;
-        EXPECT_TRUE(c == (a ^ b)) << "a=" << (std::string)a << ", b=" << (std::string)b;
+        EXPECT_TRUE(c == int128_t(al ^ bl, ah ^ bh)) << "a=" << (std::string)a << ", b=" << (std::string)b;
 
-        // the compound shifts have to match the binary ones
+        // both shift forms against the bit by bit reference
         const int32_t shift = static_cast<int32_t>(get_uint32_random() % 128);
+        const int128_t expectedLeft = ReferenceShift(a, shift, true);
+        const int128_t expectedRight = ReferenceShift(a, shift, false);
         c = a;
         c <<= shift;
-        EXPECT_TRUE(c == (a << shift)) << "a=" << (std::string)a << ", shift=" << shift;
+        EXPECT_TRUE(c == expectedLeft) << "a=" << (std::string)a << ", shift=" << shift;
+        EXPECT_TRUE((a << shift) == expectedLeft) << "a=" << (std::string)a << ", shift=" << shift;
         c = a;
         c >>= shift;
-        EXPECT_TRUE(c == (a >> shift)) << "a=" << (std::string)a << ", shift=" << shift;
+        EXPECT_TRUE(c == expectedRight) << "a=" << (std::string)a << ", shift=" << shift;
+        EXPECT_TRUE((a >> shift) == expectedRight) << "a=" << (std::string)a << ", shift=" << shift;
     }
 
     // a zero or negative shift count leaves the value alone, as documented
@@ -1439,6 +1804,759 @@ TEST(int128_t, ScalarOnTheLeftHandSideShifts)
     // the int128_t on the left forms must still resolve
     EXPECT_TRUE((ten << 1) == int128_t(20));
     EXPECT_TRUE((ten >> 1) == int128_t(5));
+}
+
+/**********************************************************************
+ * int128_t edge cases and contracts
+ *
+ * Paths the coverage report showed as never executed for the signed type, and behavior a mutation
+ * of the library survived. Expected values come from Python's arbitrary precision integers
+ * (truncating division written out, since Python's // floors) or are built from QWORDs here.
+ ***********************************************************************/
+
+// The zero, saturation and below-one branches of the double constructor never ran: the random operands
+// were floor()ed doubles in [2, 2^127). NaN, the infinities and every magnitude of 2^127 or more saturate
+// to the end of the range with the sign of the input; a fraction truncates towards zero.
+TEST(int128_t, ConstructorFromDoubleSaturatesAndTruncates)
+{
+    const int128_t max(~0ull, 0x7FFFFFFFFFFFFFFFull);
+    const int128_t min(0ull, 0x8000000000000000ull);
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double denorm = std::numeric_limits<double>::denorm_min();
+
+    // the expected value as QWORDs: an int128_t member would pad the struct to its 16 byte alignment
+    const struct {
+        double value;
+        uint64_t low, high;
+    } cases[] = {
+        {0.0, 0ull, 0ull},
+        {-0.0, 0ull, 0ull},
+        {0.5, 0ull, 0ull},
+        {-0.5, 0ull, 0ull},
+        {-0.9999999, 0ull, 0ull},
+        {denorm, 0ull, 0ull},
+        {-denorm, 0ull, 0ull},
+        {-DBL_MIN, 0ull, 0ull},
+        {3.99, 3ull, 0ull},
+        {-3.99, ~0ull - 2ull, ~0ull},
+        {-1.0, ~0ull, ~0ull},
+        {-0x1p53, 0xFFE0000000000000ull, ~0ull},
+        {0x1p126, 0ull, 0x4000000000000000ull},
+        {-0x1p126, 0ull, 0xC000000000000000ull},
+        {0x1.fffffffffffffp126, 0ull, 0x7FFFFFFFFFFFFC00ull},  // the largest double below 2^127
+        {-0x1.fffffffffffffp126, 0ull, 0x8000000000000400ull},
+        {0x1p127, ~0ull, 0x7FFFFFFFFFFFFFFFull},
+        {-0x1p127, 0ull, 0x8000000000000000ull},  // exactly the most negative value, no saturation needed
+        {-0x1.0000000000001p127, 0ull, 0x8000000000000000ull},
+        {1e39, ~0ull, 0x7FFFFFFFFFFFFFFFull},
+        {-1e39, 0ull, 0x8000000000000000ull},
+        {DBL_MAX, ~0ull, 0x7FFFFFFFFFFFFFFFull},
+        {-DBL_MAX, 0ull, 0x8000000000000000ull},
+        {inf, ~0ull, 0x7FFFFFFFFFFFFFFFull},
+        {-inf, 0ull, 0x8000000000000000ull},
+        {nan, ~0ull, 0x7FFFFFFFFFFFFFFFull},
+        {std::copysign(nan, -1.0), 0ull, 0x8000000000000000ull},
+    };
+    for (const auto& c : cases) {
+        const double value = opaque(c.value);  // the runtime path, not the constant evaluated one
+        const int128_t expected(c.low, c.high);
+        EXPECT_TRUE(int128_t(value) == expected) << "value=" << std::hexfloat << value;
+        // and the reference the random test relies on agrees with every row
+        EXPECT_TRUE(ExpectedFromDouble(value) == expected) << "value=" << std::hexfloat << value;
+    }
+
+    EXPECT_TRUE(int128_t(opaque(-1.5f)) == int128_t(-1ll));
+    EXPECT_TRUE(int128_t(opaque(3.4e38f)) == max);  // a float above 2^127
+    EXPECT_TRUE(int128_t(opaque(-0x1p127f)) == min);
+    EXPECT_TRUE(int128_t(opaque(-std::numeric_limits<float>::infinity())) == min);
+}
+// Round to nearest, ties to even, at the places random operands never reach: an exact tie, and the
+// sticky bit living in the high QWORD alone while the low QWORD is zero. That last branch was never
+// evaluated for the signed type, and ignoring it went unnoticed by both integer suites. Each row is
+// checked for the value and its negation, whose result differs in the sign bit only. Bit patterns
+// from Python's exact integer rounding and its struct module.
+TEST(int128_t, ConversionRoundsTiesToEven)
+{
+    const struct {
+        uint64_t low, high, doubleBits;
+        uint32_t floatBits;
+    } rows[] = {
+        {0x0020000000000001ull, 0x0000000000000000ull, 0x4340000000000000ull, 0x5A000000u},  // 2^53+1: one dropped bit, a tie, rounds down to even
+        {0x0020000000000003ull, 0x0000000000000000ull, 0x4340000000000002ull, 0x5A000000u},  // 2^53+3: one dropped bit, a tie, rounds up to even
+        {0x0040000000000002ull, 0x0000000000000000ull, 0x4350000000000000ull, 0x5A800000u},  // 2^54+2: two dropped bits, a tie, rounds down
+        {0x0040000000000006ull, 0x0000000000000000ull, 0x4350000000000002ull, 0x5A800000u},  // 2^54+6: two dropped bits, a tie, rounds up
+        {0x0000000001000001ull, 0x0000000000000000ull, 0x4170000010000000ull, 0x4B800000u},  // 2^24+1: float tie on one dropped bit
+        {0x0000000001000003ull, 0x0000000000000000ull, 0x4170000030000000ull, 0x4B800002u},  // 2^24+3: float tie, rounds up
+        {0x0000000000000000ull, 0x0100000000000008ull, 0x4770000000000000ull, 0x7B800000u},  // 2^120+2^67: low QWORD zero, a double tie
+        {0x0000000000000000ull, 0x0100000000000009ull, 0x4770000000000001ull, 0x7B800000u},  // 2^120+2^67+2^64: sticky bit in the high QWORD only
+        {0x0000000000000000ull, 0x0100000100000000ull, 0x4770000010000000ull, 0x7B800000u},  // 2^120+2^96: low QWORD zero, a float tie
+        {0x0000000000000000ull, 0x0100000100000001ull, 0x4770000010000000ull, 0x7B800001u},  // 2^120+2^96+2^64: float sticky bit in the high QWORD only
+        {0xFFFFFFFFFFFFFFFFull, 0x7FFFFFFFFFFFFFFFull, 0x47E0000000000000ull, 0x7F000000u},  // 2^127-1: rounds up to 2^127
+    };
+    for (const auto& row : rows) {
+        const int128_t v(row.low, row.high);
+        EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(v)), row.doubleBits) << "v=" << (std::string)v;
+        EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(v)), row.floatBits) << "v=" << (std::string)v;
+        const int128_t negated = -v;
+        EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(negated)), row.doubleBits | 0x8000000000000000ull) << "v=" << (std::string)negated;
+        EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(negated)), row.floatBits | 0x80000000u) << "v=" << (std::string)negated;
+    }
+
+    // zero converts to +0.0, never -0.0
+    const int128_t zero(opaque(0ll));
+    EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(zero)), 0ull);
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(zero)), 0u);
+}
+// The magnitude of -2^127 is the only one with bit 127 set, and the edge tests only ever divided it
+// through the power of two and equality shortcuts. Dropping that bit in the long division paths passed
+// the whole file. Quotients and remainders from Python, truncated towards zero.
+TEST(int128_t, DivideMostNegativeThroughLongDivision)
+{
+    const int128_t max(~0ull, 0x7FFFFFFFFFFFFFFFull);
+    const int128_t min(0ull, 0x8000000000000000ull);
+    const int128_t minusOne(-1ll);
+
+    const struct {
+        int128_t divisor, quotient, remainder;
+    } cases[] = {
+        {max, minusOne, minusOne},
+        {-max, int128_t(1ll), minusOne},
+        {int128_t(3ll), int128_t(0x5555555555555556ull, 0xD555555555555555ull), int128_t(-2ll)},
+        {int128_t(-3ll), int128_t(0xAAAAAAAAAAAAAAAAull, 0x2AAAAAAAAAAAAAAAull), int128_t(-2ll)},
+        {int128_t(7ll), int128_t(0xDB6DB6DB6DB6DB6Eull, 0xEDB6DB6DB6DB6DB6ull), int128_t(-2ll)},
+        {int128_t(10ll), int128_t(0x3333333333333334ull, 0xF333333333333333ull), int128_t(-8ll)},
+        {FromInt64(INT64_MIN), int128_t(0ull, 1ull), int128_t()},
+        {int128_t(UINT64_MAX, 0ull), FromInt64(INT64_MIN), FromInt64(INT64_MIN)},
+        {int128_t(1ull, 1ull), int128_t(0x8000000000000001ull, ~0ull), int128_t(0x7FFFFFFFFFFFFFFFull, ~0ull)},     // 2^64+1
+        {-int128_t(1ull, 1ull), int128_t(0x7FFFFFFFFFFFFFFFull, 0ull), int128_t(0x7FFFFFFFFFFFFFFFull, ~0ull)},
+        {int128_t(1ull, 0x4000000000000000ull), minusOne, int128_t(1ull, 0xC000000000000000ull)},                // 2^126+1
+        {int128_t(12345ull, 1ull << 36), int128_t(0xFFFFFFFFF8000001ull, ~0ull), int128_t(0x00000181C7FFCFC7ull, 0xFFFFFFF000000000ull)},  // 2^100+12345
+    };
+    for (const auto& c : cases) {
+        const int128_t q = min / c.divisor;
+        const int128_t r = min % c.divisor;
+        EXPECT_TRUE(q == c.quotient) << "divisor=" << (std::string)c.divisor << ", q=" << (std::string)q;
+        EXPECT_TRUE(r == c.remainder) << "divisor=" << (std::string)c.divisor << ", r=" << (std::string)r;
+        EXPECT_TRUE(IsExactSignedDivision(min, c.divisor, q, r)) << "divisor=" << (std::string)c.divisor;
+        int128_t expectedQ, expectedR;
+        ReferenceDivide(min, c.divisor, expectedQ, expectedR);
+        EXPECT_TRUE(expectedQ == c.quotient && expectedR == c.remainder) << "the reference disagrees, divisor=" << (std::string)c.divisor;
+
+        int128_t compound = min;
+        compound /= c.divisor;
+        EXPECT_TRUE(compound == c.quotient) << "divisor=" << (std::string)c.divisor;
+        compound = min;
+        compound %= c.divisor;
+        EXPECT_TRUE(compound == c.remainder) << "divisor=" << (std::string)c.divisor;
+    }
+
+    // the same through the scalar overloads
+    EXPECT_TRUE(min / 3 == int128_t(0x5555555555555556ull, 0xD555555555555555ull));
+    EXPECT_TRUE(min % 3 == int128_t(-2ll));
+    EXPECT_TRUE(min / -3 == int128_t(0xAAAAAAAAAAAAAAAAull, 0x2AAAAAAAAAAAAAAAull));
+    EXPECT_TRUE(min / 10u == int128_t(0x3333333333333334ull, 0xF333333333333333ull));
+    EXPECT_TRUE(min % 10u == int128_t(-8ll));
+    EXPECT_TRUE(min / INT64_MIN == int128_t(0ull, 1ull));
+    EXPECT_TRUE(min / UINT64_MAX == FromInt64(INT64_MIN));
+    EXPECT_TRUE(min % UINT64_MAX == FromInt64(INT64_MIN));
+    EXPECT_TRUE(min / INT64_MAX == int128_t(0xFFFFFFFFFFFFFFFEull, 0xFFFFFFFFFFFFFFFEull));  // -(2^64+2)
+    EXPECT_TRUE(min % INT64_MAX == int128_t(-2ll));
+
+    // and the other way round: a smaller magnitude truncates to zero and is its own remainder
+    EXPECT_TRUE((max / min).is_zero());
+    EXPECT_TRUE(max % min == max);
+}
+// Division by every 64 bit scalar type, of both signs and every size, against the reference division.
+// The int64_t and uint64_t forms of the same bits differ exactly when bit 63 is set, which is where a
+// sign or zero extension mistake shows. A scalar on the left is checked as well.
+TEST(int128_t, DivideByScalarMatchesReferenceDivision)
+{
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const uint64_t aLow = get_uint64_random();
+        const uint64_t aHigh = get_uint64_random();
+        const int32_t aShift = static_cast<int32_t>(get_uint32_random() % 128);
+        const uint64_t divisorBits = get_uint64_random();
+        const uint32_t divisorShift = get_uint32_random() % 64;
+
+        // full width with either sign, at every magnitude
+        const int128_t a = ReferenceShift(int128_t(aLow, aHigh), aShift, false);
+        const uint64_t u = divisorBits >> divisorShift;
+        const int64_t s = static_cast<int64_t>(u);  // the same bits, negative when bit 63 is set
+        if (u == 0)
+            continue;
+
+        int128_t q, r;
+        ReferenceDivide(a, FromInt64(s), q, r);
+        EXPECT_TRUE(a / s == q) << "a=" << (std::string)a << ", s=" << s;
+        EXPECT_TRUE(a % s == r) << "a=" << (std::string)a << ", s=" << s;
+        int128_t c = a;
+        c /= s;
+        EXPECT_TRUE(c == q) << "a=" << (std::string)a << ", s=" << s;
+
+        ReferenceDivide(a, int128_t(u, 0ull), q, r);
+        EXPECT_TRUE(a / u == q) << "a=" << (std::string)a << ", u=" << u;
+        EXPECT_TRUE(a % u == r) << "a=" << (std::string)a << ", u=" << u;
+        c = a;
+        c %= u;
+        EXPECT_TRUE(c == r) << "a=" << (std::string)a << ", u=" << u;
+
+        if (!a.is_zero()) {
+            ReferenceDivide(FromInt64(s), a, q, r);
+            EXPECT_TRUE(s / a == q) << "a=" << (std::string)a << ", s=" << s;
+            EXPECT_TRUE(s % a == r) << "a=" << (std::string)a << ", s=" << s;
+        }
+    }
+}
+// The shift operators against the bit by bit reference at every count from -2 to 130, on values of
+// both signs. The arithmetic right shift fills with the sign bit; counts of zero or below leave the
+// value alone. Hidden behind volatile so that the runtime code is what gets tested.
+TEST(int128_t, ShiftsMatchABitReference)
+{
+    const int128_t values[] = {int128_t(0x0123456789ABCDEFull, 0xFEDCBA9876543210ull),
+                               int128_t(0x0123456789ABCDEFull, 0x7EDCBA9876543210ull),
+                               int128_t(-1ll),
+                               int128_t(1ll),
+                               int128_t(0ull, 0x8000000000000000ull),
+                               int128_t(~0ull, 0x7FFFFFFFFFFFFFFFull)};
+    for (const auto& x : values) {
+        for (int32_t s = -2; s <= 130; ++s) {
+            volatile int32_t count = s;
+            EXPECT_TRUE((x >> count) == ReferenceShift(x, s, false)) << "x=" << (std::string)x << ", shift=" << s;
+            EXPECT_TRUE((x << count) == ReferenceShift(x, s, true)) << "x=" << (std::string)x << ", shift=" << s;
+        }
+        for (const int32_t s : {200, INT32_MAX, INT32_MIN}) {
+            volatile int32_t count = s;
+            EXPECT_TRUE((x >> count) == ReferenceShift(x, s, false)) << "x=" << (std::string)x << ", shift=" << s;
+            EXPECT_TRUE((x << count) == ReferenceShift(x, s, true)) << "x=" << (std::string)x << ", shift=" << s;
+        }
+    }
+
+    // a few results spelled out, from Python's arithmetic >> on the same value
+    const int128_t x(0x0123456789ABCDEFull, 0xFEDCBA9876543210ull);
+    EXPECT_TRUE((x >> 63) == int128_t(0xFDB97530ECA86420ull, ~0ull));
+    EXPECT_TRUE((x >> 64) == int128_t(0xFEDCBA9876543210ull, ~0ull));
+    EXPECT_TRUE((x >> 65) == int128_t(0xFF6E5D4C3B2A1908ull, ~0ull));
+    EXPECT_TRUE((x >> 100) == int128_t(-1193047ll));
+    EXPECT_TRUE((x << 65) == int128_t(0ull, 0x02468ACF13579BDEull));
+
+    // a scalar on the left is widened to 128 bit first, then shifted
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const int64_t v = static_cast<int64_t>(get_uint64_random());
+        const int32_t n = static_cast<int32_t>(get_uint32_random() % 128);
+        const int128_t count(n);
+        EXPECT_TRUE((v << count) == ReferenceShift(FromInt64(v), n, true)) << "v=" << v << ", n=" << n;
+        EXPECT_TRUE((v >> count) == ReferenceShift(FromInt64(v), n, false)) << "v=" << v << ", n=" << n;
+    }
+}
+// The scalar overloads of operator*= skip one partial product for an operand that fits in 64 bits. The
+// binary form with the scalar on the right had never run, and neither had int64_t operands or an
+// unsigned one with bit 63 set; dropping the carry of the low product for such a scalar passed both
+// integer suites. Every scalar type is checked against ReferenceMultiply() of its 128 bit extension.
+TEST(int128_t, MultiplyByScalar)
+{
+    const auto check = [](const int128_t& a, auto scalar) {
+        using S = decltype(scalar);
+        int128_t wide;
+        if constexpr (std::is_signed_v<S>) {
+            wide = FromInt64(static_cast<int64_t>(scalar));
+        } else {
+            wide = int128_t(static_cast<uint64_t>(scalar), 0ull);
+        }
+        const int128_t expected = ReferenceMultiply(a, wide);
+        EXPECT_TRUE(a * scalar == expected) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_TRUE(scalar * a == expected) << "a=" << (std::string)a << ", scalar=" << scalar;
+        int128_t c = a;
+        c *= scalar;
+        EXPECT_TRUE(c == expected) << "a=" << (std::string)a << ", scalar=" << scalar;
+    };
+
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const uint64_t aLow = get_uint64_random();
+        const uint64_t aHigh = get_uint64_random();
+        const uint64_t bits = get_uint64_random();
+        const int128_t a(aLow, aHigh);
+        check(a, static_cast<int64_t>(bits));
+        check(a, bits);
+        check(a, static_cast<int32_t>(bits));
+        check(a, static_cast<uint32_t>(bits));
+    }
+
+    const int128_t values[] = {int128_t(-1ll), int128_t(0ull, 0x8000000000000000ull), int128_t(~0ull, 0x7FFFFFFFFFFFFFFFull),
+                               int128_t(0x0123456789ABCDEFull, 0xFEDCBA9876543210ull)};
+    const int64_t signedScalars[] = {0, 1, -1, 2, -2, INT32_MIN, INT32_MAX, INT64_MIN, INT64_MIN + 1, INT64_MAX};
+    const uint64_t unsignedScalars[] = {0ull, 1ull, UINT32_MAX, 0x7FFFFFFFFFFFFFFFull, 0x8000000000000000ull, 0x8000000000000001ull, UINT64_MAX};
+    for (const auto& a : values) {
+        for (const int64_t s : signedScalars) {
+            check(a, s);
+        }
+        for (const uint64_t u : unsignedScalars) {
+            check(a, u);
+        }
+    }
+}
+// The scalar forms of the bitwise operators had never been instantiated. The scalar is widened first:
+// sign extended when it is signed, zero extended when it is not, so -256 and 0xFF...00ull clear the
+// same low bits but only the unsigned one clears the high QWORD.
+TEST(int128_t, BitwiseWithScalarOperandsExtendTheScalar)
+{
+    const int128_t pattern(0xFFFFFFFFFFFFFFFFull, 0x1234ull);
+    EXPECT_TRUE((pattern & -256) == int128_t(0xFFFFFFFFFFFFFF00ull, 0x1234ull));
+    EXPECT_TRUE((pattern & 0xFFFFFFFFFFFFFF00ull) == int128_t(0xFFFFFFFFFFFFFF00ull, 0ull));
+    EXPECT_TRUE((pattern | INT64_MIN) == int128_t(-1ll));
+    EXPECT_TRUE((pattern ^ -1) == int128_t(0ull, 0xFFFFFFFFFFFFEDCBull));
+    EXPECT_TRUE((-256 & pattern) == int128_t(0xFFFFFFFFFFFFFF00ull, 0x1234ull));
+    EXPECT_TRUE((0xFFFFFFFFFFFFFF00ull & pattern) == int128_t(0xFFFFFFFFFFFFFF00ull, 0ull));
+    int128_t y = pattern;
+    y &= -256;
+    EXPECT_TRUE(y == int128_t(0xFFFFFFFFFFFFFF00ull, 0x1234ull));
+    y = pattern;
+    y |= -1;
+    EXPECT_TRUE(y == int128_t(-1ll));
+    y = pattern;
+    y ^= 1u;
+    EXPECT_TRUE(y == int128_t(0xFFFFFFFFFFFFFFFEull, 0x1234ull));
+
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const uint64_t al = get_uint64_random();
+        const uint64_t ah = get_uint64_random();
+        const uint64_t bits = get_uint64_random();
+        const int128_t a(al, ah);
+        const int64_t s = static_cast<int64_t>(bits);
+        const uint64_t sh = SignExtension(s);
+
+        EXPECT_TRUE((a & s) == int128_t(al & bits, ah & sh)) << "a=" << (std::string)a << ", s=" << s;
+        EXPECT_TRUE((a | s) == int128_t(al | bits, ah | sh)) << "a=" << (std::string)a << ", s=" << s;
+        EXPECT_TRUE((a ^ s) == int128_t(al ^ bits, ah ^ sh)) << "a=" << (std::string)a << ", s=" << s;
+        EXPECT_TRUE((s & a) == int128_t(al & bits, ah & sh)) << "a=" << (std::string)a << ", s=" << s;
+        EXPECT_TRUE((a & bits) == int128_t(al & bits, 0ull)) << "a=" << (std::string)a << ", u=" << bits;
+        EXPECT_TRUE((a | bits) == int128_t(al | bits, ah)) << "a=" << (std::string)a << ", u=" << bits;
+        EXPECT_TRUE((bits ^ a) == int128_t(al ^ bits, ah)) << "a=" << (std::string)a << ", u=" << bits;
+
+        int128_t c = a;
+        c &= s;
+        EXPECT_TRUE(c == int128_t(al & bits, ah & sh)) << "a=" << (std::string)a << ", s=" << s;
+        c = a;
+        c |= bits;
+        EXPECT_TRUE(c == int128_t(al | bits, ah)) << "a=" << (std::string)a << ", u=" << bits;
+        c = a;
+        c ^= s;
+        EXPECT_TRUE(c == int128_t(al ^ bits, ah ^ sh)) << "a=" << (std::string)a << ", s=" << s;
+    }
+}
+// Comparisons with an integral scalar widen the scalar, which makes them exact at 128 bits - unlike
+// the builtin types, where -1 < UINT64_MAX is false. x <= scalar and x >= scalar had never run
+// outside a constant expression, and computing <= as >= survived both integer suites. The reference
+// orders the QWORDs directly: the high ones as signed values, then the low ones as unsigned. Every
+// other iteration gives both sides the same high QWORD, so that the low one decides.
+TEST(int128_t, CompareWithIntegralScalars)
+{
+    const int128_t max(~0ull, 0x7FFFFFFFFFFFFFFFull);
+    const int128_t min(0ull, 0x8000000000000000ull);
+    EXPECT_TRUE(int128_t(-2) <= -1);
+    EXPECT_FALSE(int128_t(0) <= -1);
+    EXPECT_FALSE(int128_t(-1) >= 0);
+    EXPECT_TRUE(int128_t(0) >= -1);
+    EXPECT_TRUE(int128_t(-1) < UINT64_MAX);
+    EXPECT_FALSE(int128_t(-1) == UINT64_MAX);
+    EXPECT_TRUE(UINT64_MAX > int128_t(-1));
+    EXPECT_TRUE(int128_t(~0ull, 0ull) == UINT64_MAX);
+    EXPECT_TRUE(int128_t(-1) <= 0u);
+    EXPECT_FALSE(int128_t(-1) >= 0u);
+    EXPECT_TRUE(min < INT64_MIN);
+    EXPECT_TRUE(max > UINT64_MAX);
+    EXPECT_TRUE(FromInt64(INT64_MIN) == INT64_MIN);
+    EXPECT_TRUE(INT64_MIN >= FromInt64(INT64_MIN));
+
+    const auto check = [](const int128_t& a, auto scalar, uint64_t sl, uint64_t sh) {
+        uint64_t al = 0, ah = 0;
+        a.get_components(al, ah);
+        const bool less = static_cast<int64_t>(ah) < static_cast<int64_t>(sh) || (ah == sh && al < sl);
+        const bool equal = ah == sh && al == sl;
+        const bool greater = !less && !equal;
+        EXPECT_EQ(a == scalar, equal) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(a != scalar, !equal) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(a < scalar, less) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(a <= scalar, less || equal) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(a > scalar, greater) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(a >= scalar, greater || equal) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(scalar == a, equal) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(scalar != a, !equal) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(scalar < a, greater) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(scalar <= a, greater || equal) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(scalar > a, less) << "a=" << (std::string)a << ", scalar=" << scalar;
+        EXPECT_EQ(scalar >= a, less || equal) << "a=" << (std::string)a << ", scalar=" << scalar;
+    };
+
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
+        const uint64_t al = get_uint64_random();
+        const uint64_t ah = get_uint64_random();
+        const uint64_t bits = get_uint64_random();
+        const bool sameHigh = (i & 1) != 0;
+        const bool sameLow = (i & 6) == 0;  // one iteration in four of those compares equal values
+
+        const int64_t s = static_cast<int64_t>(bits);
+        check(int128_t(sameLow ? bits : al, sameHigh ? SignExtension(s) : ah), s, bits, SignExtension(s));
+        check(int128_t(sameLow ? bits : al, sameHigh ? 0ull : ah), bits, bits, 0ull);
+        const int32_t s32 = static_cast<int32_t>(bits);
+        const uint64_t s32Low = static_cast<uint64_t>(static_cast<int64_t>(s32));
+        check(int128_t(sameLow ? s32Low : al, sameHigh ? SignExtension(s32) : ah), s32, s32Low, SignExtension(s32));
+    }
+}
+// Comparisons with a floating point scalar compare real numbers. They used to convert the scalar to
+// int128_t first, which truncated it towards zero: int128_t(-2) == -2.5 held, int128_t(-2) > -2.5 did
+// not, and NaN, the infinities and 1e39 saturated and compared equal to the ends of the range. Each
+// row gives the order of one value against every scalar column, from Python's exact comparison of an
+// int with a float: '<' the value is below the scalar, '=' equal, '>' above, 'u' unordered. Integral
+// scalars are still widened instead, see CompareWithIntegralScalars.
+TEST(int128_t, CompareWithFloatingPointIsExact)
+{
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double doubles[] = {0.0,     -0.0,    0.5,     -0.5,     1.0,     -1.0,     2.5,     -2.5,     -2.0,
+                              0x1p53,  -0x1p53, 0x1.0000000000001p53,   -0x1.0000000000001p53,   0x1p63,   -0x1p63,
+                              0x1p64,  -0x1p64, 0x1.fffffffffffffp126,  -0x1.fffffffffffffp126,  0x1p127,  -0x1p127,
+                              -0x1.0000000000001p127,  1e39,    -1e39,   DBL_MAX,  -DBL_MAX, DBL_MIN,  -DBL_MIN, inf,
+                              -inf,    nan};
+    const float finf = std::numeric_limits<float>::infinity();
+    const float fnan = std::numeric_limits<float>::quiet_NaN();
+    const float floats[] = {0.0f,    -0.0f,    2.5f,     -2.5f,    0x1p24f, -0x1p24f, 0x1.000002p24f, 0x1p64f,
+                            -0x1p64f, 0x1.fffffep126f,  0x1p127f, -0x1p127f, finf,    -finf,    fnan};
+
+    const struct {
+        uint64_t low, high;
+        const char* vsDouble;
+        const char* vsFloat;
+    } rows[] = {
+        {0x0000000000000000ull, 0x0000000000000000ull, "==<><><>><><><><><><>><><><><>u", "==<><><<><<><>u"},  // 0
+        {0x0000000000000001ull, 0x0000000000000000ull, ">>>>=><>><><><><><><>><><>>><>u", ">><><><<><<><>u"},  // 1
+        {0xFFFFFFFFFFFFFFFFull, 0xFFFFFFFFFFFFFFFFull, "<<<<<=<>><><><><><><>><><><<<>u", "<<<><><<><<><>u"},  // -1
+        {0x0000000000000002ull, 0x0000000000000000ull, ">>>>>><>><><><><><><>><><>>><>u", ">><><><<><<><>u"},  // 2
+        {0xFFFFFFFFFFFFFFFEull, 0xFFFFFFFFFFFFFFFFull, "<<<<<<<>=<><><><><><>><><><<<>u", "<<<><><<><<><>u"},  // -2
+        {0x0000000000000003ull, 0x0000000000000000ull, ">>>>>>>>><><><><><><>><><>>><>u", ">>>><><<><<><>u"},  // 3
+        {0xFFFFFFFFFFFFFFFDull, 0xFFFFFFFFFFFFFFFFull, "<<<<<<<<<<><><><><><>><><><<<>u", "<<<<<><<><<><>u"},  // -3
+        {0x0020000000000000ull, 0x0000000000000000ull, ">>>>>>>>>=><><><><><>><><>>><>u", ">>>>>>><><<><>u"},  // 2^53
+        {0x0020000000000001ull, 0x0000000000000000ull, ">>>>>>>>>>><><><><><>><><>>><>u", ">>>>>>><><<><>u"},  // 2^53+1
+        {0xFFE0000000000000ull, 0xFFFFFFFFFFFFFFFFull, "<<<<<<<<<<=<><><><><>><><><<<>u", "<<<<<<<<><<><>u"},  // -2^53
+        {0xFFDFFFFFFFFFFFFFull, 0xFFFFFFFFFFFFFFFFull, "<<<<<<<<<<<<><><><><>><><><<<>u", "<<<<<<<<><<><>u"},  // -(2^53+1)
+        {0x8000000000000000ull, 0x0000000000000000ull, ">>>>>>>>>>>>>=><><><>><><>>><>u", ">>>>>>><><<><>u"},  // 2^63
+        {0x8000000000000000ull, 0xFFFFFFFFFFFFFFFFull, "<<<<<<<<<<<<<<=<><><>><><><<<>u", "<<<<<<<<><<><>u"},  // -2^63
+        {0x0000000000000000ull, 0x0000000000000001ull, ">>>>>>>>>>>>>>>=><><>><><>>><>u", ">>>>>>>=><<><>u"},  // 2^64
+        {0x0000000000000000ull, 0xFFFFFFFFFFFFFFFFull, "<<<<<<<<<<<<<<<<=<><>><><><<<>u", "<<<<<<<<=<<><>u"},  // -2^64
+        {0xFFFFFFFFFFFFFFFFull, 0xFFFFFFFFFFFFFFFEull, "<<<<<<<<<<<<<<<<<<><>><><><<<>u", "<<<<<<<<<<<><>u"},  // -2^64-1
+        {0x0000000000000000ull, 0x7FFFFFFFFFFFFC00ull, ">>>>>>>>>>>>>>>>>=><>><><>>><>u", ">>>>>>>>>><><>u"},  // 2^127-2^74
+        {0x0000000000000001ull, 0x7FFFFFFFFFFFFC00ull, ">>>>>>>>>>>>>>>>>>><>><><>>><>u", ">>>>>>>>>><><>u"},  // 2^127-2^74+1
+        {0x0000000000000000ull, 0x8000000000000400ull, "<<<<<<<<<<<<<<<<<<=<>><><><<<>u", "<<<<<<<<<<<><>u"},  // -(2^127-2^74)
+        {0x0000000000000000ull, 0x7FFFFF8000000000ull, ">>>>>>>>>>>>>>>>><><>><><>>><>u", ">>>>>>>>>=<><>u"},  // (2^24-1)*2^103
+        {0xFFFFFFFFFFFFFFFFull, 0x7FFFFFFFFFFFFFFFull, ">>>>>>>>>>>>>>>>>>><>><><>>><>u", ">>>>>>>>>><><>u"},  // MAX
+        {0x0000000000000001ull, 0x8000000000000000ull, "<<<<<<<<<<<<<<<<<<<<>><><><<<>u", "<<<<<<<<<<<><>u"},  // MIN+1
+        {0x0000000000000000ull, 0x8000000000000000ull, "<<<<<<<<<<<<<<<<<<<<=><><><<<>u", "<<<<<<<<<<<=<>u"},  // MIN
+    };
+
+    // all six operators, with the scalar on either side, against the expected relation
+    const auto check = [](const int128_t& v, auto scalar, char relation) {
+        const bool less = relation == '<', equal = relation == '=', greater = relation == '>';
+        EXPECT_EQ(v == scalar, equal) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(v != scalar, !equal) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(v < scalar, less) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(v <= scalar, less || equal) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(v > scalar, greater) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(v >= scalar, greater || equal) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(scalar == v, equal) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(scalar != v, !equal) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(scalar < v, greater) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(scalar <= v, greater || equal) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(scalar > v, less) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+        EXPECT_EQ(scalar >= v, less || equal) << "v=" << (std::string)v << ", scalar=" << std::hexfloat << scalar;
+    };
+
+    for (const auto& row : rows) {
+        const int128_t v(row.low, row.high);
+        ASSERT_EQ(strlen(row.vsDouble), std::extent_v<decltype(doubles)>);
+        ASSERT_EQ(strlen(row.vsFloat), std::extent_v<decltype(floats)>);
+        for (size_t j = 0; j < std::extent_v<decltype(doubles)>; ++j) {
+            check(v, doubles[j], row.vsDouble[j]);
+        }
+        for (size_t j = 0; j < std::extent_v<decltype(floats)>; ++j) {
+            check(v, floats[j], row.vsFloat[j]);
+        }
+    }
+    // a long double goes through double, which on every supported compiler holds these exactly
+    check(int128_t(-3ll), -2.5L, '<');
+    check(int128_t(-2ll), -2.5L, '>');
+
+    // the same in constant evaluation
+    constexpr int128_t max(~0ull, 0x7FFFFFFFFFFFFFFFull);
+    constexpr int128_t min(0ull, 0x8000000000000000ull);
+    constexpr double cnan = std::numeric_limits<double>::quiet_NaN();
+    constexpr double cinf = std::numeric_limits<double>::infinity();
+    static_assert(int128_t(-2) != -2.5 && int128_t(-2) > -2.5 && int128_t(-3) < -2.5 && -2.5 < int128_t(-2) && -2.5f > int128_t(-3));
+    static_assert(!(int128_t(-1) == cnan) && int128_t(-1) != cnan && !(int128_t(-1) < cnan) && !(cnan >= int128_t(-1)));
+    static_assert(max < cinf && max < 1e39 && max < 0x1p127 && min > -cinf && min > -1e39 && min == -0x1p127 && min > -0x1.0000000000001p127);
+    static_assert(int128_t() == -0.0 && int128_t() > -0.5 && int128_t() < 0.5);
+}
+// operator*=(T) used to accept any operand that converted to uint64_t, so a uint128_t, a float128 or a
+// fixed_point128 went through a conversion operator and was truncated: int128_t(3) * uint128_t(2^64+1)
+// gave 3. Such operands now fail to compile, as they already did for the other arithmetic operators,
+// and the builtin operands keep working.
+TEST(int128_t, MultiplyRejectsTheOtherSignedness)
+{
+    static_assert(!Multipliable<int128_t, uint128_t>, "int128_t * uint128_t must not compile");
+    static_assert(!MultiplyAssignable<int128_t, uint128_t>, "int128_t *= uint128_t must not compile");
+    static_assert(!MultiplyAssignable<int128_t, float128>, "int128_t *= float128 must not compile");
+    static_assert(!MultiplyAssignable<int128_t, fixed_point128<20>>, "int128_t *= fixed_point128 must not compile");
+    static_assert(Multipliable<int128_t, int128_t> && Multipliable<int128_t, int> && Multipliable<int128_t, int64_t>);
+    static_assert(Multipliable<int128_t, uint64_t> && Multipliable<int128_t, double> && Multipliable<int, int128_t>);
+    static_assert(Multipliable<double, int128_t> && MultiplyAssignable<int128_t, int64_t> && MultiplyAssignable<int128_t, double>);
+    static_assert(MultiplyAssignable<int128_t, int128_t> && MultiplyAssignable<int128_t, uint32_t>);
+
+    // and the accepted forms compute the full product
+    EXPECT_TRUE(int128_t(3) * int128_t(1ull, 1ull) == int128_t(3ull, 3ull));
+    EXPECT_TRUE(int128_t(-1) * UINT64_MAX == int128_t(1ull, ~0ull));  // -(2^64-1)
+    EXPECT_TRUE(-3 * int128_t(1ull, 1ull) == -int128_t(3ull, 3ull));
+}
+// Whether an operation may throw is part of the interface: generic code branches on it, and a
+// container only moves elements whose move constructor is noexcept. Division, modulo and the
+// logarithms throw on a zero or out of domain operand and must not claim otherwise.
+TEST(int128_t, NoexceptContracts)
+{
+    int128_t a, b;
+
+    static_assert(noexcept(a + b) && noexcept(a - b) && noexcept(a * b));
+    static_assert(noexcept(a + 1) && noexcept(1 + a) && noexcept(a * -1) && noexcept(-2 * a) && noexcept(a - 1) && noexcept(1 - a));
+    static_assert(noexcept(a += b) && noexcept(a -= b) && noexcept(a *= b) && noexcept(a &= b) && noexcept(a |= b) && noexcept(a ^= b));
+    static_assert(noexcept(a & b) && noexcept(a | b) && noexcept(a ^ b) && noexcept(a & -1) && noexcept(a | 1u) && noexcept(a ^ 1ull));
+    static_assert(noexcept(-1 & a) && noexcept(1u | a) && noexcept(1ull ^ a));
+    static_assert(noexcept(a << 3) && noexcept(a >> 3) && noexcept(a <<= 3) && noexcept(a >>= 3) && noexcept(1 << a) && noexcept(-1 >> a));
+    static_assert(noexcept(a == b) && noexcept(a != b) && noexcept(a < b) && noexcept(a <= b) && noexcept(a > b) && noexcept(a >= b));
+    static_assert(noexcept(a == -1) && noexcept(-1 == a) && noexcept(a < -1) && noexcept(-1 < a) && noexcept(a <= 2.5) && noexcept(2.5 >= a));
+    static_assert(noexcept(~a) && noexcept(-a) && noexcept(+a) && noexcept(!a) && noexcept(abs(a)));
+    static_assert(noexcept(++a) && noexcept(a++) && noexcept(--a) && noexcept(a--));
+    static_assert(noexcept(sqr(a)) && noexcept(sqrt(a)) && noexcept(pow(a, 2u)) && noexcept(lzcnt128(a)));
+    static_assert(noexcept(static_cast<double>(a)) && noexcept(static_cast<float>(a)) && noexcept(static_cast<int64_t>(a)) && noexcept(a.hex()));
+    static_assert(noexcept(int128_t(-1)) && noexcept(int128_t(-1.5)) && noexcept(int128_t("-1")));
+    static_assert(std::is_nothrow_copy_constructible_v<int128_t> && std::is_nothrow_move_constructible_v<int128_t>);
+    static_assert(std::is_nothrow_copy_assignable_v<int128_t> && std::is_nothrow_move_assignable_v<int128_t>);
+
+    // the operations that throw
+    static_assert(!noexcept(a / b) && !noexcept(a % b) && !noexcept(a / -2) && !noexcept(a % -2) && !noexcept(a /= b) && !noexcept(a %= b));
+    static_assert(!noexcept(-2 / a) && !noexcept(-2 % a) && !noexcept(a / 2.0));
+    static_assert(!noexcept(log2(a)) && !noexcept(log(a)) && !noexcept(log10(a)));
+    SUCCEED();
+}
+// The negative branch of log() and log10() never ran. A negative argument is outside the domain, as
+// zero is, and the most negative value is no exception.
+TEST(int128_t, LogFunctionsRejectNegatives)
+{
+    const int128_t min(0ull, 0x8000000000000000ull);
+    EXPECT_THROW((void)log(int128_t(-1ll)), std::domain_error);
+    EXPECT_THROW((void)log10(int128_t(-1ll)), std::domain_error);
+    EXPECT_THROW((void)log(min), std::domain_error);
+    EXPECT_THROW((void)log10(min), std::domain_error);
+    EXPECT_THROW((void)log2(min), std::domain_error);
+    // sqrt() is noexcept and documented to answer zero instead
+    EXPECT_EQ(sqrt(min), 0ull);
+    EXPECT_EQ(sqrt(int128_t(-5ll)), 0ull);
+}
+// log10() at both sides of every power of ten that fits, and log() at both sides of ceil(e^k) - the
+// smallest integer whose natural log is k - for a spread of k. The random tests cannot reach these: a
+// uniform operand lands on a boundary with negligible probability. The ceil(e^k) values come from
+// Python's decimal module at 80 significant digits.
+TEST(int128_t, LogAndLog10Boundaries)
+{
+    const auto powers = PowersOfTen();
+    for (uint64_t k = 1; k < powers.size(); ++k) {
+        EXPECT_EQ(log10(powers[k]), k) << "10^" << k;
+        EXPECT_EQ(log10(powers[k] - int128_t(1ll)), k - 1) << "10^" << k << " - 1";
+    }
+
+    const struct {
+        const char* boundary;
+        uint64_t expo;
+    } boundaries[] = {
+        {"3", 1},
+        {"8", 2},
+        {"22027", 10},
+        {"235385266837019986", 40},
+        {"4727839468229346562", 43},
+        {"12851600114359308276", 44},  // above 2^63, still in the low QWORD
+        {"2293783159469609879099352841", 63},
+        {"6235149080811616882909238709", 64},
+        {"22352466037347150474430657323327147399", 86},
+        {"60760302250568721495223289381302760753", 87},
+        {"165163625499400185552832979626485876707", 88},
+    };
+    for (const auto& b : boundaries) {
+        const int128_t x(b.boundary);
+        EXPECT_EQ(log(x), b.expo) << "at ceil(e^" << b.expo << ") = " << b.boundary;
+        EXPECT_EQ(log(x - int128_t(1ll)), b.expo - 1) << "just below ceil(e^" << b.expo << ") = " << b.boundary;
+    }
+
+    // the top of the range: 10^38 <= max < 10^39, e^88 <= max < e^89, isqrt from Python's math.isqrt
+    const int128_t max(~0ull, 0x7FFFFFFFFFFFFFFFull);
+    EXPECT_EQ(log10(max), 38ull);
+    EXPECT_EQ(log(max), 88ull);
+    EXPECT_EQ(log2(max), 126ull);
+    EXPECT_EQ(sqrt(max), 13043817825332782212ull);
+}
+// The parse's sign, prefix and wrap around corners, values from Python reduced modulo 2^128. Overflow
+// wraps like the builtin types, so 2^127 parses as the most negative value.
+TEST(int128_t, ConstructorFromStringSignsAndWrap)
+{
+    const int128_t max(~0ull, 0x7FFFFFFFFFFFFFFFull);
+    const int128_t min(0ull, 0x8000000000000000ull);
+    EXPECT_TRUE(int128_t("-0x80000000000000000000000000000000") == min);
+    EXPECT_TRUE(int128_t("170141183460469231731687303715884105728") == min);    // 2^127 wraps
+    EXPECT_TRUE(int128_t("-170141183460469231731687303715884105729") == max);   // -2^127-1 wraps
+    EXPECT_TRUE(int128_t("340282366920938463463374607431768211457") == int128_t(1ll));  // 2^128+1
+    // a sign without digits, or a second sign, parses as nothing
+    for (const char* text : {"+-5", "--5", "-", "+", "-0x", "- 5", "-0x-5", "0x"}) {
+        EXPECT_TRUE(int128_t(text).is_zero()) << "text=" << text;
+    }
+    // parsing stops at the first character that is not a digit of the detected base
+    EXPECT_TRUE(int128_t("-1.5") == int128_t(-1ll));
+    EXPECT_TRUE(int128_t("1e5") == int128_t(1ll));
+    EXPECT_TRUE(int128_t("-0XFF") == int128_t(-255ll));  // the prefix is case insensitive
+    EXPECT_TRUE(int128_t("\t-42") == int128_t(-42ll));
+    EXPECT_TRUE(int128_t("-000123") == int128_t(-123ll));
+    EXPECT_TRUE(int128_t("-'5") == int128_t(-5ll));     // a digit separator is skipped
+    EXPECT_TRUE(int128_t(std::string("-0x8000000000000000")) == FromInt64(INT64_MIN));
+    // the literal: the minus is applied to 2^127, which wraps to itself
+    EXPECT_TRUE(-170141183460469231731687303715884105728_int128 == min);
+}
+// The generic assignment and the narrow integral constructors had only been evaluated at compile
+// time. opaque() keeps the operands out of the optimizer's sight.
+TEST(int128_t, AssignmentAndConstructionFromScalars)
+{
+    int128_t x;
+    x = opaque(-5);
+    EXPECT_TRUE(x == FromInt64(-5));
+    x = opaque(5ull);
+    EXPECT_TRUE(x == int128_t(5ull, 0ull));
+    x = opaque(UINT64_MAX);
+    EXPECT_TRUE(x == int128_t(UINT64_MAX, 0ull));  // zero extended
+    x = opaque(INT64_MIN);
+    EXPECT_TRUE(x == FromInt64(INT64_MIN));        // sign extended
+    x = opaque(-2.5);
+    EXPECT_TRUE(x == FromInt64(-2));
+    x = opaque(0x1p100);
+    EXPECT_TRUE(x == int128_t(0ull, 1ull << 36));
+    const char* text = "-123";
+    x = text;
+    EXPECT_TRUE(x == FromInt64(-123));
+
+    EXPECT_TRUE(int128_t(opaque(static_cast<signed char>(-3))) == FromInt64(-3));
+    EXPECT_TRUE(int128_t(opaque(static_cast<char>(65))) == FromInt64(65));
+    EXPECT_TRUE(int128_t(opaque(static_cast<unsigned char>(255))) == FromInt64(255));
+    EXPECT_TRUE(int128_t(opaque(static_cast<short>(-32768))) == FromInt64(-32768));
+    EXPECT_TRUE(int128_t(opaque(static_cast<unsigned short>(65535))) == FromInt64(65535));
+    EXPECT_TRUE(int128_t(opaque(static_cast<char16_t>(0xFFFF))) == FromInt64(65535));
+    EXPECT_TRUE(int128_t(opaque(static_cast<char32_t>(0xFFFFFFFF))) == int128_t(0xFFFFFFFFull, 0ull));
+    EXPECT_TRUE(int128_t(opaque(true)) == FromInt64(1));
+}
+// A scalar on the left is widened before the operation, so the result is exact at 128 bits even where
+// the same expression in int64_t would overflow: INT64_MIN / -1 is 2^63 here.
+TEST(int128_t, ScalarOnTheLeftWith64BitExtremes)
+{
+    EXPECT_TRUE(UINT64_MAX + int128_t(1) == int128_t(0ull, 1ull));
+    EXPECT_TRUE(0ull - int128_t(1) == int128_t(-1ll));
+    EXPECT_TRUE(5.0 - int128_t(10) == int128_t(-5ll));
+    EXPECT_TRUE(-7 / int128_t(2) == int128_t(-3ll));
+    EXPECT_TRUE(-7 % int128_t(2) == int128_t(-1ll));
+    EXPECT_TRUE(INT64_MIN / int128_t(-1) == int128_t(0x8000000000000000ull, 0ull));
+    EXPECT_TRUE(INT64_MIN * int128_t(-1) == int128_t(0x8000000000000000ull, 0ull));
+    EXPECT_TRUE(INT64_MIN - int128_t(1) == int128_t(0x7FFFFFFFFFFFFFFFull, ~0ull));
+    EXPECT_TRUE((-1 << int128_t(64)) == int128_t(0ull, ~0ull));
+    EXPECT_TRUE((-1ll >> int128_t(200)) == int128_t(-1ll));
+    EXPECT_TRUE((UINT64_MAX & int128_t(-1)) == int128_t(UINT64_MAX, 0ull));
+}
+// The conversions to the builtin integer types keep the low bits, as a builtin narrowing does.
+TEST(int128_t, NarrowingConversionsTruncate)
+{
+    const int128_t v(0x0000000500000007ull, 0x123ull);
+    EXPECT_EQ(static_cast<int64_t>(v), 21474836487ll);
+    EXPECT_EQ(static_cast<uint64_t>(v), 21474836487ull);
+    EXPECT_EQ(static_cast<int32_t>(v), 7);
+    EXPECT_EQ(static_cast<uint32_t>(v), 7u);
+
+    const int128_t min(0ull, 0x8000000000000000ull);
+    EXPECT_EQ(static_cast<int64_t>(min), 0ll);
+    EXPECT_TRUE(static_cast<bool>(min));
+    EXPECT_EQ(static_cast<int32_t>(int128_t(-1ll)), -1);
+    EXPECT_EQ(static_cast<uint32_t>(int128_t(-1ll)), 4294967295u);
+    EXPECT_EQ(static_cast<uint64_t>(int128_t(-1ll)), UINT64_MAX);
+    EXPECT_EQ(static_cast<int64_t>(int128_t(0x8000000000000000ull)), INT64_MIN);  // 2^63, positive, reads back negative
+    EXPECT_EQ(static_cast<int32_t>(int128_t(0x80000000ull)), INT32_MIN);
+}
+// A floating point divisor is converted first, truncating towards zero as the constructor does, which
+// is the semantics the multiplication has too. A magnitude below one converts to zero, and dividing by
+// it throws.
+TEST(int128_t, DivideAndModuloByFloatingPoint)
+{
+    EXPECT_TRUE(int128_t(-10) / 2.0 == int128_t(-5ll));
+    EXPECT_TRUE(int128_t(-10) % 3.0 == int128_t(-1ll));
+    EXPECT_TRUE(int128_t(-10) / -2.5 == int128_t(5ll));  // -2.5 converts to -2
+    int128_t c(-1000);
+    c /= 4.0f;
+    EXPECT_TRUE(c == int128_t(-250ll));
+    int128_t d(-10);
+    d *= -2.5;
+    EXPECT_TRUE(d == int128_t(20ll));
+
+    int128_t big = -int128_t(0ull, 1ull);  // -2^64
+    big /= 1e19;
+    EXPECT_TRUE(big == int128_t(-1ll));
+    int128_t product(-3);
+    product *= 1e30;  // the double nearest 1e30 is 1000000000000000019884624838656
+    EXPECT_TRUE(product == ReferenceMultiply(int128_t(-3ll), ExpectedFromDouble(1e30)));
+
+    EXPECT_THROW((void)(int128_t(10) / 0.5), std::logic_error);
+    EXPECT_THROW((void)(int128_t(10) % 0.5), std::logic_error);
+    EXPECT_THROW((void)(int128_t(-10) / -0.9), std::logic_error);
+    int128_t e(10);
+    EXPECT_THROW(e /= 0.25f, std::logic_error);
+}
+// The most negative value is its own negation and absolute value, and the compound operators accept an
+// operand that aliases the object. pow() values from Python, reduced modulo 2^128.
+TEST(int128_t, MostNegativeAndAliasing)
+{
+    const int128_t max(~0ull, 0x7FFFFFFFFFFFFFFFull);
+    const int128_t min(0ull, 0x8000000000000000ull);
+    EXPECT_TRUE(abs(min) == min);
+    EXPECT_TRUE(abs(min + int128_t(1ll)) == max);
+    EXPECT_TRUE(abs(int128_t(-1ll)) == int128_t(1ll));
+
+    const int128_t values[] = {int128_t(-7ll), int128_t(7ll), min, max, int128_t(0x0123456789ABCDEFull, 0xFEDCBA9876543210ull)};
+    for (const auto& v : values) {
+        int128_t a = v;
+        const int128_t& alias = a;
+        a /= alias;
+        EXPECT_TRUE(a == int128_t(1ll)) << "v=" << (std::string)v;
+        a = v;
+        a %= alias;
+        EXPECT_TRUE(a.is_zero()) << "v=" << (std::string)v;
+        a = v;
+        a *= alias;
+        EXPECT_TRUE(a == ReferenceMultiply(v, v)) << "v=" << (std::string)v;
+        a = v;
+        a /= -v;
+        // -min is min, so that quotient is 1; every other value divided by its negation is -1
+        EXPECT_TRUE(a == ((v == min) ? int128_t(1ll) : int128_t(-1ll))) << "v=" << (std::string)v;
+    }
+
+    EXPECT_TRUE(pow(int128_t(-2ll), 127u) == min);
+    EXPECT_TRUE(pow(int128_t(-2ll), 128u).is_zero());
+    EXPECT_TRUE(pow(int128_t(-2ll), 126u) == int128_t(0ull, 0x4000000000000000ull));
+    EXPECT_TRUE(pow(min, 2u).is_zero());
+    EXPECT_TRUE(pow(min, 1u) == min);
+    EXPECT_TRUE(pow(int128_t(-1ll), UINT32_MAX) == int128_t(-1ll));
+    EXPECT_TRUE(pow(int128_t(-3ll), 80u) == int128_t(0x3CEA59789C79D441ull, 0x6F32F1EF8B18A2BCull));
+    EXPECT_TRUE(pow(int128_t(-7ll), 45u) == int128_t(0xA6EE598222C2CA19ull, 0xAF7F38482F1CE458ull));
 }
 
 /**********************************************************************

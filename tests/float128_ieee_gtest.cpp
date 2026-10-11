@@ -383,6 +383,243 @@ TEST(float128_ieee, Predicates)
 }
 
 /**********************************************************************
+ * Special operands and the edges of the range
+ *
+ * The exact tables above hold finite, non zero operands. The cases below are the ones they cannot:
+ * infinities, zeros and the sign rules that decide them, NaNs, and the ends of the range. Every
+ * expected encoding comes from exact rationals (reviewer D's encodings_for_proposals.py and
+ * fma_tie_case.txt), not from the library.
+ ***********************************************************************/
+
+TEST(float128_ieee, FmaSpecialOperands)
+{
+    // IEEE 754-2008 7.2 and 6.3: the product's own special cases come first, an infinite addend
+    // wins over a finite product, and a zero sum follows the sign rule of an exact zero.
+    const float128 inf = float128::inf();
+    const float128 zero;
+    const float128 one = float128::one();
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 max = std::numeric_limits<float128>::max();
+    EXPECT_TRUE(IsQuietNan(fma(inf, zero, one)));
+    EXPECT_TRUE(IsQuietNan(fma(zero, -inf, float128::nan())));
+    EXPECT_TRUE(IsQuietNan(fma(zero, inf, float128::signaling_nan())));
+    EXPECT_TRUE(IsQuietNan(fma(inf, float128(2), -inf)));
+    EXPECT_SAME(fma(inf, float128(-2), -inf), -inf);
+    EXPECT_SAME(fma(-inf, -inf, inf), inf);
+    EXPECT_SAME(fma(float128(2), float128(3), inf), inf);
+    EXPECT_SAME(fma(float128(2), float128(3), -inf), -inf);
+    EXPECT_SAME(fma(zero, float128(5), float128(7)), float128(7));
+    EXPECT_SAME(fma(zero, float128(5), -zero), zero);
+    EXPECT_SAME(fma(-zero, float128(5), -zero), -zero);
+    EXPECT_SAME(fma(zero, float128(-5), zero), zero);
+    EXPECT_SAME(fma(float128(2), float128(3), zero), float128(6));
+    EXPECT_SAME(fma(float128(2), float128(3), -zero), float128(6));
+    // a zero addend leaves the product, which underflows to a zero of its own sign
+    EXPECT_SAME(fma(denorm, denorm, -zero), zero);
+    EXPECT_SAME(fma(-denorm, denorm, zero), -zero);
+    // the product is past the range, the sum is not
+    EXPECT_SAME(fma(max, float128(2), -max), max);
+
+    // Exact cancellation: (1 + 2^-60)^2 - (1 + 2^-59) is 2^-120, and 3 * nearest(1/3) - 1 is -2^-114.
+    EXPECT_SAME(fma(one + Pow2(-60), one + Pow2(-60), -(one + Pow2(-59))), Pow2(-120));
+    EXPECT_SAME(fma(Encoded(0x3FFD555555555555, 0x5555555555555555), float128(3), -one), -Pow2(-114));
+
+    // y is (2^113 + 7) / 3 * 2^-112, so 3y = 2 + 7 * 2^-112 is an exact tie above the odd
+    // significand of 2 + 3 * 2^-111: the product rounds it to even, up. An addend of the smallest
+    // subnormal, far below the product, falls off the accumulator and only its sign survives - as
+    // a borrow, which puts the sum below the tie, so fma() rounds down.
+    const float128 y = Encoded(0x3FFE555555555555, 0x555555555555555A);
+    EXPECT_SAME(float128(3) * y, Encoded(0x4000000000000000, 4));
+    EXPECT_SAME(fma(float128(3), y, -denorm), Encoded(0x4000000000000000, 3));
+    EXPECT_SAME(fma(float128(3), y, denorm), Encoded(0x4000000000000000, 4));
+}
+
+TEST(float128_ieee, ExactRemaindersKeepTheSignOfZero)
+{
+    const float128 zero;
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 max = std::numeric_limits<float128>::max();
+
+    // A zero remainder takes the sign of x (IEEE 754-2008 5.3.1, and C's fmod).
+    EXPECT_SAME(fmod(float128(6), float128(3)), zero);
+    EXPECT_SAME(fmod(float128(-6), float128(3)), -zero);
+    EXPECT_SAME(fmod(-zero, float128(3)), -zero);
+    EXPECT_SAME(fmod(zero, float128(-3)), zero);
+    EXPECT_SAME(fmod(max, denorm), zero);
+    EXPECT_SAME(fmod(max, float128(3)), float128(2));
+    EXPECT_SAME(fmod(float128(-5), float128::inf()), float128(-5));
+    EXPECT_SAME(remainder(float128(6), float128(3)), zero);
+    EXPECT_SAME(remainder(float128(-6), float128(3)), -zero);
+    EXPECT_SAME(remainder(-zero, float128(3)), -zero);
+
+    // 3d / 2d is a tie, and the even quotient is 2; 3 * 2^16000 / 7 is a quotient of 4800 digits.
+    EXPECT_SAME(remainder(denorm * float128(3), denorm * float128(2)), -denorm);
+    EXPECT_SAME(remainder(Pow2(16000) * float128(3), float128(7)), float128(-1));
+
+    // The quotient's low bits carry the sign of x / y.
+    int quotient = 0;
+    EXPECT_SAME(remquo(float128(-7), float128(2), &quotient), float128(1));
+    EXPECT_EQ(quotient, -4);
+    EXPECT_SAME(remquo(float128(1000), float128(3), &quotient), float128(1));
+    EXPECT_EQ(quotient, 333 & 0x7F);
+    EXPECT_SAME(remquo(float128(-1000), float128(-3), &quotient), float128(-1));
+    EXPECT_EQ(quotient, 333 & 0x7F);
+
+    // At the top of the range. x / max is 0.75, so the remainder is x - max, exactly; doubling the
+    // partial remainder in floating point, as remquo() used to, overflowed here.
+    const float128 x = Encoded(0x7FFE800000000000, 0);  // 1.5 * 2^16383
+    EXPECT_SAME(remainder(x, max), Encoded(0xFFFCFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFC));
+    EXPECT_SAME(remainder(-x, max), Encoded(0x7FFCFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFC));
+    EXPECT_SAME(remainder(x, -max), Encoded(0xFFFCFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFC));
+    EXPECT_SAME(remquo(x, max, &quotient), Encoded(0xFFFCFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFC));
+    EXPECT_EQ(quotient, 1);
+    // half the largest value is a tie whose even quotient is 0, the next value up is past it
+    const float128 half_max = Encoded(0x7FFDFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+    EXPECT_SAME(remainder(half_max, max), half_max);
+    EXPECT_SAME(remainder(float128::nextUp(half_max), max), Encoded(0xFFFDFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFE));
+
+    EXPECT_TRUE(IsQuietNan(remainder(float128::nan(), float128(1))));
+    EXPECT_TRUE(IsQuietNan(remquo(float128(1), float128::signaling_nan(), &quotient)));
+    EXPECT_EQ(quotient, 0);
+}
+
+TEST(float128_ieee, NeighboursInEveryDirection)
+{
+    const float128 inf = float128::inf();
+    const float128 zero;
+    const float128 one = float128::one();
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 min = std::numeric_limits<float128>::min();
+    const float128 max = std::numeric_limits<float128>::max();
+    const float128 largest_subnormal = Encoded(0x0000FFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+
+    // IEEE 754-2008 5.3.1 nextUp and nextDown, at every boundary a step can cross
+    EXPECT_SAME(float128::nextUp(-inf), -max);
+    EXPECT_SAME(float128::nextUp(inf), inf);
+    EXPECT_SAME(float128::nextDown(inf), max);
+    EXPECT_SAME(float128::nextDown(-inf), -inf);
+    EXPECT_SAME(float128::nextUp(max), inf);
+    EXPECT_SAME(float128::nextDown(-max), -inf);
+    EXPECT_SAME(float128::nextUp(-denorm), -zero);
+    EXPECT_SAME(float128::nextDown(denorm), zero);
+    EXPECT_SAME(float128::nextUp(-zero), denorm);
+    EXPECT_SAME(float128::nextDown(zero), -denorm);
+    EXPECT_SAME(float128::nextUp(-min), -largest_subnormal);
+    EXPECT_SAME(float128::nextDown(-largest_subnormal), -min);
+    EXPECT_SAME(float128::nextUp(-one), Encoded(0xBFFEFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF));
+    EXPECT_SAME(float128::nextDown(-one), Encoded(0xBFFF000000000000, 1));
+    EXPECT_TRUE(IsQuietNan(float128::nextUp(float128::signaling_nan())));
+    EXPECT_TRUE(IsQuietNan(float128::nextDown(float128::nan())));
+
+    // nextafter returns y itself when the two are equal, so the sign of a zero comes from y
+    EXPECT_SAME(nextafter(zero, -zero), -zero);
+    EXPECT_SAME(nextafter(-zero, zero), zero);
+    EXPECT_SAME(nextafter(-one, -one), -one);
+    EXPECT_SAME(nextafter(inf, zero), max);
+    EXPECT_SAME(nextafter(-inf, zero), -max);
+    EXPECT_SAME(nextafter(-denorm, float128(-1)), Encoded(0x8000000000000000, 2));
+    EXPECT_SAME(nexttoward(-one, -inf), Encoded(0xBFFF000000000000, 1));
+}
+
+TEST(float128_ieee, NarrowingSpecialsAndEdges)
+{
+    const float128 one = float128::one();
+    // A float NaN keeps its sign and the top of its payload, and a signaling one is quieted.
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(-float128(std::bit_cast<float>(0x7FC00123u)))), 0xFFC00123u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(float128::signaling_nan())), 0x7FC00000u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(-float128::inf())), 0xFF800000u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(-float128())), 0x80000000u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(std::numeric_limits<float128>::max())), 0x7F800000u);
+    // the overflow threshold of float is a tie, which goes to the even neighbour: up, to infinity
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(float128(FLT_MAX) + Pow2(103))), 0x7F800000u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(float128(FLT_MAX) + Pow2(102))), 0x7F7FFFFFu);
+    // half the smallest subnormal ties with zero; one and a half of it rounds to two
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(Pow2(-150))), 0u);
+    EXPECT_EQ(std::bit_cast<uint32_t>(static_cast<float>(-Pow2(-149) * float128(1.5))), 0x80000002u);
+
+    // the same edges for double
+    EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(float128(DBL_MAX) + Pow2(970))), 0x7FF0000000000000ull);
+    EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(float128(DBL_MAX) + Pow2(963))), 0x7FEFFFFFFFFFFFFFull);
+    EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(float128(DBL_MIN) * (one - Pow2(-60)))), 0x0010000000000000ull);
+    EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(-Pow2(-1080))), 0x8000000000000000ull);
+    EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(std::numeric_limits<float128>::denorm_min())), 0u);
+    EXPECT_EQ(std::bit_cast<uint64_t>(static_cast<double>(float128::signaling_nan())), 0x7FF8000000000000ull);
+}
+
+TEST(float128_ieee, FrexpLogbIlogbOfSpecials)
+{
+    const float128 inf = float128::inf();
+    const float128 zero;
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 max = std::numeric_limits<float128>::max();
+
+    int e = 99;
+    EXPECT_SAME(frexp(-zero, &e), -zero);
+    EXPECT_EQ(e, 0);
+    e = 99;
+    EXPECT_SAME(frexp(-inf, &e), -inf);
+    EXPECT_EQ(e, 0);
+    e = 99;
+    // a signaling NaN is quieted, as every other operation does to it
+    EXPECT_TRUE(IsQuietNan(frexp(float128::signaling_nan(), &e)));
+    EXPECT_EQ(e, 0);
+    EXPECT_SAME(frexp(-denorm, &e), -float128::half());
+    EXPECT_EQ(e, -16493);
+    EXPECT_SAME(frexp(max, &e), Encoded(0x3FFEFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF));
+    EXPECT_EQ(e, 16384);
+
+    EXPECT_SAME(logb(-inf), inf);
+    EXPECT_SAME(logb(-zero), -inf);
+    EXPECT_TRUE(IsQuietNan(logb(float128::signaling_nan())));
+    EXPECT_SAME(logb(denorm), float128(-16494));
+    EXPECT_SAME(logb(-max), float128(16383));
+    EXPECT_EQ(ilogb(max), 16383);
+    EXPECT_EQ(ilogb(-denorm), -16494);
+    EXPECT_EQ(ilogb(-zero), FP_ILOGB0);
+    EXPECT_EQ(ilogb(-inf), INT_MAX);
+}
+
+TEST(float128_ieee, ModfFdimMagnitudeSigns)
+{
+    const float128 inf = float128::inf();
+    const float128 zero;
+    const float128 one = float128::one();
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 max = std::numeric_limits<float128>::max();
+
+    float128 integral;
+    EXPECT_SAME(modf(float128(3), &integral), zero);
+    EXPECT_SAME(integral, float128(3));
+    EXPECT_SAME(modf(float128(-2.5), &integral), -float128::half());
+    EXPECT_SAME(integral, float128(-2));
+    EXPECT_SAME(modf(-denorm, &integral), -denorm);
+    EXPECT_SAME(integral, -zero);
+
+    // fdim is +0 unless x > y, whatever the signs of the zeros
+    EXPECT_SAME(fdim(one, one), zero);
+    EXPECT_SAME(fdim(-zero, zero), zero);
+    EXPECT_SAME(fdim(-inf, -inf), zero);
+    EXPECT_SAME(fdim(inf, -inf), inf);
+    EXPECT_SAME(fdim(max, -max), inf);
+    EXPECT_TRUE(IsQuietNan(fdim(one, float128::signaling_nan())));
+
+    // the zeros compare equal, so which one comes back is decided on the sign, in either order
+    EXPECT_SAME(fmax(-zero, zero), zero);
+    EXPECT_SAME(fmax(zero, -zero), zero);
+    EXPECT_SAME(fmin(zero, -zero), -zero);
+    EXPECT_SAME(fmin(-zero, zero), -zero);
+    EXPECT_SAME(fmaxmag(-zero, zero), zero);
+    EXPECT_SAME(fminmag(-zero, zero), -zero);
+    EXPECT_SAME(fmaxmag(one, -one), one);
+    EXPECT_SAME(fminmag(one, -one), -one);
+    EXPECT_SAME(fminmag(-inf, one), one);
+    EXPECT_SAME(fmaxmag(-inf, one), -inf);
+    EXPECT_SAME(fmaxmag(float128(2), float128(-3)), float128(-3));
+    EXPECT_SAME(fminmag(float128(-3), float128(2)), float128(2));
+    EXPECT_TRUE(IsQuietNan(fmaxmag(float128::nan(), fp128::nan("7"))));
+}
+
+/**********************************************************************
  * Special values of the recommended functions (IEEE 754-2008 9.2.1)
  ***********************************************************************/
 
@@ -436,12 +673,19 @@ TEST(float128_ieee, PowSpecialValues)
     EXPECT_SAME(pow(float128(3), 70), float128("2503155504993241601315571986085849"));
     EXPECT_SAME(pow(float128(2), -3), float128(0.125));
 
-    // A large exponent on a base near one is an ordinary finite value; it used to overflow.
+    // A large exponent on a base near one is an ordinary finite value; it used to overflow. The
+    // references are correctly rounded (mpmath), and the bound is the 4 + 2.5 |y log2 x| ulp pow()
+    // documents, which for these is 4: |y log2(1 + 2^-40)| is at most 0.004.
     const float128 base = one + Pow2(-40);
-    for (const float128& y : {float128(12000), float128(-12000), float128(3000000000)}) {
-        const float128 want = exp(y * log1p(Pow2(-40)));
-        EXPECT_TRUE(isfinite(pow(base, y)));
-        EXPECT_LT(fabs(pow(base, y) - want), want * Pow2(-100));
+    const struct {
+        float128 y, want;
+    } large[] = {
+        {float128(12000), Encoded(0x3FFF0000002EE000, 0x044A8A904309D8B1)},
+        {float128(-12000), Encoded(0x3FFEFFFFFFA24000, 0x089572DF79DB2423)},
+        {float128(3000000000), Encoded(0x3FFF00B30EDFC302, 0x839BC35E3C7E0DFD)},
+    };
+    for (const auto& c : large) {
+        EXPECT_LE(Saturate64(UlpDistance(pow(base, c.y), c.want)), 4u) << Bits(c.y);
     }
 }
 
@@ -482,12 +726,10 @@ TEST(float128_ieee, InverseTrigonometricDomain)
     EXPECT_SAME(acos(-one), float128::pi());
     EXPECT_SAME(asin(-float128()), -float128());
 
-    // acos(1 - d) is sqrt(2d) to within d/12 of itself; the Newton iteration this used divided by
-    // sin(acos(x)) and returned a NaN here.
-    const float128 d = Pow2(-100);
-    const float128 near_one = acos(one - d);
-    const float128 approx = sqrt(d << 1);
-    EXPECT_LT(fabs(near_one - approx), approx * Pow2(-95));
+    // acos(1 - d) is about sqrt(2d); the Newton iteration this used divided by sin(acos(x)) and
+    // returned a NaN here. The reference is correctly rounded (mpmath), and the bound the 3 ulp of
+    // the acos accuracy test: comparing against sqrt(2d) allowed 2^17 ulp.
+    EXPECT_LE(Saturate64(UlpDistance(acos(one - Pow2(-100)), Encoded(0x3FCD6A09E667F3BC, 0xC908B2FB1366EC78))), 3u);
 }
 
 TEST(float128_ieee, LargeTrigonometricArguments)

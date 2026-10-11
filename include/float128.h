@@ -70,6 +70,8 @@
 #include <functional> // std::hash
 #include <istream>
 #include <limits>
+#include <memory>   // std::unique_ptr, for the workspace of a decimal input past forty digits
+#include <new>      // std::nothrow
 #include <ostream>
 #include "fp128_shared.h"
 #include "fp128_decimal.h"
@@ -94,7 +96,8 @@ namespace detail
 {
 /// @brief Renders a float128 as text. Defined below, declared here because the conversions to a
 ///        string delegate to it.
-[[nodiscard]] std::string render(const float128& value, char style, int32_t precision, bool uppercase, bool alternate, char sign_char);
+[[nodiscard]] std::string render(const float128& value, char style, int32_t precision, bool uppercase, bool alternate, char sign_char,
+                                 bool bare_hex = false);
 }  // namespace detail
 
 /// @brief User-defined literal for constructing float128 from a string.
@@ -825,10 +828,23 @@ public:
     template <typename T> constexpr float128(T x) noexcept : low(0), high(0)
     {
         if constexpr (std::is_floating_point_v<T>) {
-            if constexpr (std::is_same_v<T, long double> && LDBL_MANT_DIG != 53)
+            if constexpr (std::is_same_v<T, long double> && LDBL_MANT_DIG != 53) {
                 *this = from_long_double(x);
-            else
+            } else if constexpr (std::is_same_v<T, float>) {
+                // A signaling NaN is the invalid operation, as the double constructor has it. The
+                // hardware conversion to double quiets one before that constructor could see it, so
+                // it is detected here, and quieted first so that every compiler delivers the same
+                // quiet NaN, its payload kept.
+                const uint32_t bits = std::bit_cast<uint32_t>(x);
+                if ((bits & 0x7F800000u) == 0x7F800000u && (bits & 0x003FFFFFu) != 0 && (bits & 0x00400000u) == 0) {
+                    detail::raise_flags(FE_INVALID);
+                    *this = float128(static_cast<double>(std::bit_cast<float>(bits | 0x00400000u)));
+                } else {
+                    *this = float128(static_cast<double>(x));
+                }
+            } else {
                 *this = float128(static_cast<double>(x));
+            }
             return;
         } else if constexpr (std::is_same_v<char*, T> || std::is_same_v<unsigned char*, T> || std::is_same_v<const unsigned char*, T>) {
             *this = float128(static_cast<const char*>(x));
@@ -888,9 +904,12 @@ public:
         if (*body == '-' || *body == '+')
             ++body;
         if (body[0] == '0' && (body[1] == 'x' || body[1] == 'X')) {
-            // std::from_chars takes a hexadecimal number without its prefix.
-            if (from_chars(body + 2, end, *this, std::chars_format::hex).ec == std::errc {} && *x == '-')
+            // std::from_chars takes a hexadecimal number without its prefix. A value out of range
+            // comes back as the infinity or zero it rounds to, and takes the sign as well: only
+            // text that is no number at all leaves the value zero. "-0x1p100000" used to read +inf.
+            if (from_chars(body + 2, end, *this, std::chars_format::hex).ec != std::errc::invalid_argument && *x == '-') {
                 invert_sign();
+            }
             return;
         }
         from_chars(x, end, *this);
@@ -1868,10 +1887,15 @@ public:
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_finite() const noexcept { return !is_special(); }
     /**
-     * @brief Tests if the value is subnormal
-     * @return True when the value is subnormal
+     * @brief Tests if the value is subnormal: non zero, and below the smallest normal magnitude.
+     *
+     * A zero shares the exponent field of the subnormals but is not one of them, as IEEE 754's
+     * isSubnormal has it. The arithmetic itself tests the raw field (see get_components()), where
+     * treating a zero alike is harmless and saves the test of the fraction.
+     *
+     * @return True when the value is subnormal, false for a zero.
      */
-    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_subnormal() const noexcept { return get_exponent_bits() == 0; }
+    [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_subnormal() const noexcept { return get_exponent_bits() == 0 && (low | get_fraction_bits()) != 0; }
     /**
      * @brief Tests if the value is normal (not zero, subnormal, infinite, or NaN)
      * @return True if and only if the value is normal
@@ -1925,13 +1949,17 @@ public:
     }
     /**
      * @brief Returns if the value is an integer (fraction is zero).
-     * @return True when the value is an integer.
+     * @return True when the value is an integer, either zero included; false for an infinity or a NaN.
      */
     [[nodiscard]] FP128_FORCE_INLINE constexpr bool is_int() const
     {
         // An infinity or a NaN has an exponent beyond every integer's, but is not one.
         if (is_special())
             return false;
+        // A zero's exponent field reads as the lowest exponent of all, which the test below would
+        // take for a value under one.
+        if (is_zero())
+            return true;
         int32_t expo = get_exponent();
         if (expo < 0)
             return false;
@@ -2105,7 +2133,9 @@ public:
         e = get_exponent();
         s = get_sign();
 
-        if (is_subnormal()) {
+        // The raw exponent field rather than is_subnormal(): a zero takes this branch too, which
+        // leaves its components zero, and the test stays a single compare on the hot path.
+        if (get_exponent_bits() == 0) {
             // shift the bits to the left so the msb is on bit 112
             auto shift = FRAC_BITS - static_cast<int32_t>(log2(l, h));
             shift_left128_inplace_safe(l, h, shift);
@@ -2940,36 +2970,92 @@ public:
     [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 phi() noexcept { return float128(0x7C15F39CC0605CEE, 0x9E3779B97F4A, 0x3FFF, 0); }
     /// @}
     /**
-     * @brief calculates 10^e
-     * @param e integer exponent, in the range
+     * @brief Calculates 10^e.
+     *
+     * Exact for 0 <= e <= 48, where 10^e is representable. Otherwise the power is formed in double
+     * word arithmetic - a pair (hi, lo) whose sum carries about 226 bits, the error of each product
+     * recovered exactly with fma() - and rounded once, at the end, in the current direction.
+     *
+     * Measured against exact rationals for every e from -4970 to 4935 in all four rounding
+     * directions (2026-10-10): correctly rounded, with exactly the exception flags of a single
+     * rounding, everywhere except exp10(-4931) rounding upward, which is one ulp high. Close to the
+     * subnormal range the cross terms of the last products fall below the subnormal grid and are
+     * rounded there, which can cost the last bit; the bound is 1 ulp in every direction.
+     *
+     * The previous version squared and multiplied the rounded 0.1 itself, carrying its error and
+     * every rounding along: exp10(-100) was 66 ulp off and exp10(-4000) 1809, and the directed
+     * modes drifted further still, up to 3453 ulp.
+     *
+     * @param e Integer exponent. Beyond the range of the format the result overflows (e > 4932) or
+     *        underflows (e < -4965) as rounding the exact power would, in the current direction and
+     *        with the same exception flags.
      * @return 10^e
      */
     [[nodiscard]] FP128_INLINE static constexpr float128 exp10(int32_t e) noexcept
     {
-        // check the limits first
-        if (e < -4965) {
-            return 0;
-        } else if (e > 4932) {
-            return inf();
-        }
+        // Past either end of the range the answer is the overflow or the underflow of the current
+        // direction, which scaling one far out produces with its flags.
+        if (e > 4932)
+            return ldexp(one(), SCALE_LIMIT);
+        if (e < -4965)
+            return ldexp(one(), -SCALE_LIMIT);
+        if (std::is_constant_evaluated())
+            return exp10_double_word(e);
+        return exp10_filtered(e);
+    }
 
-        // calculate the exponent optimally
-        float128 res = 1;
-        float128 b;
-        if (e > 0)
-            b = 10;  // 10^1
-        else if (e < 0) {
-            b = tenth();
+    /**
+     * @brief The power of exp10(), for an e whose result is inside the range of the format.
+     *
+     * Binary exponentiation on (hi, lo) pairs. The product of two pairs is hi * bh, whose rounding
+     * error fma() recovers exactly, plus the cross terms, which are 2^-113 of it and are rounded;
+     * the pair is then renormalized so that lo stays below an ulp of hi.
+     *
+     * @param e Exponent, with 10^e inside the range of the format
+     * @return 10^e, rounded once in the current direction.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr float128 exp10_double_word(int32_t e) noexcept
+    {
+        float128 res_hi = one(), res_lo;
+        float128 base_hi = float128(10), base_lo;
+        if (e < 0) {
+            // 0.1 as a pair: tenth() and the binary128 nearest to 0.1 - tenth()
+            base_hi = tenth();
+            base_lo = float128(0x999999999999999A, 0xBF89999999999999);
             e = -e;
         }
-
-        while (e > 0) {
+        // hi and bh may be the same object when squaring: every read of the operands happens
+        // before hi is written.
+        const auto multiply = [](float128& hi, float128& lo, const float128& bh, const float128& bl) {
+            const float128 p = hi * bh;
+            const float128 error = fma(hi, bh, -p);
+            const float128 cross = error + (hi * bl + lo * bh);
+            hi = p + cross;
+            lo = cross - (hi - p);
+        };
+        for (;;) {
             if (e & 1)
-                res *= b;
+                multiply(res_hi, res_lo, base_hi, base_lo);
             e >>= 1;
-            b.square();
+            if (e == 0)
+                break;
+            multiply(base_hi, base_lo, base_hi, base_lo);
         }
-        return res;
+        return res_hi + res_lo;
+    }
+
+    /**
+     * @brief exp10_double_word() at run time, raising only the exceptions the result justifies.
+     *
+     * The cross terms of the products can underflow while the power itself does not.
+     *
+     * @param e Exponent, with 10^e inside the range of the format
+     * @return 10^e
+     */
+    [[nodiscard]] static float128 exp10_filtered(int32_t e) noexcept
+    {
+        detail::flag_filter filter;
+        return filter(exp10_double_word(e));
     }
 
     /// @brief Returns false; this type does not conform to IEEE 754-1985.
@@ -3506,20 +3592,25 @@ public:
 
     /**
      * @brief Retrieves an integer that represents the base-2 exponent of the specified value.
+     *
+     * IEEE 754-2008 logB (5.3.3) with an integer result format: a zero, an infinity and a NaN have
+     * no exponent the result can express, so each is the invalid operation.
+     *
      * @param x The specified value.
-     * @return Integer value, rounded towards the nearest integer.
+     * @return The unbiased exponent of x - that of its leading bit for a subnormal. FP_ILOGB0 for a
+     *         zero, INT_MAX for an infinity and FP_ILOGBNAN for a NaN, each raising invalid.
      */
     [[nodiscard]] friend FP128_INLINE constexpr int32_t ilogb(const float128& x) noexcept
     {
         // The three answers <cmath> reserves for the arguments that have no exponent. A subnormal
         // does have one, but not the one its exponent field holds, so it goes through
         // get_components() with the rest.
-        if (x.is_zero())
-            return FP_ILOGB0;
-        if (x.is_nan())
-            return FP_ILOGBNAN;
-        if (x.is_inf())
-            return INT_MAX;
+        if (x.is_zero() || x.is_special()) {
+            detail::raise_flags(FE_INVALID);
+            if (x.is_zero())
+                return FP_ILOGB0;
+            return x.is_nan() ? FP_ILOGBNAN : INT_MAX;
+        }
 
         uint64_t l = 0, h = 0;
         int32_t expo = 0;
@@ -3906,68 +3997,22 @@ public:
         return filter(root);
     }
     /**
-     * @brief Calculates the reciprocal of a value. y = 1 / x
-     * Using newton iterations: Yn+1 = Yn(2 - x * Yn)
+     * @brief Calculates the reciprocal of a value, 1 / x, correctly rounded.
+     *
+     * The division itself, which rounds once in the current direction. This used to refine a
+     * double seed with Newton iterations, which was a third of the speed of the division (11 M/s
+     * against 35 M/s on MSVC, 10.5 against 37 on Clang, P-core, 2026-10-10) and up to an ulp off:
+     * a subnormal result was rounded twice, and in a directed rounding mode the result could land
+     * on the wrong side.
+     *
      * @param x Input value
-     * @return 1 / x. Returns zero on overflow or division by zero
+     * @return 1 / x. +-0 gives +-inf and raises division by zero, +-inf gives +-0, a NaN is propagated.
      */
     [[nodiscard]] friend FP128_INLINE float128 reciprocal(const float128& x) noexcept
     {
-        static const float128 two = 2;
-        constexpr int max_iterations = 3;
-        constexpr int debug = false;
-        const auto x_sign = x.get_sign();
-        if (x.is_nan())
-            return propagate_nan(x);
-        if (x.is_inf()) {
-            float128 zero;
-            zero.set_sign(x_sign);
-            return zero;
-        }
-        if (x.is_zero()) {
-            detail::raise_flags(FE_DIVBYZERO);
-            return (x_sign) ? -inf() : inf();
-        }
-
-        // get_components() normalizes a subnormal, so the mantissa below is always in [1, 2) and
-        // the Newton iteration sees the same problem whatever the magnitude of x was. Rebuilding
-        // the value from the mantissa alone is also what keeps the scaling exact.
-        uint64_t l = 0, h = 0;
-        int32_t expo = 0;
-        uint32_t sign = 0;
-        x.get_components(l, h, expo, sign);
-        const float128 norm_x(l, h, EXP_BIAS, 0);
-
-        float128 y = 1.0 / static_cast<double>(norm_x);
-
-        if (!y)
-            return y;
-
-        float128 xy, y_prev;
-        // Newton iterations:
-        int i = 0;
-        for (; i < max_iterations && (y_prev != y); ++i) {
-            y_prev = y;
-            xy = norm_x * y;
-            // y = y * (two - xy);
-            y *= two - xy;
-        }
-
-        if constexpr (debug) {
-            static int debug_max_iter = 0;
-            if (i > debug_max_iter || i == max_iterations) {
-                debug_max_iter = i;
-                printf("reciprocal took %i iterations for %.10lf\n", i, static_cast<double>(x));
-            }
-        }
-
-        // The mantissa was divided out above, so undoing the exponent is a scaling rather than a
-        // replacement. Overwriting it, as this used to, was right only while y kept an exponent of
-        // -1, which is every value except the one case y comes out exactly 1: reciprocal() of any
-        // power of two was off by a factor of two, and exp() of a small negative argument with it.
-        y = ldexp(y, -expo);
-        y.set_sign(x_sign);
-        return y;
+        float128 res = float128::one();
+        res /= x;
+        return res;
     }
     /**
      * @brief Factorial reciprocal (inverse). Calculates 1 / x!
@@ -4041,27 +4086,41 @@ public:
         res = (x >= 0 && x < series_len) ? c[x] : float128();
     }
     /**
-     * @brief returns the double factorial of a number
-     * @param x The number to compute the double factorial of. Values below 100 come from a
-     *          precomputed table.
-     * @return x!!, or infinity for the values above the table.
+     * @brief Returns the double factorial of a number, x!! = x * (x - 2) * (x - 4) * ...
+     *
+     * The values below 100 come from a table built during compilation, every product rounded to
+     * nearest. Filling a function local table on first use, as this used to, was a data race when
+     * two threads made the first call together, and under FP128_IEEE_ENV the products took the
+     * rounding direction of whichever caller came first.
+     *
+     * @param x The number to compute the double factorial of.
+     * @return x!!: exact for every odd x up to 51 and every even x up to 74, and within 1 ulp of the
+     *         correctly rounded value up to 99 (each product of the table rounds once, so the error
+     *         can accumulate). (-1)!! is 1, the empty product (2n - 1)!! takes for n = 0. Any other
+     *         negative x is the invalid operation and returns a NaN; x of 100 or more returns
+     *         infinity.
      */
     [[nodiscard]] friend FP128_INLINE float128 double_factorial(int x) noexcept
     {
         constexpr int32_t arr_size = 100;
-        static float128 c[arr_size];
-        if (c[0].is_zero()) {
-            c[0] = 1;
-            c[1] = 1;
-
-            // compute the odd and even double factorials
-            for (int i = 2; i < arr_size - 1; i += 2) {
-                c[i] = c[i - 2] * i;
-                c[i + 1] = c[i - 1] * (i + 1);
+        struct table_t {
+            float128 c[arr_size];  ///< c[i] is i!!
+        };
+        static constexpr table_t table = [] {
+            table_t t {};
+            t.c[0] = float128::one();
+            t.c[1] = float128::one();
+            // the odd and even double factorials
+            for (int32_t i = 2; i < arr_size - 1; i += 2) {
+                t.c[i] = t.c[i - 2] * i;
+                t.c[i + 1] = t.c[i - 1] * (i + 1);
             }
-        }
+            return t;
+        }();
+        if (x < 0)
+            return (x == -1) ? float128::one() : invalid_operation();
         if (x < arr_size)
-            return c[x];
+            return table.c[x];
 
         // TODO: compute the following members
         return float128::inf();
@@ -4279,6 +4338,14 @@ public:
      * infinite, pow(-0, 0.5) a NaN, and every integer exponent beyond 11355 in magnitude overflowed
      * whatever the base, so pow(1 + 2^-40, 12000), which is about 1.00000001, came out infinite.
      *
+     * Accuracy, measured against mpmath and pinned by tests/float128_accuracy_gtest.cpp: within
+     * 4 + 2.5 |y log2(x)| ulp, which is about 41000 ulp next to the overflow and underflow
+     * thresholds, where |y log2(x)| reaches 16383. Both methods below lose about two ulp per unit of
+     * that product - the relative error of log(x), or of every squaring, becomes an absolute error
+     * of the exponent, and the exponential makes it relative again - and holding it to a few ulp
+     * would take an intermediate wider than 113 bits. A y of 1/2 is the square root, correctly
+     * rounded.
+     *
      * @param x Base value
      * @param y Exponent value
      * @return x^y
@@ -4324,6 +4391,12 @@ public:
         // Both finite and non zero. A negative base has a real power only for an integer exponent.
         if (x.is_negative() && !y.is_int())
             return invalid_operation();
+        // x^0.5 is the square root, which is correctly rounded and so exact wherever the root is
+        // representable. Through exp(log(x)/2) it was 300 ulp off at the top of the range and 4000
+        // off sqrt(denorm_min) = 2^-8247, which is exact.
+        if (y == float128::half()) {
+            return sqrt(x);
+        }
         // From here on only the flags the result justifies reach the caller.
         detail::flag_filter filter;
 
@@ -4401,6 +4474,12 @@ public:
     {
         if (t.is_zero())
             return t;
+        // Below 2^-60 the cubic term is under 2^-120 of the result, so t - t^2/2 is the answer to
+        // the last bit. The substitution below would halve t first, which for a subnormal t rounds
+        // away its last bit: log1p(denorm_min) came out zero.
+        if (fabs(t) < float128(0, 0, EXP_BIAS - 60, 0)) {
+            return t - (sqr(t) >> 1);
+        }
 
         const float128 s = t / (float128(2) + t);
         const float128 w = sqr(s);
@@ -4726,9 +4805,28 @@ public:
 
         return x;
     }
+    /// @brief Terms of the cosine series cos1() runs. Up to pi/4, x^32/32! is below 2^-125.
+    static constexpr int32_t COS_TERMS = 16;
+
     /**
      * @brief Calculate the cosine function over a limited range [-0.5pi, 0.5pi]
-     * Since the sin1 function converges faster, call it with the modified angle.
+     *
+     * Up to pi/4, the range the trigonometric functions reduce their argument to, the Maclaurin
+     * series is evaluated as one minus its tail:
+     *
+     *                  2       4       6
+     *                 x       x       x
+     * cos(x) = 1 - ( --- - ( --- - ( --- - ...)))
+     *                 2!      4!      6!
+     *
+     * The tail is at most 0.3 and is formed from the argument alone, so it carries its own last
+     * bits and the subtraction from one rounds once. A zero argument gives exactly one, and so does
+     * any argument whose square is below the last place of one. This used to be computed as
+     * sin1(pi/2 - x), whose series sums to 1 - 2^-113 for x = 0: cos(0) and sin(pi/2) were not one.
+     *
+     * Beyond pi/4 the cosine is the sine of the complement, which stays accurate near pi/2 where the
+     * series above would cancel down to nothing.
+     *
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
      * @return Cosine of x
      */
@@ -4736,7 +4834,18 @@ public:
     {
         constexpr float128 half_pi = float128::half_pi();
         assert(fabs(x) <= half_pi);
-        return (x.is_positive()) ? sin1(half_pi - x) : -sin1(-half_pi - x);
+        if (fabs(x) > float128::quarter_pi()) {
+            return (x.is_positive()) ? sin1(half_pi - x) : -sin1(-half_pi - x);
+        }
+
+        const float128 xx = x * x;
+        float128 tail, factor;
+        fact_reciprocal(2 * COS_TERMS, tail);
+        for (int32_t k = COS_TERMS - 1; k >= 1; --k) {
+            fact_reciprocal(2 * k, factor);
+            tail = factor - xx * tail;
+        }
+        return float128::one() - xx * tail;
     }
     /**
      * @brief Calculate the Sine function
@@ -5173,6 +5282,15 @@ public:
         auto sign = x.get_sign();
         x.set_sign(0);
 
+        // atan(1) is pi/4, which quarter_pi() holds correctly rounded. The Newton iteration below
+        // settles wherever the rounding of its sine and cosine leaves it, an ulp either side, and
+        // acos(0) = 2 atan(1) and atan2(y, y) inherit that.
+        if (x == float128::one()) {
+            float128 res = float128::quarter_pi();
+            res.set_sign(sign);
+            return filter.inexact(res);
+        }
+
         // limit argument to 0..1. x is greater than one here, so the division cannot be by zero.
         if (x > 1) {
             comp = true;
@@ -5573,6 +5691,11 @@ public:
      * evaluated with the modified Lentz algorithm. The fraction converges for every x above one,
      * and fastest where the series form is weakest.
      *
+     * Accuracy, measured against mpmath and pinned by tests/float128_accuracy_gtest.cpp: within
+     * 56 ulp. The worst is just above one, 43 ulp at 1.32, where the fraction converges slowest and
+     * rounds once per step; from 2 on the error was measured below 28 ulp, and below one, where the
+     * answer is 1 - erf(x), below 8.
+     *
      * @param x Input value
      * @return 1 - erf(x)
      */
@@ -5787,12 +5910,17 @@ public:
     /**
      * @brief Gets the mantissa and exponent of a floating-point number.
      * @param x Floating-point value.
-     * @param expptr Floating-point value.
-     * @return Mantissa in the [0.5,1) range.
+     * @param expptr Receives the exponent: zero for a zero, an infinity or a NaN.
+     * @return Mantissa in the [0.5,1) range with the sign of x. A zero or an infinity comes back
+     *         unchanged, a NaN quieted (a signaling one raising invalid, as for every operation).
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr float128 frexp(float128 x, int* expptr) noexcept
     {
-        if (x.is_special() || x.is_zero()) {
+        if (x.is_nan()) {
+            *expptr = 0;
+            return propagate_nan(x);
+        }
+        if (x.is_inf() || x.is_zero()) {
             *expptr = 0;
             return x;
         }
@@ -5848,9 +5976,18 @@ public:
             return FP_ZERO;
         return x.is_subnormal() ? FP_SUBNORMAL : FP_NORMAL;
     }
-    /// @brief True when either operand is a NaN, so that the two do not compare in any order.
+    /**
+     * @brief True when either operand is a NaN, so that the two do not compare in any order.
+     *
+     * This and the five predicates below are IEEE 754-2008's quiet comparisons (5.11): a quiet NaN
+     * operand is an ordinary unordered answer, a signaling one is the invalid operation. The
+     * relational operators are the signaling comparisons instead, which raise invalid for any NaN.
+     * The five below decide unorderedness through this function, which is where the signal comes from.
+     */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool isunordered(const float128& x, const float128& y) noexcept
     {
+        if (x.is_signaling() || y.is_signaling())
+            detail::raise_flags(FE_INVALID);
         return x.is_nan() || y.is_nan();
     }
     /// @brief x > y, false rather than unordered when either is a NaN.
@@ -5963,7 +6100,7 @@ public:
     /// @brief isSignaling: true for a signaling NaN.
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool issignaling(const float128& x) noexcept { return x.is_signaling(); }
     /// @brief isSubnormal: true for a subnormal value, which zero is not.
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool issubnormal(const float128& x) noexcept { return x.is_subnormal() && !x.is_zero(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool issubnormal(const float128& x) noexcept { return x.is_subnormal(); }
     /// @brief isZero: true for either zero.
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool iszero(const float128& x) noexcept { return x.is_zero(); }
     /// @}
@@ -6049,6 +6186,12 @@ public:
 
     /**
      * @brief The representable value next to x in the direction of y.
+     *
+     * A quiet operation, like IEEE 754-2008's nextUp and nextDown that it is built on: stepping
+     * from the largest finite value to infinity, or into the subnormal range or onto zero, raises
+     * neither overflow nor underflow (C's Annex F would raise them). Only a signaling NaN operand
+     * raises an exception, invalid, and is quieted.
+     *
      * @param x Starting value
      * @param y Value giving the direction
      * @return The neighbour of x towards y, or y itself when the two are equal.
@@ -6077,9 +6220,13 @@ public:
      * @param x Dividend, must be finite and non zero
      * @param y Divisor, must be finite and non zero
      * @param quotient Receives the low bits of the integer quotient
+     * @param half Receives how twice the remainder compares with |y|: negative, zero or positive.
+     *        remainder() decides on it, and it is decided here, on the integer mantissas, because
+     *        doubling the remainder in floating point overflows once |y| is above half the largest
+     *        finite value.
      * @return The remainder, with a positive sign.
      */
-    [[nodiscard]] FP128_INLINE static float128 fmod_magnitude(const float128& x, const float128& y, uint64_t& quotient) noexcept
+    [[nodiscard]] FP128_INLINE static float128 fmod_magnitude(const float128& x, const float128& y, uint64_t& quotient, int32_t& half) noexcept
     {
         quotient = 0;
 
@@ -6088,12 +6235,22 @@ public:
         uint32_t sx = 0, sy = 0;
         x.get_components(lx, hx, ex, sx);
         y.get_components(ly, hy, ey, sy);
-
-        if (ex < ey || (ex == ey && uint128_t(lx, hx) < uint128_t(ly, hy)))
-            return fabs(x);
-
-        uint128_t rem(lx, hx);
+        const uint128_t mx(lx, hx);
         const uint128_t mod(ly, hy);
+
+        if (ex < ey || (ex == ey && mx < mod)) {
+            // |x| is the remainder. Both mantissas lead at bit 112, so 2|x| against |y| is mx * 2 on
+            // the same exponent, mx on the next one up, and smaller still below that.
+            if (ex + 1 < ey) {
+                half = -1;
+            } else {
+                const uint128_t twice = (ex == ey) ? (mx << 1) : mx;
+                half = (twice < mod) ? -1 : ((twice == mod) ? 0 : 1);
+            }
+            return fabs(x);
+        }
+
+        uint128_t rem = mx;
         uint128_t block_quotient = rem / mod;
         rem -= block_quotient * mod;
         uint64_t low = 0, high = 0;
@@ -6112,6 +6269,10 @@ public:
             // Only the low bits of the quotient are ever wanted, so the overflow is dropped.
             quotient = (quotient << step) + low;
         }
+
+        // rem is below mod, which is below 2^113, so doubling it stays within 128 bits.
+        const uint128_t twice = rem << 1;
+        half = (twice < mod) ? -1 : ((twice == mod) ? 0 : 1);
 
         if (rem.is_zero())
             return float128();
@@ -6160,14 +6321,19 @@ public:
             return x;
 
         uint64_t bits = 0;
+        int32_t half = 0;
         const float128 magnitude = fabs(y);
-        float128 rem = fmod_magnitude(x, y, bits);
+        float128 rem = fmod_magnitude(x, y, bits, half);
 
-        // fmod leaves the remainder in [0, |y|); the IEEE one is the nearer of that and
-        // |y| - it, with a tie going to whichever leaves an even quotient.
-        const float128 twice = rem << 1;
-        const bool round_up = (twice > magnitude) || (twice == magnitude && (bits & 1) != 0);
+        // fmod leaves the remainder in [0, |y|); the IEEE one is the nearer of that and |y| - it,
+        // with a tie going to whichever leaves an even quotient. Which is nearer comes from the
+        // integer mantissas: doubling rem in floating point, as this used to, overflowed for |y|
+        // above half the largest value, raising overflow for an exact operation and - rounding
+        // toward zero or downward, where the doubled value stops at the largest one - taking the
+        // wrong side.
+        const bool round_up = half > 0 || (half == 0 && (bits & 1) != 0);
         if (round_up) {
+            // rem is at least |y| / 2 here, so the difference is exact (Sterbenz).
             rem -= magnitude;
             ++bits;
         }
@@ -6214,17 +6380,147 @@ public:
         return filter(ldexp(sqrt(sqr(a) + sqr(b) + sqr(c)), expo));
     }
 
-    /// @brief Terms of the Stirling series lgamma() runs. Sixteen reach 2^-119 for an argument of 40.
+    /// @brief Terms of the Stirling series lgamma() runs. Sixteen reach 2^-119 for an argument of 32.
     static constexpr int32_t STIRLING_TERMS = 16;
+    /// @brief Terms of the series lgamma_near_two() runs. For |z| <= 1/2 the last is below 2^-120 of the sum.
+    static constexpr int32_t LGAMMA_NEAR_TWO_TERMS = 58;
+    /// @brief Below this magnitude lgamma() and tgamma() move the argument next to two by the recurrence.
+    static constexpr int32_t GAMMA_RECURRENCE_LIMIT = 32;
+
+    /**
+     * @brief lgamma(2 + z) for |z| <= 1/2, accurate relative to the result.
+     *
+     * The Taylor series of log(gamma) about 2:
+     *
+     *                                     inf      k  zeta(k) - 1   k
+     *     lgamma(2 + z) = (1 - gamma) z +  sum  (-1)  ----------- z
+     *                                     k=2              k
+     *
+     * zeta(k) - 1 is about 2^-k, so a term is about (z/2)^k / k and 58 of them reach past the last
+     * bit for |z| <= 1/2. Every term carries a power of z, so the sum is accurate relative to itself
+     * however close z is to zero - which is what lgamma near its zeros at 1 and 2 needs, and what the
+     * recurrence and Stirling series it replaced there could not give: they formed the answer as a
+     * difference of two values near 80, 2^-106 wide in absolute terms, which was 2^28 ulp at
+     * lgamma(1 + 2^-20) and every bit of lgamma(2 - 2^-100).
+     *
+     * The coefficients are the series' own, rounded to binary128 (ties to even) from mpmath at 400
+     * bits; the first is 1 - gamma, gamma being Euler's constant.
+     *
+     * @param z Offset from two, |z| <= 1/2
+     * @return lgamma(2 + z)
+     */
+    [[nodiscard]] FP128_INLINE static float128 lgamma_near_two(const float128& z) noexcept
+    {
+        constexpr float128 coefficients[LGAMMA_NEAR_TWO_TERMS] = {
+            float128(0xE16CB90701FBFAB5ull, 0x3FFDB0EE6072093Cull),  // 0.42278434
+            float128(0x6461CF62448802EBull, 0x3FFD4A34CC4A60FAull),  // 0.32246703
+            float128(0x68125D0741DF7858ull, 0xBFFB13E001A55760ull),  // -0.067352301
+            float128(0x36BF2242232DCA47ull, 0x3FF951322AC7D848ull),  // 0.020580808
+            float128(0x186D6760C385330Eull, 0xBFF7E404FC218F5Full),  // -0.007385551
+            float128(0xFD490FAE70050172ull, 0x3FF67ADD6EADB6C2ull),  // 0.0028905103
+            float128(0x7CEB67C604C626F6ull, 0xBFF538AC5C2BF8E0ull),  // -0.0011927539
+            float128(0x8BE59CA4DDB5A64Dull, 0x3FF40B36AF86396Eull),  // 0.00050966952
+            float128(0x7C70754606688FA5ull, 0xBFF2D3FD4C76D2FCull),  // -0.00022315476
+            float128(0xA33A61354E004CF2ull, 0x3FF1A127B0F17D65ull),  // 9.9457513e-5
+            float128(0xEF2EFD5F190DC2CDull, 0xBFF078DE5BD7C81Eull),  // -4.4926237e-5
+            float128(0x224C0AE964B1EE44ull, 0x3FEF580DCEE66EB0ull),  // 2.0507213e-5
+            float128(0x2856A464E0AB35D5ull, 0xBFEE3CBC963CE224ull),  // -9.4394883e-6
+            float128(0xB901BBAE75609FD8ull, 0x3FED2597A39F34AAull),  // 4.3748668e-6
+            float128(0x11C76B0E65AC639Bull, 0xBFEC11B2EB767954ull),  // -2.0392158e-6
+            float128(0xF3A02AD5FFB78217ull, 0x3FEB0064CDEB22F0ull),  // 9.5514121e-7
+            float128(0xEBB3D4F1868FBE6Bull, 0xBFE9E2600D93CFD2ull),  // -4.4924692e-7
+            float128(0xD7668ADDDDA6D48Full, 0x3FE8C76BBB3F07A4ull),  // 2.1207185e-7
+            float128(0x7657C89FA5B60F88ull, 0xBFE7AF5A6CBBF8A9ull),  // -1.0043225e-7
+            float128(0xF40C9C591CD909EAull, 0x3FE699B93C2070B0ull),  // 4.7698102e-8
+            float128(0xC6CCA00AFB036818ull, 0xBFE5862C734DF3EAull),  // -2.2711095e-8
+            float128(0xCB258B1DCC5155DFull, 0x3FE47469DACCFADCull),  // 1.0838659e-8
+            float128(0xD035EE5DBF0EDF9Aull, 0xBFE36434A8447AEAull),  // -5.183475e-9
+            float128(0x29E2BE683656F13Bull, 0x3FE2555A877FFD2Cull),  // 2.4836745e-9
+            float128(0xE413CDB83A1538F4ull, 0xBFE147B1679258D0ull),  // -1.1921401e-9
+            float128(0xBC50C1202229AE9Aull, 0x3FE03B15D2B2FC10ull),  // 5.7313672e-10
+            float128(0xF97A755322CE1DB6ull, 0xBFDF2F69A9FABE3Dull),  // -2.7595229e-10
+            float128(0xC41820A7091423A3ull, 0x3FDE24932A337434ull),  // 1.3304764e-10
+            float128(0xC53D3AF6D2812D29ull, 0xBFDD1A7C26EC2523ull),  // -6.4229646e-11
+            float128(0x78E3F2CAD8600E57ull, 0x3FDC11116E693ED9ull),  // 3.1044248e-11
+            float128(0x8281DF041B793D4Bull, 0xBFDB08424CBC543Dull),  // -1.5021384e-11
+            float128(0xF4D51A9815322258ull, 0x3FDA000026E3F644ull),  // 7.2759745e-12
+            float128(0xA0BADB5F2A2D6045ull, 0xBFD8F07C514FC9F0ull),  // -3.5277425e-12
+            float128(0x7A755E9E6B1E780Aull, 0x3FD7E1E2026AAFCDull),  // 1.7119918e-12
+            float128(0x1D78ED65B062543Eull, 0xBFD6D41D56E5EE2Eull),  // -8.3153858e-13
+            float128(0x6BFBE2E26CB30374ull, 0x3FD5C71C7F6F10E3ull),  // 4.0422005e-13
+            float128(0xAD6B4BBD43F5EE38ull, 0xBFD4BACF9A27BC89ull),  // -1.9664756e-13
+            float128(0xE281AFE37085970Eull, 0x3FD3AF28718A10D6ull),  // 9.5736304e-14
+            float128(0x5A75058C37B49BF0ull, 0xBFD2A41A45603E5Bull),  // -4.664076e-14
+            float128(0x8B187BC1BEF29131ull, 0x3FD199999C0716EEull),  // 2.273737e-14
+            float128(0x7E625A92BB8E6DFAull, 0xBFD08F9C1A8DF9D7ull),  // -1.1091399e-14
+            float128(0x4CC5056234AEF19Eull, 0x3FCF8618628D2890ull),  // 5.4136592e-15
+            float128(0x05C6EE82DF30CE0Bull, 0xBFCE7D05F4C31C56ull),  // -2.64388e-15
+            float128(0xA674E2F0035C28C7ull, 0x3FCD745D17B56BA4ull),  // 1.2918959e-15
+            float128(0x66BB45CB97243D92ull, 0xBFCC6C16C1B4D645ull),  // -6.3159355e-16
+            float128(0xC887EB79BCA14271ull, 0x3FCB642C85C023D9ull),  // 3.0893163e-16
+            float128(0xC9A37039036FD052ull, 0xBFCA5C9882D825E9ull),  // -1.5117931e-16
+            float128(0x639EB90C92EA148Aull, 0x3FC9555555698A86ull),  // 7.4014869e-17
+            float128(0x8DAE8C46EE149FD0ull, 0xBFC84E5E0A8022BCull),  // -3.625218e-17
+            float128(0xE882E7B3E6F672F6ull, 0x3FC747AE14838081ull),  // 1.7763568e-17
+            float128(0x13C8EE7D4261693Full, 0xBFC641414146E3E3ull),  // -8.7076316e-18
+            float128(0xA0A0E2D83D68A5C6ull, 0x3FC53B13B13EC2F3ull),  // 4.2700886e-18
+            float128(0x94896C42A8F2EC41ull, 0xBFC43521CFB52085ull),  // -2.0947604e-18
+            float128(0x922DAAC30B4BE8C9ull, 0x3FC32F684BDBA6A9ull),  // 1.0279843e-18
+            float128(0x3B3843DA7A1E5BB0ull, 0xBFC229E4129F4967ull),  // -5.0464683e-19
+            float128(0xBBBA2C3DB2CD6133ull, 0x3FC1249249253F4Cull),  // 2.4781764e-19
+            float128(0xB6A6D988E3DBA6D1ull, 0xBFC01F7047DC8348ull),  // -1.2173498e-19
+            float128(0xBB412D63F4093EF5ull, 0x3FBF1A7B9611F1F7ull),  // 5.9818051e-20
+        };
+        float128 acc = coefficients[LGAMMA_NEAR_TWO_TERMS - 1];
+        for (int32_t k = LGAMMA_NEAR_TWO_TERMS - 2; k >= 0; --k) {
+            acc = coefficients[k] + z * acc;
+        }
+        return z * acc;
+    }
+
+    /**
+     * @brief |sin(pi * x)| for a finite x that is not an integer, without the error of rounding pi * x.
+     *
+     * The integer part of x only changes the sign, and x - round(x) is exact, so the reduction costs
+     * nothing. What is left, f in [-1/2, 1/2], is multiplied by pi as an unevaluated sum: the rounded
+     * product, its exact error from fma(), and the part of pi below the last place of float128::pi().
+     * sin(pi * f) is then sin(p) + cos(p) * e to well past the last bit. Forming sin(pi() * x)
+     * instead, as lgamma() did, rounded the argument before reducing it: next to a pole, where the
+     * sine is as small as x is close to an integer, that rounding was most of the answer.
+     *
+     * @param x Finite value, not an integer, below 2^112 in magnitude
+     * @return |sin(pi * x)|, which is positive.
+     */
+    [[nodiscard]] FP128_INLINE static float128 abs_sin_pi(const float128& x) noexcept
+    {
+        constexpr float128 pi_low(0xA67CC74020BBEA64ull, 0x3F8DCD129024E088ull);  // pi - pi(), from mpmath
+        const float128 f = x - round(x);
+        const float128 p = float128::pi() * f;
+        const float128 e = fma(float128::pi(), f, -p) + pi_low * f;
+        return fabs(sin(p) + cos(p) * e);
+    }
 
     /**
      * @brief Natural logarithm of the absolute value of the gamma function.
      *
-     * Stirling's asymptotic series converges usefully only for a large argument, so a small one is
-     * walked up to 40 with the recurrence gamma(x+1) = x*gamma(x) and the logarithms of the
-     * factors are subtracted off afterwards. A negative argument goes through the reflection
-     * formula, which is why the result is the logarithm of the absolute value: the gamma function
-     * alternates sign between the poles at the non positive integers.
+     * Three regimes:
+     * - |x| < 32: x = n + z with n = round(x), and the recurrence gamma(x + 1) = x * gamma(x) moves the
+     *   argument to 2 + z, where lgamma_near_two() is accurate relative to its result. Every factor
+     *   the recurrence takes is x moved by an integer towards zero, which is exact, so the answer is
+     *   lgamma(2 + z) plus or minus the logarithm of their product: rounded a few times rather than
+     *   cancelled. Next to a pole the factor z is the small one, and its logarithm is the answer.
+     * - x >= 32: Stirling's asymptotic series.
+     * - x <= -32: the reflection formula, as |gamma(x)| = pi / (|sin(pi x)| |x| gamma(-x)), with the
+     *   sine reduced exactly by abs_sin_pi().
+     *
+     * The result is the logarithm of the absolute value: the gamma function alternates sign between
+     * the poles at the non positive integers.
+     *
+     * Accuracy, measured against mpmath and pinned by tests/float128_accuracy_gtest.cpp: within 6 ulp
+     * for x > 0. For x < 0 within the larger of 6 ulp and an absolute error of 2^-110. The absolute
+     * term matters next to the zeros lgamma has on the negative axis - two between each pair of
+     * poles from (-3, -2) to (-32, -31), about 1/n! from the poles - where the answer is a difference
+     * of terms of order log(n!): relative to a result that vanishes there it is unbounded.
      *
      * @param x Input value
      * @return log(|gamma(x)|)
@@ -6240,13 +6536,36 @@ public:
             detail::raise_flags(FE_DIVBYZERO);
             return inf();
         }
-        // gamma(1) and gamma(2) are both one. The recurrence and the series below would reach the
-        // logarithm of 31! and subtract it from itself, which cancels to a small non zero value
-        // rather than to the exact answer.
+        // gamma(1) and gamma(2) are both one, which the reduction below reaches exactly as well;
+        // this only saves the work.
         if (x == float128::one() || x == float128(2))
             return float128();
         // From here on only the flags the result justifies reach the caller.
         detail::flag_filter filter;
+
+        if (fabs(x) < float128(GAMMA_RECURRENCE_LIMIT)) {
+            const float128 n_value = round(x);
+            const float128 z = x - n_value;  // exact, |z| <= 1/2
+            const int32_t n = static_cast<int32_t>(n_value);
+            float128 product = float128::one();
+            if (n >= 2) {
+                // gamma(x) = gamma(2 + z) * (z + 2) * (z + 3) * ... * (z + n - 1)
+                for (int32_t j = 2; j < n; ++j) {
+                    product *= z + float128(j);
+                }
+                return filter(lgamma_near_two(z) + log(product));
+            }
+            // gamma(x) = gamma(2 + z) / ((1 + z) * z * (z - 1) * ... * (z + n)). Of the factors only
+            // 1 + z can round, so its logarithm comes from log1p().
+            for (int32_t k = n; k <= 0; ++k) {
+                product *= z + float128(k);
+            }
+            return filter(lgamma_near_two(z) - (log1p(z) + log(fabs(product))));
+        }
+
+        if (x.is_negative()) {
+            return filter(log(float128::pi() / (abs_sin_pi(x) * fabs(x))) - lgamma(-x));
+        }
 
         constexpr float128 coefficients[STIRLING_TERMS] = {
             float128(0x5555555555555555, 0x555555555555, 0x3FFB, 0),  // B2 / (2*1)
@@ -6267,21 +6586,6 @@ public:
             float128(0x77880C2D3577880C, 0xD1089B142D35, 0x4016, 1),  // B32 / (32*31)
         };
         constexpr float128 half_log_two_pi(0x4A69297920028832, 0xD67F1C864BEB, 0x3FFE, 0);
-        constexpr float128 stirling_limit(0, 0, EXP_BIAS + 5, 0);  // 32, where sixteen terms suffice
-
-        // gamma(x) * gamma(1-x) = pi / sin(pi*x) reflects the negative half onto the positive one,
-        // where the series lives.
-        if (x.is_negative()) {
-            const float128 reflected = sin(float128::pi() * x);
-            return filter(log(float128::pi() / fabs(reflected)) - lgamma(float128::one() - x));
-        }
-
-        // Walk up to where the asymptotic series is accurate, remembering what to divide out.
-        float128 scale_log;
-        while (x < stirling_limit) {
-            scale_log += log(x);
-            x += float128::one();
-        }
 
         const float128 inv_xx = float128::one() / sqr(x);
         float128 series;
@@ -6289,15 +6593,26 @@ public:
             series = (series + coefficients[i]) * inv_xx;
         series = (series + coefficients[0]) / x;
 
-        return filter((x - float128::half()) * log(x) - x + half_log_two_pi + series - scale_log);
+        return filter((x - float128::half()) * log(x) - x + half_log_two_pi + series);
     }
 
     /**
      * @brief The gamma function.
      *
-     * Exact for the small integer arguments, where the answer is a factorial the format holds
-     * without rounding, and exp(lgamma) elsewhere. The exponential is what limits the accuracy: a
-     * logarithm as large as 7000 carries its own last bit into the seventh place of the result.
+     * - The integers up to 38: the factorial, exactly. 37! is the largest factorial a binary128 holds
+     *   without rounding - its odd part has 110 bits - so no partial product of the integers below x
+     *   rounds either.
+     * - |x| < 32: exp(lgamma(2 + z)) multiplied or divided by the exact factors the recurrence takes,
+     *   see lgamma(). The exponential is of a value below 0.3 and the product rounds once per factor,
+     *   so the result is within a few ulp - also next to a pole, where it used to be 2^39 ulp off at
+     *   -1 + 2^-40, and at a tiny argument, where gamma(x) is about 1/x.
+     * - Elsewhere exp(lgamma(x)), with the sign of the interval between the poles. The exponential
+     *   is what limits the accuracy there: a logarithm as large as 11000 carries its own last bit
+     *   into the fourteenth bit from the bottom of the result.
+     *
+     * Accuracy, measured against mpmath and pinned by tests/float128_accuracy_gtest.cpp: exact for
+     * the integers up to 38, within 8 ulp for |x| < 32, and within 8 + 4.5 |lgamma(x)| ulp beyond
+     * that, which reaches about 51000 ulp at either end of the range.
      *
      * @param x Input value
      * @return gamma(x)
@@ -6321,13 +6636,38 @@ public:
         if (x > float128(1756))
             return filter.inexact(inf());
 
-        // 34! is the largest factorial a binary128 holds exactly, so every integer argument up to
-        // 35 comes back with no rounding at all.
-        if (x.is_int() && x <= float128(35)) {
+        // 37! is the largest factorial a binary128 holds exactly, so every integer argument up to
+        // 38 comes back with no rounding at all.
+        if (x.is_int() && x <= float128(38)) {
             float128 result = float128::one();
             for (float128 i = float128(2); i < x; i += float128::one())
                 result *= i;
             return filter(result);
+        }
+
+        if (fabs(x) < float128(GAMMA_RECURRENCE_LIMIT)) {
+            const float128 n_value = round(x);
+            const float128 z = x - n_value;  // exact, |z| <= 1/2
+            const int32_t n = static_cast<int32_t>(n_value);
+            float128 result = exp(lgamma_near_two(z));
+            if (n >= 2) {
+                for (int32_t j = 2; j < n; ++j) {
+                    result *= z + float128(j);
+                }
+                return filter(result);
+            }
+            // gamma(1 + z) = gamma(2 + z) / (1 + z)
+            if (n == 1) {
+                return filter(result / (float128::one() + z));
+            }
+            // Every factor but z itself is at least 1/2 in magnitude, so their product is formed
+            // first and z, which may be subnormal, divides last: gamma(z) is then about 1/z, and
+            // dividing by a subnormal z rounds only once.
+            float128 product = float128::one() + z;
+            for (int32_t k = n; k < 0; ++k) {
+                product *= z + float128(k);
+            }
+            return filter((result / product) / z);
         }
 
         const float128 magnitude = exp(lgamma(x));
@@ -6358,8 +6698,15 @@ namespace detail
 /// @brief Default precision the e, f and g styles use when none is given, as in printf.
 inline constexpr int32_t DEFAULT_PRECISION = 6;
 
-/// @brief Appends the decimal exponent of a scientific form, with a sign and at least two digits.
-inline void append_exponent(std::string& out, int32_t exponent, char marker)
+/**
+ * @brief Appends the decimal exponent of a scientific or hexadecimal form, with a sign.
+ * @param out Text to append to
+ * @param exponent The exponent
+ * @param marker The character that introduces it: e, E, p or P
+ * @param min_digits Fewest digits to show, zero padded: two as printf shows a double's decimal
+ *        exponent, one as std::to_chars shows a hexadecimal one
+ */
+inline void append_exponent(std::string& out, int32_t exponent, char marker, int32_t min_digits = 2)
 {
     out += marker;
     out += (exponent < 0) ? '-' : '+';
@@ -6385,8 +6732,8 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
             break;
     }
 
-    // The exponent always shows at least two digits, as it does for a double.
-    while (index > max_digits - 2)
+    // The exponent shows at least min_digits digits.
+    while (index > max_digits - min_digits)
         digits[--index] = '0';
 
     out.append(digits + index, static_cast<size_t>(max_digits - index));
@@ -6456,9 +6803,13 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
  * @param uppercase Emit the digits, the exponent marker and the special values in upper case
  * @param alternate Keep the decimal point and, for 'g', the trailing zeros
  * @param sign_char Character to emit for a non negative value: '-' means emit nothing
+ * @param bare_hex For the 'a' style, the form std::to_chars writes: no 0x prefix and the binary
+ *        exponent with as few digits as it needs, 1.8p+1, which std::from_chars with
+ *        chars_format::hex reads back. Otherwise the printf form, 0x1.8p+01.
  * @return The rendered text.
  */
-[[nodiscard]] inline std::string render(const float128& value, char style, int32_t precision, bool uppercase, bool alternate, char sign_char)
+[[nodiscard]] inline std::string render(const float128& value, char style, int32_t precision, bool uppercase, bool alternate, char sign_char,
+                                        bool bare_hex)
 {
     std::string out;
     if (value.is_negative())
@@ -6480,7 +6831,10 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
     // The hexadecimal form is a direct reading of the encoding, so it needs none of the decimal
     // machinery and is exact by construction at any precision.
     if (style == 'a') {
-        out += uppercase ? "0X" : "0x";
+        if (!bare_hex) {
+            out += uppercase ? "0X" : "0x";
+        }
+        const int32_t exponent_digits = bare_hex ? 1 : 2;
         if (value.is_zero()) {
             out += '0';
             if (alternate || precision > 0) {
@@ -6488,7 +6842,7 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
                 for (int32_t i = 0; i < precision; ++i)
                     out += '0';
             }
-            append_exponent(out, 0, uppercase ? 'P' : 'p');
+            append_exponent(out, 0, uppercase ? 'P' : 'p', exponent_digits);
             return out;
         }
 
@@ -6554,11 +6908,16 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
         }
 
         out += leading_two ? '2' : '1';
-        if (kept > 0 || alternate) {
+        if (kept > 0 || alternate || precision > 28) {
             out += '.';
             out.append(fraction, static_cast<size_t>(kept));
+            // The 28 digits are the whole fraction; a longer precision is padded with zeros, as
+            // printf pads it. It used to stop at 28 digits whatever was asked for.
+            if (precision > 28) {
+                out.append(static_cast<size_t>(precision - 28), '0');
+            }
         }
-        append_exponent(out, exponent, uppercase ? 'P' : 'p');
+        append_exponent(out, exponent, uppercase ? 'P' : 'p', exponent_digits);
         return out;
     }
 
@@ -6631,13 +6990,22 @@ inline void append_exponent(std::string& out, int32_t exponent, char marker)
             // Every digit asked for is zero, and the value lies below the last of them. To nearest,
             // it rounds up only from above half a place - a tie goes to the even digit, the zero
             // already there; away from zero it always does.
+            //
+            // Half a place is decided on the leading digit truncated, with whether anything follows
+            // it. The probe above rounded that digit, which made every value from 0.45 of a place up
+            // look like 0.5 and above: 0.046 printed with one decimal as 0.1.
             raise_flags(FE_INEXACT);
             bool round_up = false;
-            if (direction == digit_rounding::away_from_zero)
+            if (direction == digit_rounding::away_from_zero) {
                 round_up = true;
-            else if (direction == digit_rounding::nearest_even)
-                round_up = (significant == 0) && (digits[0] > '5' || (digits[0] == '5' && !exact));
-            out += '0';
+            } else if (direction == digit_rounding::nearest_even) {
+                bool rest_is_zero = false;
+                const int32_t leading_exponent10 = to_decimal_digits(low, high, exponent, 1, digits, &rest_is_zero, digit_rounding::toward_zero);
+                round_up = (leading_exponent10 == -after_point) && (digits[0] > '5' || (digits[0] == '5' && !rest_is_zero));
+            }
+            // With no digits after the point the unit that rounding up adds is the integer one. It
+            // used to be dropped, so 0.7 printed as 0 with no decimals.
+            out += (round_up && after_point == 0) ? '1' : '0';
             if (after_point > 0 || alternate) {
                 out += '.';
                 for (int32_t i = 0; i < after_point; ++i)
@@ -6936,6 +7304,47 @@ inline std::from_chars_result from_hex_chars(const char* first, const char* last
 }
 }  // namespace detail
 
+namespace detail
+{
+/**
+ * @brief Rounds digits * 10^exponent10, with the given sign, to a float128.
+ * @tparam Capacity Limbs of the workspace
+ * @param workspace Big integer for decimal_to_binary() to compute in
+ * @param digits Significant decimal digits, no sign and no point
+ * @param count Number of digits
+ * @param max_kept Digits used as such; any after them only count as a sticky bit
+ * @param exponent10 Power of ten the digits are scaled by
+ * @param sign 1 for a negative value
+ * @param value Receives the result
+ * @return result_out_of_range when it overflowed to an infinity or underflowed to zero, otherwise
+ *         no error.
+ */
+template <int32_t Capacity>
+inline std::errc round_decimal(basic_big_uint<Capacity>& workspace, const char* digits, int32_t count, int32_t max_kept, int32_t exponent10,
+                               uint32_t sign, float128& value) noexcept
+{
+    uint64_t low = 0, high = 0, extra = 0;
+    int32_t exponent = 0;
+    if (!decimal_to_binary(workspace, digits, count, max_kept, exponent10, low, high, exponent, &extra)) {
+        if (exponent == 0) {
+            // the digits were all zeros
+            value = float128();
+            value.set_sign(sign);
+            return std::errc {};
+        }
+        // Far beyond the range in one direction or the other. A value of the right size and a
+        // sticky bit let the rounding decide the result, which depends on the direction: an
+        // overflow can stop at the largest finite value, an underflow at the smallest subnormal.
+        value = float128::round_pack(sign, (exponent > 0) ? 20000 : -20000, 0, 1ull << 48, 1);
+        return std::errc::result_out_of_range;
+    }
+
+    // The mantissa comes back unrounded, so a subnormal result is rounded once, to its own width.
+    value = float128::round_pack(sign, exponent, low, high, extra);
+    return (value.is_inf() || value.is_zero()) ? std::errc::result_out_of_range : std::errc {};
+}
+}  // namespace detail
+
 /**
  * @brief Converts text to a float128, in the shape of std::from_chars.
  *
@@ -6943,6 +7352,13 @@ inline std::from_chars_result from_hex_chars(const char* first, const char* last
  * with an optional point and an optional exponent, or one of inf, infinity, nan, nan(payload) and
  * snan. The result is the representable value nearest the one the text names, rounded once in the
  * current rounding direction - including when it is subnormal, where fewer than 113 bits are kept.
+ *
+ * That holds for any number of digits. The first 40 significant ones settle the rounding unless
+ * the value lies within one unit of the fortieth digit of a point halfway between two binary128
+ * values; only then are all of them read, up to the 11700 that decide any case, which costs a few
+ * milliseconds for an input that long. Digits past the fortieth used to be dropped, so
+ * 10384593717069655257060992658440193.000001, just above the tie between 2^113 and 2^113 + 2,
+ * read as the tie and rounded down to 2^113.
  *
  * @param first Start of the text
  * @param last One past the end of the text
@@ -6970,12 +7386,15 @@ inline std::from_chars_result from_chars(const char* first, const char* last, fl
         return result;
     }
 
-    // The digits are collected without the point, which only decides the exponent.
-    char digits[detail::MAX_SIGNIFICANT_DIGITS];
+    // The digits are collected without the point, which only decides the exponent. One extra place
+    // is left for the digit that stands for the ones past the fortieth.
+    char digits[detail::MAX_SIGNIFICANT_DIGITS + 1];
     int32_t count = 0;
     int32_t exponent10 = 0;
     bool any_digit = false;
     bool seen_significant = false;
+    bool dropped = false;  // a non zero digit past the fortieth significant one
+    const char* const significand = cursor;
 
     // What is being built is `digits` read as an integer, times 10^exponent10. A digit before the
     // point that does not fit raises the exponent, since its place is still there. One after the
@@ -6986,10 +7405,12 @@ inline std::from_chars_result from_chars(const char* first, const char* last, fl
         seen_significant = seen_significant || (digit != '0');
         if (!seen_significant)
             return;
-        if (count < detail::MAX_SIGNIFICANT_DIGITS)
+        if (count < detail::MAX_SIGNIFICANT_DIGITS) {
             digits[count++] = digit;
-        else
+        } else {
             ++exponent10;
+            dropped = dropped || (digit != '0');
+        }
     };
     const auto take_fraction = [&](char digit) {
         any_digit = true;
@@ -7001,6 +7422,8 @@ inline std::from_chars_result from_chars(const char* first, const char* last, fl
         if (count < detail::MAX_SIGNIFICANT_DIGITS) {
             digits[count++] = digit;
             --exponent10;
+        } else {
+            dropped = dropped || (digit != '0');
         }
     };
 
@@ -7018,6 +7441,8 @@ inline std::from_chars_result from_chars(const char* first, const char* last, fl
         return result;
     }
     result.ptr = cursor;
+    const char* const significand_end = cursor;
+    int32_t exponent_part = 0;
 
     // An exponent is only consumed when it is well formed, so that "1e" reads as 1.
     if (cursor < last && (*cursor == 'e' || *cursor == 'E')) {
@@ -7034,33 +7459,91 @@ inline std::from_chars_result from_chars(const char* first, const char* last, fl
                     magnitude = magnitude * 10 + (*probe - '0');
                 ++probe;
             }
-            exponent10 += static_cast<int32_t>(exponent_negative ? -magnitude : magnitude);
+            exponent_part = static_cast<int32_t>(exponent_negative ? -magnitude : magnitude);
+            exponent10 += exponent_part;
             result.ptr = probe;
         }
     }
 
     const uint32_t sign = negative ? 1u : 0u;
-    uint64_t low = 0, high = 0, extra = 0;
-    int32_t exponent = 0;
-    if (!detail::from_decimal_digits(digits, count, exponent10, low, high, exponent, &extra)) {
-        if (exponent == 0) {
-            // the digits were all zeros
-            value = float128();
-            value.set_sign(sign);
-            return result;
-        }
-        // Far beyond the range in one direction or the other. A value of the right size and a
-        // sticky bit let the rounding decide the result, which depends on the direction: an
-        // overflow can stop at the largest finite value, an underflow at the smallest subnormal.
-        value = float128::round_pack(sign, (exponent > 0) ? 20000 : -20000, 0, 1ull << 48, 1);
-        result.ec = std::errc::result_out_of_range;
+    detail::big_uint workspace;
+    if (!dropped) {
+        result.ec = detail::round_decimal(workspace, digits, count, detail::MAX_SIGNIFICANT_DIGITS, exponent10, sign, value);
         return result;
     }
 
-    // The mantissa comes back unrounded, so a subnormal result is rounded once, to its own width.
-    value = float128::round_pack(sign, exponent, low, high, extra);
-    if (value.is_inf() || value.is_zero())
-        result.ec = std::errc::result_out_of_range;
+    // The value lies strictly between P, the forty digits kept, and P plus one unit of the fortieth
+    // digit. A '1' after P stands for the rest: decimal_to_binary() reads it as a sticky bit, which
+    // gives the rounding of a value just above P. When that agrees with the rounding of P plus one
+    // unit, everything between them rounds the same way and the remaining digits cannot matter.
+    digits[count] = '1';
+    float128 below;
+    const std::errc below_ec = detail::round_decimal(workspace, digits, count + 1, detail::MAX_SIGNIFICANT_DIGITS, exponent10 - 1, sign, below);
+
+    char upper[detail::MAX_SIGNIFICANT_DIGITS];
+    int32_t upper_exponent10 = exponent10;
+    for (int32_t i = 0; i < count; ++i)
+        upper[i] = digits[i];
+    int32_t index = count - 1;
+    while (index >= 0 && upper[index] == '9')
+        upper[index--] = '0';
+    if (index >= 0) {
+        ++upper[index];
+    } else {
+        // 99...9 plus one is 10...0, one digit longer: the same digits with the exponent one higher.
+        upper[0] = '1';
+        ++upper_exponent10;
+    }
+    float128 above;
+    (void)detail::round_decimal(workspace, upper, count, detail::MAX_SIGNIFICANT_DIGITS, upper_exponent10, sign, above);
+
+    uint64_t below_low = 0, below_high = 0, above_low = 0, above_high = 0;
+    below.get_bits(below_low, below_high);
+    above.get_bits(above_low, above_high);
+    if (below_low == above_low && below_high == above_high) {
+        value = below;
+        result.ec = below_ec;
+        return result;
+    }
+
+    // A rounding boundary lies within the last unit: read every digit. The workspace is twelve
+    // kilobytes, so it comes from the heap; should that fail, the sticky reading above stands.
+    std::unique_ptr<detail::wide_big_uint> wide(new (std::nothrow) detail::wide_big_uint);
+    std::unique_ptr<char[]> all(new (std::nothrow) char[detail::MAX_EXACT_DIGITS + 1]);
+    if (!wide || !all) {
+        value = below;
+        result.ec = below_ec;
+        return result;
+    }
+    int32_t all_count = 0;
+    int32_t all_exponent10 = exponent_part;
+    bool in_fraction = false, significant = false, rest = false;
+    for (const char* q = significand; q < significand_end; ++q) {
+        if (*q == '.') {
+            in_fraction = true;
+            continue;
+        }
+        significant = significant || (*q != '0');
+        if (!significant) {
+            if (in_fraction)
+                --all_exponent10;
+            continue;
+        }
+        if (all_count < detail::MAX_EXACT_DIGITS) {
+            all[static_cast<size_t>(all_count++)] = *q;
+            if (in_fraction)
+                --all_exponent10;
+        } else {
+            if (!in_fraction)
+                ++all_exponent10;
+            rest = rest || (*q != '0');
+        }
+    }
+    if (rest) {
+        all[static_cast<size_t>(all_count++)] = '1';
+        --all_exponent10;
+    }
+    result.ec = detail::round_decimal(*wide, all.get(), all_count, detail::MAX_EXACT_DIGITS, all_exponent10, sign, value);
     return result;
 }
 
@@ -7088,7 +7571,10 @@ inline std::from_chars_result from_chars(const char* first, const char* last, fl
  * @param first Start of the output range
  * @param last One past the end of the output range
  * @param value Value to convert
- * @param fmt Layout to use
+ * @param fmt Layout to use. chars_format::hex writes what std::to_chars writes for a double - no 0x
+ *        prefix and as few exponent digits as needed, 1.8p+1 - which from_chars() with
+ *        chars_format::hex reads back to the same value. A subnormal is written normalized,
+ *        1p-16494 for the smallest one.
  * @param precision Digits after the point, or significant digits for `general`
  * @return ptr points past the last character written; ec is value_too_large when the range was too
  *         small, in which case nothing was written.
@@ -7103,7 +7589,8 @@ inline std::to_chars_result to_chars(char* first, char* last, const float128& va
     default:                            style = 'g'; break;
     }
 
-    const std::string text = detail::render(value, style, precision, false, false, '-');
+    // The hexadecimal form without the 0x prefix, which from_chars() does not accept either.
+    const std::string text = detail::render(value, style, precision, false, false, '-', fmt == std::chars_format::hex);
     if (text.size() > static_cast<size_t>(last - first))
         return {last, std::errc::value_too_large};
 
@@ -7182,18 +7669,117 @@ inline std::ostream& operator<<(std::ostream& os, const float128& value)
 /**
  * @brief Reads a float128 from a stream.
  *
- * Accepts what the constructor from a string does. Failure leaves the value untouched and sets
- * failbit, the way the builtin extractors do.
+ * Accepts what the constructor from a string does: a decimal number with an optional exponent, a
+ * hexadecimal one after a 0x prefix with an optional binary exponent (0x1.8p1), and inf, infinity,
+ * nan, nan(payload) and snan in any case, each with an optional sign. Leading white space is
+ * skipped unless skipws is off.
+ *
+ * Like the builtin extractors it reads only as far as the number goes and leaves the character
+ * that ends it in the stream, so "1.5,2.5" gives 1.5 and leaves ",2.5" to be read next. It used to
+ * read up to the next white space and fail the whole token. A value beyond the range is read as the
+ * infinity or zero it rounds to, as the constructor reads it.
+ *
+ * Failure - no number at all, or one that stops halfway, such as "1e" or "0x" - leaves the value
+ * untouched and sets failbit.
  */
 inline std::istream& operator>>(std::istream& is, float128& value)
 {
-    std::string token;
-    if (!(is >> token))
+    const std::istream::sentry sentry(is);
+    if (!sentry)
         return is;
 
+    std::streambuf* const buffer = is.rdbuf();
+    using traits = std::char_traits<char>;
+    std::string text;
+    int c = buffer->sgetc();
+    const auto take = [&]() {
+        text += traits::to_char_type(c);
+        buffer->sbumpc();
+        c = buffer->sgetc();
+    };
+    const auto is_digit = [](int ch) { return ch >= '0' && ch <= '9'; };
+    const auto is_hex_digit = [](int ch) { return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'); };
+    const auto lower = [](int ch) { return (ch >= 'A' && ch <= 'Z') ? ch - 'A' + 'a' : ch; };
+
+    if (c == '+' || c == '-') {
+        take();
+    }
+    const size_t body = text.size();
+
+    bool hex = false;
+    if (c == '0') {
+        take();
+        if (c == 'x' || c == 'X') {
+            take();
+            hex = true;
+        }
+    }
+
+    if (text.size() == body && c != traits::eof() && lower(c) >= 'a' && lower(c) <= 'z') {
+        // inf, infinity, nan, snan: a letter is taken only while the word so far is the start of one
+        static constexpr const char* words[] = {"infinity", "snan", "nan"};
+        std::string word;
+        while (c != traits::eof()) {
+            const std::string next = word + static_cast<char>(lower(c));
+            bool prefix = false;
+            for (const char* candidate : words) {
+                prefix = prefix || std::string(candidate).compare(0, next.size(), next) == 0;
+            }
+            if (!prefix)
+                break;
+            word = next;
+            take();
+        }
+        if ((word == "nan" || word == "snan") && c == '(') {
+            take();
+            while (c != traits::eof() && (is_digit(c) || (lower(c) >= 'a' && lower(c) <= 'z') || c == '_')) {
+                take();
+            }
+            if (c == ')') {
+                take();
+            }
+        }
+    } else {
+        const auto mantissa_digit = [&](int ch) { return hex ? is_hex_digit(ch) : is_digit(ch); };
+        while (c != traits::eof() && mantissa_digit(c)) {
+            take();
+        }
+        if (c == '.') {
+            take();
+            while (c != traits::eof() && mantissa_digit(c)) {
+                take();
+            }
+        }
+        if (c != traits::eof() && lower(c) == (hex ? 'p' : 'e')) {
+            take();
+            if (c == '+' || c == '-') {
+                take();
+            }
+            while (c != traits::eof() && is_digit(c)) {
+                take();
+            }
+        }
+    }
+    if (c == traits::eof()) {
+        is.setstate(std::ios_base::eofbit);
+    }
+
+    // The same reading the constructor makes, which has to consume every character taken.
     float128 parsed;
-    const std::from_chars_result result = from_chars(token.data(), token.data() + token.size(), parsed);
-    if (result.ec == std::errc::invalid_argument || result.ptr != token.data() + token.size()) {
+    const char* const first = text.data();
+    const char* const last = first + text.size();
+    bool ok = false;
+    if (hex) {
+        const std::from_chars_result result = from_chars(first + body + 2, last, parsed, std::chars_format::hex);
+        ok = result.ec != std::errc::invalid_argument && result.ptr == last;
+        if (ok && body != 0 && text[0] == '-') {
+            parsed = -parsed;
+        }
+    } else {
+        const std::from_chars_result result = from_chars(first, last, parsed);
+        ok = result.ec != std::errc::invalid_argument && result.ptr == last;
+    }
+    if (!ok) {
         is.setstate(std::ios_base::failbit);
         return is;
     }

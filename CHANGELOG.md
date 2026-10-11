@@ -52,6 +52,88 @@ each now checked by `tests/float128_ieee_gtest.cpp` and `tools/ieee_check.py`:
   `from_chars` accepts `chars_format::hex`. Shortened hexadecimal output rounds ties to even.
 - **`inf / 0`** no longer counts as a division by zero.
 
+A review of the test suite, with coverage and mutation testing, found the following. Each is now
+checked by the test file of its type.
+
+`float128`:
+
+- **`remainder` and `remquo` near the top of the range** doubled the remainder to decide the rounding,
+  which overflows above half of `max`: the exact `remainder(1.5 * 2^16383, max)` raised overflow and
+  inexact, and rounding towards zero or downward returned `x` itself with a quotient of 0.
+- `isless()`, `isgreater()` and the rest of the quiet comparisons, and `isunordered()`, raise the
+  invalid exception for a signaling NaN, as IEEE 754 5.11 requires and as this changelog already said.
+- `ilogb()` of 0, an infinity or a NaN raises the invalid exception; `float128(float)` of a signaling
+  NaN raises it too, as the `double` conversion did; `frexp()` of a signaling NaN quiets it.
+- `is_subnormal()` is false for a zero and `is_int()` is true for one, as documented.
+- `double_factorial()` of a negative argument read before its table; (-1)!! is now 1 and other
+  negative arguments are NaN. The table is built at compile time, which also removes a data race on
+  its first use.
+- `exp10()` of a negative exponent was up to 1809 ulp off (3453 in the directed rounding modes). It
+  is now correctly rounded except for `exp10(-4931)` rounded upward, which is 1 ulp off.
+- **`cos(0)` was 1 - 2^-113** rather than 1, as was the cosine of every tiny argument; `sin(pi/2)`,
+  `cos(pi)` and `atan(1)` now round to their constants as well.
+- **`lgamma` and `tgamma`** lost every bit near the zeros of `lgamma` at 1 and 2 and next to the
+  poles of `tgamma` (`lgamma(2 - 2^-100)` was 6e32 ulp off, `tgamma(-1 + 2^-40)` 4.7e11 ulp). Both are
+  rewritten; `tgamma` is exact for every integer up to 38, the largest factorial a float128 holds
+  exactly being 37!, where it used to stop at 35. They are also about three times faster.
+- `pow(x, 0.5)` is `sqrt(x)`, so an exact root is exact; `pow(denorm_min, 0.5)` was 4078 ulp off.
+  `log1p(+-denorm_min)` returned zero.
+- **Decimal text input** dropped every digit past the 40th, so a long input could round the wrong
+  way. It is now correctly rounded at any length.
+- **Fixed notation of a value below the last requested digit** was wrong: `{:.0f}` of 0.7 was "0"
+  and `{:.1f}` of 0.046 was "0.1", through `std::format`, the streams and `to_chars` alike.
+- `to_chars` in `chars_format::hex` wrote "0x1.8p+01", which `from_chars` could not read back; it now
+  writes "1.8p+1", as `std::to_chars` does. `{:.Na}` pads with zeros past 28 digits, and
+  `float128("-0x1p100000")` is negative infinity rather than positive.
+- `operator>>` reads the number and stops where it ends, as it does for a `double` ("1.5,2.5" reads
+  1.5), accepts hexadecimal and the special values, and sets `failbit` on bad input.
+- The documented accuracy of `pow` (4 + 2.5 |y log2 x| ulp), `erfc` (56 ulp), `lgamma` and `tgamma`
+  is now what they achieve; the old bounds were exceeded outside the regions the tests sampled.
+
+`fixed_point128`:
+
+- **`pow(1, y)` was 0** for every `y`.
+- **`x % y` and `fmod()`** were computed from the quotient rounded to nearest, so a quotient that
+  rounded up to an integer gave 0: `(9 - epsilon) % 3` was 0 rather than `3 - epsilon`. They now
+  return the exact remainder with the sign of `x`. `lowest() % -1` crashed the process with an
+  integer overflow trap at `I = 63`.
+- **`hypot()`** overflowed its intermediate sum of squares: `hypot(300, 400)` was 0 at `I = 16`.
+- **`sqrt()`** lost about I/2 bits, up to 2.9e9 ulp at `I = 63`. It is now correctly rounded, as are
+  `hypot()` and `reciprocal()`; `sqrt()`'s `iterations` argument no longer has an effect.
+- **`sin()` and `cos()`**: the series wrapped around at `I = 16`, and `cos(0)` was not 1 at `I = 63`.
+  `tan`, `atan`, `asin` and `acos`, which are built on them, improve with them; `asin` and `acos`
+  were also off by up to 8e16 ulp near +-1.
+- **Overflow inside a function**: `exp` of a negative argument and `tanh` returned garbage once
+  `e^|x|` overflowed, and `asinh`, `acosh` and `atanh` overflowed and terminated the program.
+  `atan2` lost its sign when `x / y` underflowed.
+- **`log`, `log10` and `exp2`** used ln 2 and log10(2) constants with wrong digits, up to 7015 ulp
+  off at `I = 1`.
+- **`0 / 0` and `0 % 0`** returned 0 instead of throwing, as every other division by zero does.
+- `fixed_point128<1>` to `<3>` converted to text with digits like `"0.:6:::"`.
+- **The text form was not one-to-one**: it printed a digit too few, so `epsilon()` printed as "0",
+  `max()` as 2^I, which is out of range, and three quarters of the values at `I = 32` read back as
+  another value. Every value now survives a round trip through text, and the string constructor is
+  correctly rounded at every width (it was up to 22.8 ulp off at `I = 1`).
+- `operator>>` reports bad and out of range input through `failbit`, and
+  `numeric_limits<fixed_point128>::is_modulo` is `true`, since the arithmetic wraps.
+- `reciprocal()` returned garbage rather than the documented 0 when the result is out of range;
+  `logb()` of a negative argument threw, and `ilogb(0)` returned `I - 128` instead of `FP_ILOGB0`.
+- The accuracy of every math function is measured and stated in its documentation.
+
+The integer types:
+
+- **`uint128_t` and `int128_t` compared with a floating point value** truncated it first, so
+  `int128_t(2) == 2.5` held and `int128_t(-2) > -2.5` did not, and saturated it, so the largest
+  value equalled NaN, infinity and `1e39`. The two are now compared as real numbers: a fraction
+  orders correctly, a NaN is unordered (only `!=` holds), and a value beyond the range orders beyond
+  every value of the type. Integral operands are compared as before.
+- The binary `&`, `|` and `^` are `noexcept`, like their compound forms.
+- `shift_right128()` and `shift_left128()` return the right value for a shift of 0. No caller in the
+  library passed one.
+- `operator>>` behaves like it does for a builtin integer: input without digits sets `failbit` and
+  stores 0, a value out of range sets `failbit` and stores the end of the range (it used to wrap
+  silently), reading stops where the number ends, and `std::hex` and `std::oct` are honoured.
+
 ### Added
 
 - **`FP128_IEEE_ENV`**: opt in IEEE 754 rounding directions and exception flags, through
@@ -82,6 +164,17 @@ each now checked by `tests/float128_ieee_gtest.cpp` and `tools/ieee_check.py`:
   +31% and +18%): addition +22% / +28%, multiplication +29% / +3%, division +18% / +14%,
   `sqrt` +15% / +21%, `exp` +41% / +23%, `sin` +56% / +36%, Mandelbrot +7% / +4% (MSVC / Clang).
   The exception is Clang on an E-core, where addition and subtraction measure 23-24% slower.
+- **Multiplying a `uint128_t` or `int128_t` by the other 128 bit integer type, or by `float128`, no
+  longer compiles.** It used to compile and silently use only the low 64 bits of the right operand:
+  `int128_t(3) * uint128_t(2^64 + 1)` was 3. The other mixed operators were already rejected.
+- **`fixed_point128` rounds to nearest, ties away from zero, in every operation.** Multiplication
+  and division by a `fixed_point128` already did. Right shifts, narrowing conversions between
+  widths and division by a power of two now do as well; they decided the rounding from a single
+  dropped bit, an error of up to 0.75 ulp, and broke ties to even. Division by an integer used to
+  truncate. One consequence: `epsilon() >> 1` is `epsilon()`, so a loop that halves a value until it
+  reaches zero does not end, as was already the case for `x *= 0.5`.
+- `float128::reciprocal()` is `1 / x`: correctly rounded, and about 3.2 times faster than the Newton
+  iteration it replaces. `reciprocal(0)` is infinity, as its documentation now says.
 
 ## [0.12.0.0] - 2026-10-03
 

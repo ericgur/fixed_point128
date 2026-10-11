@@ -56,21 +56,23 @@ namespace detail
 /**
  * @brief Fixed capacity unsigned big integer, 32 bit limbs, least significant first.
  *
- * Sized for the widest intermediate any conversion below needs: reading the smallest subnormal
- * back from its decimal form scales a 40 digit mantissa by 2^16716, which is 527 limbs.
- *
  * The operations are only the ones the conversions use - multiply and divide by a value that fits
  * in a limb, shift, compare - so none of them needs a general multi word division.
+ *
+ * @tparam Capacity Limbs. big_uint, the one every conversion uses, is sized for the widest
+ *         intermediate they need: reading the smallest subnormal back from its decimal form scales
+ *         a 40 digit mantissa by 2^16716, which is 527 limbs. wide_big_uint holds the same for a
+ *         mantissa of MAX_EXACT_DIGITS digits, which only an input that long needs.
  */
-class big_uint
+template <int32_t Capacity> class basic_big_uint
 {
 public:
-    static constexpr int32_t CAPACITY = 560;         ///< Limbs, 17920 bits.
+    static constexpr int32_t CAPACITY = Capacity;    ///< Limbs.
     static constexpr int32_t LIMB_BITS = 32;         ///< Bits per limb.
     static constexpr uint64_t LIMB_BASE = 1ull << LIMB_BITS;  ///< One past the largest limb value.
 
     /// @brief Constructs zero.
-    big_uint() noexcept : used(0), limb {} {}
+    basic_big_uint() noexcept : used(0), limb {} {}
 
     /// @brief Sets the value to a 128 bit integer.
     void set(uint64_t low, uint64_t high) noexcept
@@ -323,11 +325,27 @@ private:
     uint32_t limb[CAPACITY];   ///< Limbs, least significant first.
 };
 
+/// @brief The big integer every conversion uses, 560 limbs or 17920 bits.
+using big_uint = basic_big_uint<560>;
+
 /// @brief Largest number of significant digits any conversion here produces.
 ///
 /// A binary128 needs 36 to survive a round trip, and one more is kept so that a caller asking for
 /// the maximum can still see the digit that decides the rounding.
 inline constexpr int32_t MAX_SIGNIFICANT_DIGITS = 40;
+
+/// @brief Significant digits that settle the rounding of any decimal input exactly.
+///
+/// A rounding boundary - the point halfway between two neighbouring binary128 values - is an odd
+/// multiple of a power of two no smaller than 2^-16495, so its decimal expansion ends: at most 34
+/// digits for the odd multiplier and 0.699 digits per binary place below one, about 11565 in all.
+/// Digits past this many cannot carry the value across a boundary, so they only need to be known
+/// to be non zero.
+inline constexpr int32_t MAX_EXACT_DIGITS = 11700;
+
+/// @brief The big integer that holds MAX_EXACT_DIGITS digits scaled to the smallest subnormal,
+///        about 94600 bits. Twelve kilobytes, so it is only ever allocated on the heap.
+using wide_big_uint = basic_big_uint<3072>;
 
 /// @brief Largest number of digits to_decimal_digits() produces.
 ///
@@ -493,8 +511,12 @@ inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, 
  * ten by multiplication, a negative one by division with the discarded remainder kept as a sticky
  * bit - so the 113 bit result is the correctly rounded one and never two roundings deep.
  *
+ * @tparam Capacity Limbs of the workspace
+ * @param value Workspace, which has to hold max_kept digits scaled to the bottom of the format:
+ *        a big_uint for MAX_SIGNIFICANT_DIGITS, a wide_big_uint for MAX_EXACT_DIGITS
  * @param digits Decimal digits, most significant first, no sign and no point
  * @param count Number of digits
+ * @param max_kept Significant digits used as such; any after them only count as a sticky bit
  * @param exponent10 Power of ten the digits are scaled by
  * @param mantissa_low Receives the low QWORD of the 113 bit mantissa
  * @param mantissa_high Receives the high QWORD
@@ -507,8 +529,9 @@ inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, 
  *         case the exponent says which: below -100000 for an underflow, above 100000 for an
  *         overflow.
  */
-inline bool from_decimal_digits(const char* digits, int32_t count, int32_t exponent10, uint64_t& mantissa_low, uint64_t& mantissa_high,
-                                int32_t& exponent, uint64_t* extra = nullptr) noexcept
+template <int32_t Capacity>
+inline bool decimal_to_binary(basic_big_uint<Capacity>& value, const char* digits, int32_t count, int32_t max_kept, int32_t exponent10,
+                              uint64_t& mantissa_low, uint64_t& mantissa_high, int32_t& exponent, uint64_t* extra) noexcept
 {
     mantissa_low = mantissa_high = 0;
     exponent = 0;
@@ -524,22 +547,20 @@ inline bool from_decimal_digits(const char* digits, int32_t count, int32_t expon
         ++exponent10;
     }
 
-    // Digits past the fortieth are read as a sticky bit only: they say the value lies strictly
-    // above the forty digit prefix, not how far. That is exact for every input of up to 40
-    // significant digits, which is more than the 39 IEEE 754-2008 5.12.2 requires to be correctly
-    // rounded for binary128 (H = M + 3, M being the 36 digits it takes to tell every binary128
-    // apart). A longer input whose prefix lies just below a halfway point between two binary128
-    // values, and whose later digits carry it past that point, is still rounded as the prefix is.
+    // Digits past max_kept are read as a sticky bit only: they say the value lies strictly above
+    // the prefix, not how far. from_chars() hands over at most 40 digits plus one that stands for
+    // the rest, which is exact whenever the rounding of the prefix and of the prefix one unit up
+    // agree; when they do not, it hands over MAX_EXACT_DIGITS, which is exact for every input.
     int32_t kept = count - first;
     bool sticky = false;
-    if (kept > MAX_SIGNIFICANT_DIGITS) {
-        for (int32_t i = first + MAX_SIGNIFICANT_DIGITS; i < count; ++i)
+    if (kept > max_kept) {
+        for (int32_t i = first + max_kept; i < count; ++i)
             sticky = sticky || (digits[i] != '0');
-        exponent10 += kept - MAX_SIGNIFICANT_DIGITS;
-        kept = MAX_SIGNIFICANT_DIGITS;
+        exponent10 += kept - max_kept;
+        kept = max_kept;
     }
 
-    big_uint value;
+    value.clear();
     for (int32_t i = 0; i < kept; ++i) {
         value.mul_small(10u);
         value.add_small(static_cast<uint32_t>(digits[first + i] - '0'));
@@ -625,6 +646,19 @@ inline bool from_decimal_digits(const char* digits, int32_t count, int32_t expon
     // The caller's convention puts the leading one at bit 112, so the exponent counts from there.
     exponent = binary_exponent + 112;
     return true;
+}
+
+/**
+ * @brief Reads a decimal mantissa and exponent back to the nearest binary128.
+ *
+ * decimal_to_binary() with a big_uint of its own, keeping MAX_SIGNIFICANT_DIGITS digits and reading
+ * any after them as a sticky bit. See decimal_to_binary() for the parameters.
+ */
+inline bool from_decimal_digits(const char* digits, int32_t count, int32_t exponent10, uint64_t& mantissa_low, uint64_t& mantissa_high,
+                                int32_t& exponent, uint64_t* extra = nullptr) noexcept
+{
+    big_uint value;
+    return decimal_to_binary(value, digits, count, MAX_SIGNIFICANT_DIGITS, exponent10, mantissa_low, mantissa_high, exponent, extra);
 }
 
 }  // namespace detail

@@ -1085,114 +1085,131 @@ FP128_INLINE constexpr void shift_left128_inplace(uint64_t& l, uint64_t& h, int 
  */
 #define FP128_ADD_ROUND_BIT(l, h, round_up) ((h) += addcarryx_u64(0, (l), static_cast<uint64_t>(round_up), &(l)))
 /**
- * @brief Right shift a 128 bit integer (inplace) with rounding.
- * Handles any positive shift value.
+ * @brief Right shift of an unsigned 128 bit integer (inplace), rounded to nearest with a tie going up.
+ *
+ * The magnitude is divided by 2^shift and rounded to the nearest integer; an exact tie rounds up,
+ * which for a magnitude is away from zero. That is the rule fixed_point128 applies to every rounded
+ * result - the multiply, the divisions and the signed shift below - so a value gets the same answer
+ * whichever of them produced it.
+ *
+ * Rounding half up needs no sticky bit: the result moves up exactly when the highest dropped bit is
+ * set, whatever lies below it, which keeps this free of branches beyond the choice of QWORD.
+ *
  * @param l Low QWORD
  * @param h High QWORD
- * @param shift Bits to shift, between 1-inf
+ * @param shift Bits to shift, any non negative count. 128 rounds 2^127 and above up to one, more
+ *              than 128 always leaves zero.
  */
 FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0);
     if (shift == 0)
         return;
-    uint64_t lsb = 0;
+
+    uint64_t round_bit = 0;  // the highest bit shifted out
     switch (shift >> 6) {
     case 0:  // 1-63 bit
-        lsb = (shift == 1) ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
+        round_bit = (l >> (shift - 1)) & 1;
         l = (l >> shift) | (h << (64 - shift));
         h >>= shift;
         break;
     case 1:  // 64-127 bit
-        shift -= 64;
-        switch (shift) {
-        case 0:
-            lsb = ((h & 1) << 2) | ((l >> 63) << 1) |
-                  ((l & 0x7FFFFFFFFFFFFFFFull) != 0 ? 1 : 0);  // the last clause checks if any of the bits that got shifted away are 1, if so we need to round
-                                                               // up in case of a tie (when h's lsb is 1 and the rest of the bits are zero)
-            break;
-        case 1:
-            lsb = ((h & 3) << 1) | (l != 0 ? 1 : 0);
-            break;
-        default:
-            lsb = (h >> (shift - 2)) & 7;
-        }
-
-        l = h >> shift;
+        round_bit = (shift == 64) ? (l >> 63) : ((h >> (shift - 65)) & 1);
+        l = h >> (shift - 64);
         h = 0;
         break;
-    default:  // >127 bit or negative
+    default:  // 128 bit and above
+        round_bit = (shift == 128) ? (h >> 63) : 0;
         h = l = 0;
     }
 
-    // Use rounding half to even
-    // Middle bit is the bit that got shifted away.
-    // It get rounded up in 2 cases:
-    //   1) The 2 rightmost bits are b11 (lsb == 3 or 7), this equal to 0.75
-    //   2) The value's msb is 1 (odd number) and the right bits are b10 (0.5) so the result will be an even number
-    if (lsb >= 6 || lsb == 3) {
-        ++l;  // low will wrap around to zero if overflowed
-        h += l == 0;
-    }
+    // a plain add and compare, which the compiler turns into ADD and ADC
+    l += round_bit;
+    h += static_cast<uint64_t>(l < round_bit);
 }
 /**
- * @brief Arithmetic right shift of a 128 bit two's complement value (inplace) with rounding.
+ * @brief The shifts by 64 bits or more of shift_right128_inplace_safe_signed().
  *
- * The signed counterpart of shift_right128_inplace_safe: the vacated top bits are filled with
- * copies of the sign bit instead of zeros, so the shift divides by a power of two for negative
- * values as well as positive ones. Rounding is half to even and is applied to the two's complement
- * bits, which means a tie moves towards the even neighbour rather than away from zero.
+ * Kept apart so that the common case stays small: the callers of that function, the shift operators
+ * of fixed_point128 among them, are inlined only while it is, and a shift by a constant count then
+ * folds down to a handful of instructions. The QWORDs travel by value: a reference would take their
+ * address and push the caller's value through memory on the common path as well.
  *
- * Handles any positive shift value. A shift of 128 or more leaves zero whatever the sign: rounding
- * to nearest is what this function does, and every value shifted that far is nearer to zero than to
- * the last place below it.
+ * Only the low QWORD of the result is returned. The high one is the sign of the input, or zero when
+ * the low QWORD is zero: the quotient fits in 64 bits, and a negative one is never zero there unless
+ * rounding carried it all the way up from minus one half.
  *
  * @param l Low QWORD
  * @param h High QWORD, holding the sign in its MSB
- * @param shift Bits to shift, between 0-inf
+ * @param shift Bits to shift, 64 or more
+ * @return The low QWORD of the rounded quotient.
+ */
+[[nodiscard]] constexpr uint64_t shift_right128_wide_signed_low(uint64_t l, uint64_t h, int shift) noexcept
+{
+    FP128_ASSERT(shift >= 64);
+    const int64_t value = static_cast<int64_t>(h);
+    const uint64_t sign_bits = static_cast<uint64_t>(value >> 63);  // all zeros or all ones
+    if (shift >= 128) {
+        // the quotient is in [-1/2, 1/2), and only lowest() shifted by exactly 128 reaches -1/2: a
+        // tie, which goes away from zero to minus one
+        return (shift == 128 && h == (1ull << 63) && l == 0) ? UINT64_MAX : 0;
+    }
+
+    const int32_t s = shift - 64;  // 0-63
+    // bit shift-1 of the value: bits 126:63 of it are (h << 1) | (l >> 63)
+    const uint64_t round_bit = (((h << 1) | (l >> 63)) >> s) & 1;
+    // every bit below it: l, without its top bit when s is zero, and bits [s-2:0] of h. The left
+    // shift by 2 + 63 - s keeps exactly those, and nothing at all for s below 2.
+    const bool sticky = ((l << static_cast<int32_t>(s == 0)) | ((h << 2) << (63 - s))) != 0;
+    const uint64_t round_up = round_bit & (static_cast<uint64_t>(sticky) | (~sign_bits & 1));
+    return static_cast<uint64_t>(value >> s) + round_up;
+}
+/**
+ * @brief Arithmetic right shift of a 128 bit two's complement value (inplace), rounded to nearest
+ *        with a tie going away from zero.
+ *
+ * The signed counterpart of shift_right128_inplace_safe: the vacated top bits are filled with
+ * copies of the sign bit instead of zeros, so the shift divides by a power of two for negative
+ * values as well as positive ones. The result is the quotient rounded to the nearest integer, and an
+ * exact tie goes away from zero - the same answer as rounding the magnitude half up and putting the
+ * sign back, which is what the multiply and the divisions of fixed_point128 do.
+ *
+ * The arithmetic shift itself rounds towards minus infinity. One is added back when the dropped
+ * part is above one half, or is exactly one half of a non negative value; the sticky bit, which
+ * tells those two apart, is every dropped bit below the highest one.
+ *
+ * A shift of 128 or more leaves zero, except that lowest() shifted by exactly 128 is a tie at minus
+ * one half and so rounds away from zero, to minus one.
+ *
+ * @param l Low QWORD
+ * @param h High QWORD, holding the sign in its MSB
+ * @param shift Bits to shift, any non negative count
  */
 FP128_FORCE_INLINE constexpr void shift_right128_inplace_safe_signed(uint64_t& l, uint64_t& h, int shift) noexcept
 {
     FP128_ASSERT(shift >= 0);
     if (shift == 0)
         return;
-
-    const int64_t value = static_cast<int64_t>(h);
-    const uint64_t sign_bits = static_cast<uint64_t>(value >> 63);  // all zeros or all ones
-    uint64_t lsb = 0;
-    switch (shift >> 6) {
-    case 0:  // 1-63 bit
-        lsb = (shift == 1) ? (l & 3) << 1 : (l >> (shift - 2)) & 7;
-        l = (l >> shift) | (h << (64 - shift));
-        h = static_cast<uint64_t>(value >> shift);
-        break;
-    case 1:  // 64-127 bit
-        shift -= 64;
-        switch (shift) {
-        case 0:
-            // the last clause is the sticky bit: it distinguishes an exact tie from a remainder
-            // above half, exactly as in the unsigned version
-            lsb = ((h & 1) << 2) | ((l >> 63) << 1) | ((l & 0x7FFFFFFFFFFFFFFFull) != 0 ? 1 : 0);
-            break;
-        case 1:
-            lsb = ((h & 3) << 1) | (l != 0 ? 1 : 0);
-            break;
-        default:
-            lsb = (h >> (shift - 2)) & 7;
-        }
-
-        l = static_cast<uint64_t>(value >> shift);
-        h = sign_bits;
-        break;
-    default:  // >127 bit
-        h = l = 0;
+    if (shift >= 64) {
+        const uint64_t sign = static_cast<uint64_t>(static_cast<int64_t>(h) >> 63);
+        l = shift_right128_wide_signed_low(l, h, shift);
+        h = (l == 0) ? 0 : sign;
+        return;
     }
 
-    // Use rounding half to even, see shift_right128_inplace_safe for what the three bits mean.
-    if (lsb >= 6 || lsb == 3) {
-        ++l;  // low will wrap around to zero if overflowed
-        h += l == 0;
-    }
+    const uint64_t sign_bits = static_cast<uint64_t>(static_cast<int64_t>(h) >> 63);  // all zeros or all ones
+    const uint64_t round_bit = (l >> (shift - 1)) & 1;  // the highest bit shifted out
+    // bits [shift-2:0] of l, the ones below it, moved to the top. Shifting by one first keeps both
+    // counts below 64 and makes a shift of one, which has no bit below the rounding bit, give zero.
+    const bool sticky = ((l << 1) << (64 - shift)) != 0;
+    l = (l >> shift) | (h << (64 - shift));
+    h = static_cast<uint64_t>(static_cast<int64_t>(h) >> shift);
+
+    // above one half always rounds up; exactly one half rounds up only for a non negative value. A
+    // plain add and compare, which the compiler turns into ADD and ADC, see shift_right128_inplace_safe.
+    const uint64_t round_up = round_bit & (static_cast<uint64_t>(sticky) | (~sign_bits & 1));
+    l += round_up;
+    h += static_cast<uint64_t>(l < round_up);
 }
 /**
  * @brief Left shift a 128 bit integer (inplace).
@@ -1278,7 +1295,10 @@ template <int shift> [[nodiscard]] FP128_INLINE constexpr uint64_t shift_right12
     FP128_ASSERT(shift >= 0 && shift < 128);
     switch (shift >> 6) {
     case 0:  // 0-63 bit
-        return (l >> shift) | (h << (64 - shift));
+        // h moves by 64 - shift, which is 64 when shift is 0 and too wide for one shift: that is
+        // undefined behavior, and x64 hardware would mask it to 0 and OR all of h in. Two shifts
+        // of at most 63 each give the 0 the math calls for.
+        return (l >> shift) | ((h << 1) << (63 - shift));
     case 1:  // 64-127 bit
         return h >> (shift ^ 64);
     default:
@@ -1308,8 +1328,9 @@ template <int shift> [[nodiscard]] FP128_INLINE constexpr uint64_t shift_right12
 {
     FP128_ASSERT(shift >= 0 && shift < 128);
     switch (shift >> 6) {
-        case 0:  // 1-63 bit
-            return (h << shift) | (l >> (64 - shift));
+        case 0:  // 0-63 bit
+            // two shifts for the same reason as in shift_right128(): 64 - shift is 64 when shift is 0
+            return (h << shift) | ((l >> 1) >> (63 - shift));
         case 1:
             return l << (shift - 64);
         default:
