@@ -40,7 +40,8 @@
     Which configurations to measure. Default both.
 
 .PARAMETER SaveBaseline
-    Promote the run just measured to the baseline, replacing whatever was there.
+    Promote the run just measured to the baseline, replacing whatever was there. The report is
+    written first, so it compares the run against the baseline it replaces.
 
 .PARAMETER NoBuild
     Measure the binaries already in the build tree instead of rebuilding first.
@@ -1247,19 +1248,6 @@ if (-not $ReportOnly) {
     }
 }
 
-if ($SaveBaseline) {
-    foreach ($config in $selected) {
-        foreach ($target in $coreTargets) {
-            $name = Get-ResultFileName -ToolchainName $config.Name -CoreLabel $target.Label
-            $source = Join-Path $currentDir $name
-            if (Test-Path $source) {
-                Copy-Item $source (Join-Path $baselineDir $name) -Force
-            }
-        }
-    }
-    Write-Host ('Baseline updated from this run: {0}' -f $baselineDir)
-}
-
 $cores = [ordered]@{}
 foreach ($target in $coreTargets) {
     $comparisons = [ordered]@{}
@@ -1354,3 +1342,20 @@ foreach ($label in $cores.Keys) {
 }
 Write-Host ''
 Write-Host ('Report: {0}' -f $reportPath)
+
+# Promoted only once the report is written, so that the report compares this run against the
+# baseline it replaces. Promoting first made every -SaveBaseline report compare the run with itself.
+if ($SaveBaseline) {
+    $promoted = 0
+    foreach ($config in $selected) {
+        foreach ($target in $coreTargets) {
+            $name = Get-ResultFileName -ToolchainName $config.Name -CoreLabel $target.Label
+            $source = Join-Path $currentDir $name
+            if (Test-Path $source) {
+                Copy-Item $source (Join-Path $baselineDir $name) -Force
+                $promoted++
+            }
+        }
+    }
+    Write-Host ('Baseline updated from this run ({0} files): {1}' -f $promoted, $baselineDir)
+}

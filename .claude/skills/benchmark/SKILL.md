@@ -31,7 +31,7 @@ their numbers are never mixed. On a uniform CPU there is a single set of runs an
 
 | flag                      | effect                                                              |
 | ------------------------- | ------------------------------------------------------------------- |
-| `-SaveBaseline`           | adopt this run as the new baseline                                   |
+| `-SaveBaseline`           | report against the old baseline, then adopt this run as the new one  |
 | `-Toolchain msvc`         | measure one configuration only                                       |
 | `-CoreType P` / `E`       | measure one core type only; default `Auto` measures every type        |
 | `-Rounds <n>`             | runs per configuration, default 5 (minimum 3)                        |
