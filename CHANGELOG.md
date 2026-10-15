@@ -7,7 +7,7 @@ and this project adheres to a four-part `MAJOR.MINOR.PATCH.BUILD` version scheme
 exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants in
 [`include/fp128_shared.h`](include/fp128_shared.h).
 
-## [Unreleased]
+## [1.0.0.0] - 2026-10-15
 
 ### Fixed
 
@@ -61,7 +61,7 @@ checked by the test file of its type.
   which overflows above half of `max`: the exact `remainder(1.5 * 2^16383, max)` raised overflow and
   inexact, and rounding towards zero or downward returned `x` itself with a quotient of 0.
 - `isless()`, `isgreater()` and the rest of the quiet comparisons, and `isunordered()`, raise the
-  invalid exception for a signaling NaN, as IEEE 754 5.11 requires and as this changelog already said.
+  invalid exception for a signaling NaN, as IEEE 754 5.11 requires.
 - `ilogb()` of 0, an infinity or a NaN raises the invalid exception; `float128(float)` of a signaling
   NaN raises it too, as the `double` conversion did; `frexp()` of a signaling NaN quiets it.
 - `is_subnormal()` is false for a zero and `is_int()` is true for one, as documented.
@@ -99,7 +99,7 @@ checked by the test file of its type.
   integer overflow trap at `I = 63`.
 - **`hypot()`** overflowed its intermediate sum of squares: `hypot(300, 400)` was 0 at `I = 16`.
 - **`sqrt()`** lost about I/2 bits, up to 2.9e9 ulp at `I = 63`. It is now correctly rounded, as are
-  `hypot()` and `reciprocal()`; `sqrt()`'s `iterations` argument no longer has an effect.
+  `hypot()` and `reciprocal()`.
 - **`sin()` and `cos()`**: the series wrapped around at `I = 16`, and `cos(0)` was not 1 at `I = 63`.
   `tan`, `atan`, `asin` and `acos`, which are built on them, improve with them; `asin` and `acos`
   were also off by up to 8e16 ulp near +-1.
@@ -156,11 +156,12 @@ The integer types:
   their documentation always said.
 - **`std::numeric_limits<float128>::is_iec559` and `float128::is754version2008()`** are `true` only
   with `FP128_IEEE_ENV`, since the standard requires the environment the macro adds.
-- `sqrt()`'s `iterations` argument no longer has an effect: the root is correctly rounded either way.
+- The `iterations` argument of `sqrt()` no longer has an effect, for `float128` and `fixed_point128`
+  alike: the root is correctly rounded either way.
 - The relational operators raise the invalid exception for a NaN operand, as IEEE 754's signaling
   comparisons do; `==`, `!=` and `isless()` and friends raise it only for a signaling NaN.
 - **float128 is faster.** Rounding once, branch free, and the reformulated functions measure ahead of
-  1.0.0.0's start on 31 of the 32 float128 benchmarks with MSVC and 30 with Clang (P-core; median
+  0.12.0.0 on 31 of the 32 float128 benchmarks with MSVC and 30 with Clang (P-core; median
   +31% and +18%): addition +22% / +28%, multiplication +29% / +3%, division +18% / +14%,
   `sqrt` +15% / +21%, `exp` +41% / +23%, `sin` +56% / +36%, Mandelbrot +7% / +4% (MSVC / Clang).
   The exception is Clang on an E-core, where addition and subtraction measure 23-24% slower.
@@ -178,10 +179,15 @@ The integer types:
 - **Long division is specialized for the width of its numerator.** `div_128bit()` takes the word
   count as a template argument, so each type gets a division unrolled for its own shape whether or
   not the compiler inlines it; with the count an ordinary argument, clang++ compiled one generic copy
-  for every type. Measured against the commit before (MSVC and Clang, P- and E-core): division of
+  for every type. Measured against the same code without it (MSVC and Clang, P- and E-core): division of
   the 128 bit integers by a divisor above 2^64 +22% to +63%, `float128` division +7% to +53% and
   `reciprocal` +10% to +69%, `fixed_point128` division by a fraction +11% to +44% (-6% with MSVC on
   a P-core). `div_128bit(q, r, u, v, m)` still takes the count at run time.
+- **The reworked math functions are faster as well**, measured against the code before the test
+  review (MSVC and Clang, P- and E-core): `float128` `sin`, `cos`, `tan`, `asin`, `acos` and `atan`
+  +17% to +45%; `fixed_point128` `tanh` +63% to +84%, `sin` +34% to +44%, `tan` +19% to +30% and
+  `acos` +12% to +23%. `fixed_point128::atanh` is 24% to 36% slower, the price of no longer
+  overflowing and of its accuracy near +-1.
 
 ## [0.12.0.0] - 2026-10-03
 
@@ -515,7 +521,7 @@ up to it.
 - clang compatibility for `fixed_point128` and for the benchmark's add/sub/mul/div
   conditions.
 
-[Unreleased]: https://github.com/ericgur/fixed_point128/compare/v0.12.0.0...HEAD
+[1.0.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v1.0.0.0
 [0.12.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.12.0.0
 [0.11.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.11.0.0
 [0.10.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.10.0.0

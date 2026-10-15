@@ -49,7 +49,7 @@
 include/     the library - header only, this is all a consumer needs
 bench/       benchmark program
 tests/       GoogleTest suite
-tools/       maintenance tools for log2: table generator and accuracy harness
+tools/       maintenance tools: table and reference generators, accuracy and IEEE 754 checks
 external/    third party dependencies (GoogleTest, as a git submodule)
 cmake/       CMake helper modules
 msvc/        Visual Studio project files (the solution lives at the repository root)
@@ -126,12 +126,13 @@ cmake --preset msvc -DFP128_BUILD_TESTS=OFF       # skip the tests (no submodule
 
 ### Visual Studio
 
-Open `fixed_point128.slnx` in Visual Studio 2019 or newer. The solution holds three projects:
+Open `fixed_point128.slnx` in Visual Studio 2019 or newer. The solution holds four projects:
 
 | Project | Output |
 | --- | --- |
 | `bench` | the benchmark executable |
 | `fixed_point128_tests` | the GoogleTest suite |
+| `fixed_point128_env_tests` | the tests of the opt in floating point environment, built with `FP128_IEEE_ENV` |
 | `googletest` | GoogleTest built as a static library from the submodule |
 
 Four configurations are available - `Debug`, `Release`, and `Debug_clang` / `Release_clang` for the
@@ -237,10 +238,11 @@ value = (int128)(high:low) / 2^F
 The representable range is therefore `[-2^I, 2^I - 2^-F]`, asymmetric like every two's complement type: the most negative value has no positive counterpart, so negating it - or taking `fabs` of it - wraps back to itself, exactly as `-INT64_MIN` does. Overflow is silent throughout.
 
 **Features:**
-- Construction from integer types, `double`, C strings (accurate to 37 decimal digits), and raw components.
+- Construction from integer types, `double`, C strings (correctly rounded at every width), and raw components. The text form is one to one: every value reads back from its string as itself.
 - Full arithmetic operators including optimized 64-bit multiply path.
 - A builtin scalar may appear on either side of any binary operator. The scalar is widened rather than the object narrowed, so the result is `fixed_point128<I>` and `1 - f` keeps the fraction of `f`.
 - Cross-template assignment and conversion between different `I` values.
+- Every operation rounds to nearest, ties away from zero: multiplication, division (by a `fixed_point128` or an integer), `>>` and the conversion to a narrower `I` alike. One consequence: `epsilon() >> 1` is `epsilon()`, so a loop that halves a value until it reaches zero does not end. Division by zero throws, `0 / 0` included.
 - Comprehensive math library:
   - **Basic:** `fabs`, `floor`, `ceil`, `trunc`, `round`, `copysign`, `fmod`, `modf`, `fdim`, `fmin`, `fmax`.
   - **Power / Root:** `sqr`, `sqrt`, `pow`, `hypot`, `reciprocal`.
@@ -258,6 +260,8 @@ The representable range is therefore `[-2^I, 2^I - 2^-F]`, asymmetric like every
 | `I >= 4` | `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2()`, `sinh()`, `cosh()` |
 
 Everything else works for every `I`, `half_pi()`, `sqrt_2()` and `golden_ratio()` included. A result that leaves the range - `exp()` of a large argument, `log()` of a tiny one - depends on the argument rather than on the type and overflows silently, as any other operation does.
+
+**Accuracy:** `sqrt`, `hypot`, `reciprocal`, `%` and `fmod` are correctly rounded or exact; the other math functions are within a few ulp, and the documentation of each states its measured bound.
 - Standard library integration: `std::numeric_limits`, `std::formatter`, `std::hash`, `operator<<`, `operator>>`.
 
 ### float128.h
@@ -337,8 +341,8 @@ next section states how close each comes. With `FP128_IEEE_ENV` they raise the f
 justifies - inexact, and overflow or underflow when the result did - rather than whatever their
 intermediate steps raised.
 
-Decimal input is correctly rounded for up to 40 significant digits, more than the 39 the standard
-requires of binary128; digits past the fortieth only count as a sticky bit.
+Decimal input is correctly rounded whatever its length, beyond the 39 significant digits the
+standard requires of binary128.
 
 #### Accuracy
 
@@ -351,10 +355,12 @@ correctly rounded operations are checked bit for bit by `tests/float128_ieee_gte
 
 `sqrt`, `fma`, `fmod` and `remainder` are exact, and so is `hypot` over its tables. `cbrt`, `exp`,
 `exp2`, `expm1`, `log2`, `log1p` and `cosh` are within 1 ulp, and most of the rest within 2 to 4,
-`sin`, `cos` and `tan` included at any argument up to the top of the range. Two are looser and say
-something about the implementation rather than about rounding: `erf` accumulates the roundings of a
-long series, and `pow` is `exp(y*log(x))`, where an exponent large enough to reach the top of the
-range turns the relative error of `log` into an absolute one.
+`sin`, `cos` and `tan` included at any argument up to the top of the range; `lgamma` is within
+6 ulp and `tgamma` within 8 below 32, exact at the integers whose factorial a binary128 holds. A few
+are looser and say something about the implementation rather than about rounding: `erf` and `erfc`
+accumulate the roundings of a long series (`erfc` up to 56 ulp near 1), `pow` is `exp(y*log(x))`,
+where a large `y*log2(x)` turns the relative error of `log` into an absolute one (within
+4 + 2.5 |y log2 x| ulp), and next to its negative zeros `lgamma` is bounded in absolute terms.
 
 `tools/gen_ref_vectors.py` regenerates the reference tables; the seed is fixed, so an unchanged
 configuration reproduces an identical file.
@@ -370,6 +376,8 @@ Signed 128-bit integer stored in two's complement representation, aligned to 16 
 - Full arithmetic operators: `+`, `-`, `*`, `/`, `%`, `<<`, `>>`, `&`, `|`, `^`, and their assignment variants.
 - Comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`.
 - A builtin scalar may appear on either side of any of the above. The scalar is widened, so the result is 128 bit and the comparisons stay exact for values no builtin type can hold. This also makes `1 << n` produce the expected power of two where a builtin shift that wide would be undefined behavior.
+- A floating point operand is compared as the real number it is: `int128_t(2) == 2.5` is false, a NaN is unordered, and a value beyond the range orders beyond every value of the type.
+- `int128_t` and `uint128_t` do not mix: an operation between the two does not compile, and neither does multiplying one by a `float128`.
 - Math functions: `abs`, `sqrt`, `log`, `log2`, `log10`, `pow`.
 - Conversions to `int64_t`, `uint64_t`, `float`, `double`, `long double`, and strings.
 - Standard library integration: `std::numeric_limits`, `std::formatter`, `std::hash`, `operator<<`, `operator>>`.
@@ -423,11 +431,11 @@ Because `int128_t` and `uint128_t` are aliases rather than distinct classes, nei
 Foundation header providing platform-specific intrinsic wrappers and common helper functions used by the rest of the library.
 
 **Key contents:**
-- **Library version** - `FP128_VERSION_MAJOR/MINOR/PATCH/BUILD`, the packed comparable `FP128_VERSION` with its `FP128_MAKE_VERSION(major, minor, patch, build)` builder, and `FP128_VERSION_STRING`. The same values are available to C++ code as `fp128::version_major` and friends, and as `fp128::version_string`. The current version is **0.9.0.0**; the benchmark prints it and records it in its JSON report so two sets of results can be attributed to the version that produced them.
+- **Library version** - `FP128_VERSION_MAJOR/MINOR/PATCH/BUILD`, the packed comparable `FP128_VERSION` with its `FP128_MAKE_VERSION(major, minor, patch, build)` builder, and `FP128_VERSION_STRING`. The same values are available to C++ code as `fp128::version_major` and friends, and as `fp128::version_string`. The current version is **1.0.0.0**; the benchmark prints it and records it in its JSON report so two sets of results can be attributed to the version that produced them.
 - **Build configuration macros** - Compiler detection (`FP128_MSVC`, `FP128_CLANG`), inline control (`FP128_INLINE`, `FP128_FORCE_INLINE`), and feature flags (`FP128_CPP_STYLE_MODULO`, `FP128_USE_RECIPROCAL_FOR_DIVISION`).
 - **Intrinsic wrappers** - Portable wrappers for `lzcnt`, `popcnt`, `mulx`, `addcarryx`, and `udiv128` covering both MSVC and GCC/Clang.
 - **128-bit shift functions** - `shift_right128`, `shift_left128`, and rounding variants.
-- **Multi-word division** - `div_64bit` for a divisor that fits in one QWORD and `div_128bit` for anything wider, both derived from *Hacker's Delight* by Henry S. Warren Jr.
+- **Multi-word division** - `div_64bit` for a divisor that fits in one QWORD and `div_128bit` for anything wider, both derived from *Hacker's Delight* by Henry S. Warren Jr. `div_128bit<m>` takes the word count of the numerator as a template argument, so every caller gets a division unrolled for its shape; an overload takes the count at run time.
 - **Bit manipulation** - `lzcnt128`, `popcnt128`, `log2`, and `twos_complement128`.
 - **IEEE 754 unions** - `Double` and `Float` structs for accessing bit fields of native floating-point values.
 
