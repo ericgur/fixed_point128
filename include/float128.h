@@ -210,7 +210,7 @@ float128 double_factorial(int x) noexcept;
  * each reported by a status flag that stays raised until the program lowers it.
  *
  * float128 provides both, as a per thread environment of its own that is entirely separate from the
- * hardware one <cfenv> controls: setting the rounding direction here does not change how double
+ * hardware one `<cfenv>` controls: setting the rounding direction here does not change how double
  * rounds, and an exception raised by a float128 operation shows up here and not in fetestexcept().
  *
  * <B>The environment is opt in.</B> It exists only when every translation unit that includes this
@@ -223,7 +223,7 @@ float128 double_factorial(int x) noexcept;
  * The macro changes the definition of inline functions, so it must have the same value in every
  * translation unit of a program. Mixing the two violates the one definition rule.
  *
- * The rounding directions and exception flags are named with the FE_ constants of <cfenv>, so the
+ * The rounding directions and exception flags are named with the FE_ constants of `<cfenv>`, so the
  * calls read the way their hardware counterparts do:
  * @code
  *     fp128::fesetround(FE_UPWARD);
@@ -231,7 +231,7 @@ float128 double_factorial(int x) noexcept;
  *     if (fp128::fetestexcept(FE_INEXACT)) { ... }  // the quotient was not exact
  * @endcode
  * The calls have to be qualified: their arguments are plain integers, so argument dependent lookup
- * cannot tell them from the <cfenv> functions of the same name.
+ * cannot tell them from the `<cfenv>` functions of the same name.
  * @{
  */
 
@@ -2344,7 +2344,13 @@ public:
         return round_pack(sign, e, l, h, extra, detail::current_rounding());
     }
     /// @overload
+    /// @param sign Sign of the result
+    /// @param e Unbiased exponent of bit 112 of the significand
+    /// @param l Low QWORD of the significand
+    /// @param h High QWORD of the significand, its leading one at bit 48
+    /// @param extra Bits below the significand, left aligned, the rest jammed into bit 0
     /// @param mode Rounding direction to use instead of the current one
+    /// @return The correctly rounded result, including its subnormal and overflow cases.
     [[nodiscard]] FP128_FORCE_INLINE static constexpr float128 round_pack(uint32_t sign, int32_t e, uint64_t l, uint64_t h, uint64_t extra,
                                                                           detail::rounding mode) noexcept
     {

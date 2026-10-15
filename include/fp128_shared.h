@@ -184,7 +184,7 @@
  * the MSVC STL reports -Wdeprecated-declarations twice per specialization from C++23 on.
  *
  * The warning is silenced around those declarations only. The library's own switch,
- * _SILENCE_CXX23_DENORM_DEPRECATION_WARNING, would have to be defined before <limits> is included
+ * _SILENCE_CXX23_DENORM_DEPRECATION_WARNING, would have to be defined before `<limits>` is included
  * and would hide the warning in the including program as well.
  *
  * @def FP128_SUPPRESS_DEPRECATED_END
