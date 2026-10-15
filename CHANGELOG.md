@@ -175,6 +175,13 @@ The integer types:
   reaches zero does not end, as was already the case for `x *= 0.5`.
 - `float128::reciprocal()` is `1 / x`: correctly rounded, and about 3.2 times faster than the Newton
   iteration it replaces. `reciprocal(0)` is infinity, as its documentation now says.
+- **Long division is specialized for the width of its numerator.** `div_128bit()` takes the word
+  count as a template argument, so each type gets a division unrolled for its own shape whether or
+  not the compiler inlines it; with the count an ordinary argument, clang++ compiled one generic copy
+  for every type. Measured against the commit before (MSVC and Clang, P- and E-core): division of
+  the 128 bit integers by a divisor above 2^64 +22% to +63%, `float128` division +7% to +53% and
+  `reciprocal` +10% to +69%, `fixed_point128` division by a fraction +11% to +44% (-6% with MSVC on
+  a P-core). `div_128bit(q, r, u, v, m)` still takes the count at run time.
 
 ## [0.12.0.0] - 2026-10-03
 

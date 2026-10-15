@@ -1810,7 +1810,7 @@ public:
         // unity bit at bit 112 and its high QWORD is never zero. div_128bit's precondition therefore
         // holds unconditionally here, unlike in fixed_point128 where a tiny divisor has to be routed
         // to div_64bit instead.
-        if (div_128bit(q, rem, nom, denom, array_length(nom))) {
+        if (div_128bit<array_length(nom)>(q, rem, nom, denom)) {
             // The dividend was scaled by 2^128 and both mantissas are in [2^112, 2^113), so the
             // quotient is in (2^127, 2^129): its leading one is at bit 128 when the dividend's
             // mantissa is the larger and at bit 127 otherwise. Keeping 113 bits means shifting out

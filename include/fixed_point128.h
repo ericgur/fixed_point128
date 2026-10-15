@@ -145,11 +145,11 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  * @brief Divides a 256 bit numerator by a 128 bit divisor: the one call of div_128bit() in this header.
  *
  * The long division, the remainder and the integer square root of fixed_point128 all divide by a
- * divisor that needs both QWORDs, and all of them come through here. A static function with a single
- * call site is inlined there whatever its size, and with the word count fixed at four the loops of
- * div_128bit() unroll. Three call sites of their own made clang-cl keep div_128bit() out of line
- * instead, which cost the long division 60% in a translation unit that also takes a remainder or a
- * square root.
+ * divisor that needs both QWORDs, and all of them come through here. The word count is fixed at four
+ * by the template argument of div_128bit<4>(), so its loops are unrolled for this shape whether the
+ * compiler inlines it or not. That used to depend on inlining: with the count an ordinary argument
+ * and callers in int128_shared.h and float128.h sharing one out of line copy, clang++ compiled a
+ * generic division and the long division here lost 15%.
  *
  * @param q (output) Quotient, three words, q[0] lowest.
  * @param r (output, optional) Remainder, two words. Can be nullptr.
@@ -159,7 +159,7 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  */
 [[nodiscard]] inline bool Divide256By128(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v) noexcept
 {
-    return div_128bit(q, r, u, v, 4);
+    return div_128bit<4>(q, r, u, v);
 }
 
 /**

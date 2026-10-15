@@ -939,7 +939,7 @@ public:
             // large fits in a single QWORD, so div_128bit fills q[0] and leaves q[1] at zero.
             else {
                 const uint64_t denom[2] = {rhs.low, rhs.high};
-                if (!div_128bit(q, nullptr, nom, denom, array_length(nom))) {
+                if (!div_128bit<array_length(nom)>(q, nullptr, nom, denom)) {
                     FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
                 }
             }
@@ -1073,7 +1073,7 @@ public:
                 // Written into a separate buffer rather than into low and high directly: the
                 // numerator is still being read out of them while the division runs.
                 uint64_t r[2] {};
-                if (!div_128bit(q, r, nom, denom, array_length(nom))) {
+                if (!div_128bit<array_length(nom)>(q, r, nom, denom)) {
                     FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
                 }
                 low = r[0];

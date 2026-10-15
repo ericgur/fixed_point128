@@ -1417,18 +1417,26 @@ FP128_INLINE static bool div_64bit(uint64_t* q, uint64_t* r, const uint64_t* u, 
  *       that case belongs in div_64bit() which is cheaper again. Every caller here already branches
  *       on it.
  *
+ * The word count is a template parameter so that every call site gets a division specialized for
+ * its own shape - the loops unrolled for that count - whether or not the compiler inlines it. Every
+ * caller in the library knows the count when it compiles. As a function argument it only became a
+ * constant where the compiler happened to inline the call or specialize it for its call sites, and
+ * with callers in three headers sharing one out of line copy, clang++ did neither: that copy cost
+ * fixed_point128's long division 15%. div_128bit(q, r, u, v, m) below takes the count at run time.
+ *
+ * @tparam m Count of words in @p u. Must be 2, 3 or 4.
  * @param q (output) Quotient, m - 1 words, q[0] lowest. Only those words are written, so a caller
  *          wanting a wider zero filled result must zero the rest itself.
  * @param r (output, optional) Remainder, two words. Can be nullptr.
  * @param u Numerator, @p m words, u[0] lowest.
  * @param v Denominator, two words. v[1] must be non zero.
- * @param m Count of words in @p u. Must be 2, 3 or 4.
  * @return true on success, false when a parameter fails one of the conditions above.
  */
-FP128_INLINE static bool div_128bit(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v, int64_t m) noexcept
+template <int64_t m> FP128_INLINE static bool div_128bit(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v) noexcept
 {
     constexpr int64_t MAX_WORDS = 4;  // 256 bit numerator, the widest any type here divides
-    if (q == nullptr || u == nullptr || v == nullptr || m < 2 || m > MAX_WORDS || v[1] == 0)
+    static_assert(m >= 2 && m <= MAX_WORDS, "div_128bit divides a numerator of 2 to 4 words");
+    if (q == nullptr || u == nullptr || v == nullptr || v[1] == 0)
         return false;
 
     // Normalize so the divisor's high bit is set, which is what bounds the quotient estimate to two
@@ -1500,6 +1508,33 @@ FP128_INLINE static bool div_128bit(uint64_t* q, uint64_t* r, const uint64_t* u,
     }
 
     return true;
+}
+/**
+ * @brief div_128bit() with the word count of the numerator chosen at run time.
+ *
+ * Dispatches to the specialization for @p m. The library's own callers all know the count when they
+ * compile and call div_128bit<m>() directly; this form is for a count that is only known at run time.
+ *
+ * @param q (output) Quotient, m - 1 words, q[0] lowest.
+ * @param r (output, optional) Remainder, two words. Can be nullptr.
+ * @param u Numerator, @p m words, u[0] lowest.
+ * @param v Denominator, two words. v[1] must be non zero.
+ * @param m Count of words in @p u. Must be 2, 3 or 4.
+ * @return true on success, false when @p m is out of range or a parameter fails a condition of
+ *         div_128bit<m>().
+ */
+FP128_INLINE static bool div_128bit(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v, int64_t m) noexcept
+{
+    switch (m) {
+    case 2:
+        return div_128bit<2>(q, r, u, v);
+    case 3:
+        return div_128bit<3>(q, r, u, v);
+    case 4:
+        return div_128bit<4>(q, r, u, v);
+    default:
+        return false;
+    }
 }
 /**
  * @brief Counts the number of 1 bits (population count) in a 128-bit unsigned integer.
