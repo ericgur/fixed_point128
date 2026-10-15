@@ -20,6 +20,7 @@ import argparse
 import random
 import sys
 from fractions import Fraction
+from math import isqrt
 
 try:
     import mpmath
@@ -425,12 +426,286 @@ def emit_ternary(out, name, ref, inputs):
     out.append("")
 
 
+# ---------------------------------------------------------------------------
+# Correctly rounded operations (IEEE 754-2008 clause 5)
+# ---------------------------------------------------------------------------
+#
+# The operations IEEE 754 requires to be correctly rounded are checked bit for bit, sign of zero
+# included, rather than within an ulp bound. Their references are computed on exact rationals:
+# encode() rounds through a 240 bit mpmath value first, which is plenty for a transcendental but
+# not for a sum like 1 + 2^-113 + 2^-500, where the 240 bit intermediate drops the bit that breaks
+# the tie. A random draw also rarely lands where rounding is hard, so the inputs are aimed at
+# those places: ties and values a sticky bit away from them, deep cancellation, results in the
+# subnormal range and at the edge of overflow.
+#
+# They come from a sampler of their own, so the tables above keep their contents.
+
+EXACT_SEED = 0x7542008
+EXACT_COUNT = 160
+
+
+def encode_exact(q, zero_sign=0):
+    """Round an exact Fraction to binary128, ties to even, with no intermediate rounding.
+
+    zero_sign is the sign to give an exactly zero result, which the operation decides.
+    """
+    if q == 0:
+        return NEG_ZERO if zero_sign else ZERO
+    sign = 1 if q < 0 else 0
+    a = -q if sign else q
+    msb = a.numerator.bit_length() - a.denominator.bit_length()
+    if Fraction(2) ** msb > a:
+        msb -= 1
+    unit = max(msb - FRAC_BITS, MIN_SUB_EXP)
+    scaled = a / Fraction(2) ** unit
+    n = scaled.numerator // scaled.denominator
+    rest = scaled - n
+    if rest > Fraction(1, 2) or (rest == Fraction(1, 2) and n & 1):
+        n += 1
+    if n == 0:
+        return NEG_ZERO if sign else ZERO
+    if n.bit_length() > P:
+        n >>= 1
+        unit += 1
+    if n.bit_length() < P:
+        high = n >> 64
+    else:
+        biased = unit + FRAC_BITS + EXP_BIAS
+        if biased >= EXP_MAX:
+            return NEG_INF if sign else INF
+        high = ((n >> 64) & ((1 << 48) - 1)) | (biased << 48)
+    if sign:
+        high |= 1 << 63
+    return (n & ((1 << 64) - 1), high)
+
+
+def round_to_binary(q, p, emin, emax):
+    """Round an exact Fraction to a binary format of p bits and return it as a Fraction.
+
+    An overflow comes back as a Fraction too large for binary128, which encode_exact() turns into
+    an infinity of the right sign.
+    """
+    if q == 0:
+        return q
+    sign = -1 if q < 0 else 1
+    a = abs(q)
+    msb = a.numerator.bit_length() - a.denominator.bit_length()
+    if Fraction(2) ** msb > a:
+        msb -= 1
+    unit = max(msb - (p - 1), emin - (p - 1))
+    scaled = a / Fraction(2) ** unit
+    n = scaled.numerator // scaled.denominator
+    rest = scaled - n
+    if rest > Fraction(1, 2) or (rest == Fraction(1, 2) and n & 1):
+        n += 1
+    if n.bit_length() > p:
+        n >>= 1
+        unit += 1
+    if unit + n.bit_length() - 1 > emax:
+        return sign * Fraction(2) ** (MAX_EXP + 1)
+    return sign * Fraction(n) * Fraction(2) ** unit
+
+
+def exact_sqrt(q):
+    """sqrt of a positive Fraction whose denominator is a power of two, as something that rounds the same."""
+    k = 130 + (q.denominator.bit_length() + 1) // 2
+    n = q * Fraction(4) ** k
+    r = isqrt(n.numerator)
+    if r * r == n.numerator:
+        return Fraction(r) / Fraction(2) ** k
+    # strictly between r and r + 1, which no rounding boundary of 113 bits separates
+    return Fraction(2 * r + 1, 2) / Fraction(2) ** k
+
+
+class ExactSampler(Sampler):
+    """Inputs aimed at where correct rounding is hard."""
+
+    def mantissa(self):
+        """A 112 bit fraction: random, sparse (a tie or a sticky bit away from one), or all ones."""
+        style = self.rng.random()
+        if style < 0.5:
+            return self.rng.getrandbits(FRAC_BITS)
+        if style < 0.8:
+            m = 0
+            for _ in range(self.rng.randint(1, 3)):
+                m |= 1 << self.rng.randint(0, FRAC_BITS - 1)
+            return m
+        return ((1 << FRAC_BITS) - 1) ^ self.rng.getrandbits(3)
+
+    def value(self, e, sign=None):
+        """A normal value with the exponent e, or a subnormal one below the normal range."""
+        s = self.rng.randint(0, 1) if sign is None else sign
+        if e < MIN_NORM_EXP:
+            frac = max(self.rng.getrandbits(FRAC_BITS) >> self.rng.randint(0, FRAC_BITS - 1), 1)
+            return (frac & ((1 << 64) - 1), (s << 63) | (frac >> 64))
+        frac = self.mantissa()
+        return (frac & ((1 << 64) - 1), (s << 63) | ((e + EXP_BIAS) << 48) | (frac >> 64))
+
+    def exponent_of(self, bits):
+        biased = (bits[1] >> 48) & EXP_MAX
+        return biased - EXP_BIAS if biased else MIN_NORM_EXP
+
+
+def exact_sets(s):
+    """Return {name: (arity, reference, [inputs])} for the correctly rounded operations."""
+    def draw(n, fn):
+        return [fn() for _ in range(n)]
+
+    q = EXACT_COUNT // 4
+
+    def aligned():
+        x = s.value(s.rng.randint(-100, 100))
+        return (x, s.value(s.exponent_of(x) - s.rng.randint(0, 135)))
+
+    def cancelling():
+        x = s.value(s.rng.randint(-100, 100))
+        y = decode_fraction(x) * (1 + Fraction(s.rng.getrandbits(20) + 1, 1 << s.rng.randint(60, 140)))
+        return (x, encode_exact(-y))
+
+    def tiny_pair():
+        return (s.value(s.rng.randint(-16500, -16370)), s.value(s.rng.randint(-16500, -16370)))
+
+    def big_pair():
+        return (s.value(s.rng.randint(16370, 16383)), s.value(s.rng.randint(16370, 16383)))
+
+    def subnormal_product():
+        e = s.rng.randint(-9000, -7000)
+        return (s.value(e), s.value(s.rng.randint(-16500, -16370) - e))
+
+    def overflowing_product():
+        return (s.value(s.rng.randint(8180, 8200)), s.value(s.rng.randint(8180, 8200)))
+
+    def subnormal_quotient():
+        e = s.rng.randint(100, 3000)
+        return (s.value(s.rng.randint(-16500, -16370) + e), s.value(e))
+
+    def subnormal_fma():
+        e = s.rng.randint(-9000, -7000)
+        x, y = s.value(e), s.value(s.rng.randint(-16500, -16380) - e)
+        return (x, y, s.value(s.rng.randint(-16494, -16383)))
+
+    def cancelling_fma():
+        x, y = s.value(s.rng.randint(-60, 60)), s.value(s.rng.randint(-60, 60))
+        p = decode_fraction(x) * decode_fraction(y)
+        return (x, y, encode_exact(-p * (1 + Fraction(s.rng.getrandbits(16) + 1, 1 << s.rng.randint(100, 200)))))
+
+    def add(x, y):
+        a, b = decode_fraction(x), decode_fraction(y)
+        if a + b == 0:
+            return encode_exact(Fraction(0), (x[1] >> 63) & (y[1] >> 63))
+        return encode_exact(a + b)
+
+    def sub(x, y):
+        return add(x, (y[0], y[1] ^ (1 << 63)))
+
+    def mul(x, y):
+        return encode_exact(decode_fraction(x) * decode_fraction(y), (x[1] ^ y[1]) >> 63)
+
+    def div(x, y):
+        return encode_exact(decode_fraction(x) / decode_fraction(y), (x[1] ^ y[1]) >> 63)
+
+    def fma(x, y, z):
+        sum_ = decode_fraction(x) * decode_fraction(y) + decode_fraction(z)
+        return encode_exact(sum_)
+
+    def to_double(x):
+        return encode_exact(round_to_binary(decode_fraction(x), 53, -1022, 1023), x[1] >> 63)
+
+    def to_float(x):
+        return encode_exact(round_to_binary(decode_fraction(x), 24, -126, 127), x[1] >> 63)
+
+    def integral(rounder):
+        def ref(x):
+            v = decode_fraction(x)
+            r = rounder(v)
+            return encode_exact(Fraction(r), x[1] >> 63)
+        return ref
+
+    def floor_(v):
+        return v.numerator // v.denominator
+
+    def ceil_(v):
+        return -((-v.numerator) // v.denominator)
+
+    def trunc_(v):
+        return floor_(v) if v >= 0 else ceil_(v)
+
+    def round_(v):
+        a = abs(v) + Fraction(1, 2)
+        n = a.numerator // a.denominator
+        return n if v >= 0 else -n
+
+    def rint_(v):
+        a = abs(v)
+        n = a.numerator // a.denominator
+        rest = a - n
+        if rest > Fraction(1, 2) or (rest == Fraction(1, 2) and n & 1):
+            n += 1
+        return n if v >= 0 else -n
+
+    def integral_input():
+        return s.value(s.rng.randint(-3, 114))
+
+    def small_negative():
+        return s.value(s.rng.randint(-4, -1), sign=1)
+
+    sets = {
+        'add_exact': (2, add, draw(EXACT_COUNT - 3 * q, aligned) + draw(q, cancelling) + draw(q, tiny_pair) + draw(q, big_pair)),
+        'sub_exact': (2, sub, draw(EXACT_COUNT - 3 * q, aligned) + draw(q, cancelling) + draw(q, tiny_pair) + draw(q, big_pair)),
+        'mul_exact': (2, mul, draw(EXACT_COUNT - 2 * q, lambda: (s.value(s.rng.randint(-200, 200)), s.value(s.rng.randint(-200, 200))))
+                      + draw(q, subnormal_product) + draw(q, overflowing_product)),
+        'div_exact': (2, div, draw(EXACT_COUNT - q, lambda: (s.value(s.rng.randint(-200, 200)), s.value(s.rng.randint(-200, 200))))
+                      + draw(q, subnormal_quotient)),
+        'sqrt_exact': (1, lambda x: encode_exact(exact_sqrt(decode_fraction(x))),
+                       draw(EXACT_COUNT - q, lambda: s.value(s.rng.randint(-16494, 16383), sign=0))
+                       + draw(q, lambda: encode_exact(Fraction(s.rng.getrandbits(56) + 1) ** 2 * Fraction(2) ** (2 * s.rng.randint(-200, 200))))),
+        'fma_exact': (3, fma, draw(EXACT_COUNT // 2, subnormal_fma) + draw(EXACT_COUNT // 2, cancelling_fma)),
+        'to_double_exact': (1, to_double, draw(EXACT_COUNT, lambda: s.value(s.rng.randint(-1080, 1030)))),
+        'to_float_exact': (1, to_float, draw(EXACT_COUNT, lambda: s.value(s.rng.randint(-155, 130)))),
+        'floor_exact': (1, integral(floor_), draw(EXACT_COUNT - q, integral_input) + draw(q, small_negative)),
+        'ceil_exact': (1, integral(ceil_), draw(EXACT_COUNT - q, integral_input) + draw(q, small_negative)),
+        'trunc_exact': (1, integral(trunc_), draw(EXACT_COUNT - q, integral_input) + draw(q, small_negative)),
+        'round_exact': (1, integral(round_), draw(EXACT_COUNT - q, integral_input) + draw(q, small_negative)),
+        'rint_exact': (1, integral(rint_), draw(EXACT_COUNT - q, integral_input) + draw(q, small_negative)),
+    }
+    return sets
+
+
+def large_trig_sets(s):
+    """Arguments far above 2^62, where the reduction has to read 2/pi to thousands of bits."""
+    def draw(n, fn):
+        return [fn() for _ in range(n)]
+
+    def large():
+        return s.bits(60, 16383)
+
+    return {
+        'sin_large': (mpmath.sin, draw(UNARY_COUNT, large)),
+        'cos_large': (mpmath.cos, draw(UNARY_COUNT, large)),
+        'tan_large': (mpmath.tan, draw(UNARY_COUNT, large)),
+    }
+
+
+def emit_exact(out, name, arity, ref, inputs):
+    kind = {1: 'ref_unary', 2: 'ref_binary', 3: 'ref_ternary'}[arity]
+    out.append(f"inline constexpr {kind} {name}_ref[] = {{")
+    for args in inputs:
+        args = (args,) if arity == 1 else args
+        result = ref(*args)
+        fields = ', '.join(f"{qword(a[0])}, {qword(a[1])}" for a in args)
+        out.append(f"    {{{fields}, {qword(result[0])}, {qword(result[1])}}},")
+    out.append("};")
+    out.append("")
+
 HEADER = '''// Generated by tools/gen_ref_vectors.py - do not edit by hand.
 //
 // Correctly rounded binary128 reference values for the float128 math functions, computed by
 // mpmath at 240 bits and rounded to the format with round half to even. Each input is itself a
 // binary128 bit pattern, so the only rounding anywhere in a comparison against these tables is
 // the one the function under test performs.
+//
+// The tables named *_exact are the operations IEEE 754 requires to be correctly rounded. Their
+// references are computed on exact rationals and are meant to be matched bit for bit.
 
 #ifndef FP128_FLOAT128_REF_DATA_H
 #define FP128_FLOAT128_REF_DATA_H
@@ -487,6 +762,18 @@ def main():
     for name, (ref, inputs) in ternary_sets(sampler).items():
         print(f"  {name} ({len(inputs)} cases)", file=sys.stderr)
         emit_ternary(out, name, ref, inputs)
+
+    # The correctly rounded operations and the large trigonometric arguments draw from a sampler
+    # of their own, so adding them left every table above unchanged.
+    exact_sampler = ExactSampler(EXACT_SEED)
+    for name, (arity, ref, inputs) in exact_sets(exact_sampler).items():
+        print(f"  {name} ({len(inputs)} cases)", file=sys.stderr)
+        emit_exact(out, name, arity, ref, inputs)
+    with mpmath.workprec(17000):
+        # sin of an argument near 2^16383 needs the argument reduced against pi to as many bits
+        for name, (ref, inputs) in large_trig_sets(exact_sampler).items():
+            print(f"  {name} ({len(inputs)} cases)", file=sys.stderr)
+            emit_unary(out, name, ref, inputs)
 
     with open(args.output, 'w', encoding='utf-8', newline='\n') as f:
         f.write(HEADER)

@@ -60,7 +60,8 @@ FP128_FORCE_INLINE int32_t get_random_sign()
     return (rand() & 1) ? 1 : -1;
 }
 
-// returns a random number
+// returns a random number with a biased exponent in [min_exponent, max_exponent): the upper bound
+// is exclusive, so get_double_random(1, 128) is what reaches every magnitude below 2^128.
 [[maybe_unused]] double static get_double_random(int32_t min_exponent = -10, int32_t max_exponent = 63)
 {
     Double res;
@@ -71,28 +72,51 @@ FP128_FORCE_INLINE int32_t get_random_sign()
     return res.val();
 }
 
+// The generators below make one rand() call per statement. Several calls in one expression are
+// unsequenced, so a compiler may draw them in any order it likes, and differently in each place a
+// generator is inlined: MSVC filled the mantissa of get_double_random() in another order than
+// clang-cl did, so the same seed produced different operands on the two compilers and a failure
+// only reproduced on the one that hit it. The order below is left to right, which both compilers
+// already used everywhere else: the integer streams are unchanged, and the doubles MSVC draws are
+// now the ones clang-cl always drew.
+
 // returns a positive random number
 uint64_t static get_uint64_random()
 {
-    return (((uint64_t)rand()) << 60) + (((uint64_t)rand()) << 45) + (((uint64_t)rand()) << 30) + (((uint64_t)rand()) << 15) + (uint64_t)rand();
+    uint64_t r = static_cast<uint64_t>(rand()) << 60;
+    r += static_cast<uint64_t>(rand()) << 45;
+    r += static_cast<uint64_t>(rand()) << 30;
+    r += static_cast<uint64_t>(rand()) << 15;
+    r += static_cast<uint64_t>(rand());
+    return r;
 }
 
 // returns a random number
+//
+// The sign is applied to the unsigned draw, where negation wraps: negating 2^63 as an int64_t would
+// be signed overflow, which is undefined behavior.
 int64_t static get_int64_random()
 {
-    return (int64_t)get_uint64_random() * (int64_t)get_random_sign();
+    const uint64_t magnitude = get_uint64_random();
+    const int32_t sign = get_random_sign();
+    return static_cast<int64_t>((sign > 0) ? magnitude : 0 - magnitude);
 }
 
 // returns a positive random number
 uint32_t static get_uint32_random()
 {
-    return (((uint32_t)rand()) << 30) + (((uint32_t)rand()) << 15) + (uint32_t)rand();
+    uint32_t r = static_cast<uint32_t>(rand()) << 30;
+    r += static_cast<uint32_t>(rand()) << 15;
+    r += static_cast<uint32_t>(rand());
+    return r;
 }
 
-// returns a random number
+// returns a random number, the sign applied as in get_int64_random()
 int32_t static get_int32_random()
 {
-    return (int32_t)get_uint32_random() * get_random_sign();
+    const uint32_t magnitude = get_uint32_random();
+    const int32_t sign = get_random_sign();
+    return static_cast<int32_t>((sign > 0) ? magnitude : 0 - magnitude);
 }
 
 [[maybe_unused]] char static get_digit_random()
@@ -197,6 +221,44 @@ template <typename T> T static ReferenceMultiply(const T& a, const T& b)
     return T((static_cast<uint64_t>(r[1]) << 32) | r[0], (static_cast<uint64_t>(r[3]) << 32) | r[2]);
 }
 
+// Reference implementation of the full 256 bit product of two unsigned 128 bit values.
+//
+// A division check of the form q * b + r == a only proves the identity modulo 2^128 when the
+// product is truncated: for an even b, q + 2^127 passes it as well as q does. Requiring the high
+// half of the exact product to be zero closes that hole. Signed results are checked on their
+// magnitudes, all of which fit in an unsigned 128 bit value, -2^127 included.
+//
+// Same 32 bit limb schoolbook algorithm as ReferenceMultiply(), carried to all eight limbs, and
+// for the same reason shares no code with the implementation under test.
+//
+// @param a Left hand side operand
+// @param b Right hand side operand
+// @param high Receives the upper 128 bit of a * b
+// @return The lower 128 bit of a * b.
+[[maybe_unused]] uint128_t static ReferenceMultiplyWide(const uint128_t& a, const uint128_t& b, uint128_t& high)
+{
+    uint64_t al = 0, ah = 0, bl = 0, bh = 0;
+    a.get_components(al, ah);
+    b.get_components(bl, bh);
+
+    const uint32_t x[4] = {static_cast<uint32_t>(al), static_cast<uint32_t>(al >> 32), static_cast<uint32_t>(ah), static_cast<uint32_t>(ah >> 32)};
+    const uint32_t y[4] = {static_cast<uint32_t>(bl), static_cast<uint32_t>(bl >> 32), static_cast<uint32_t>(bh), static_cast<uint32_t>(bh >> 32)};
+    uint32_t r[8] {};
+
+    for (auto i = 0u; i < 4u; ++i) {
+        uint64_t carry = 0;
+        for (auto j = 0u; j < 4u; ++j) {
+            const uint64_t t = static_cast<uint64_t>(x[i]) * y[j] + r[i + j] + carry;
+            r[i + j] = static_cast<uint32_t>(t);
+            carry = t >> 32;
+        }
+        r[i + 4] = static_cast<uint32_t>(carry);
+    }
+
+    high = uint128_t((static_cast<uint64_t>(r[5]) << 32) | r[4], (static_cast<uint64_t>(r[7]) << 32) | r[6]);
+    return uint128_t((static_cast<uint64_t>(r[1]) << 32) | r[0], (static_cast<uint64_t>(r[3]) << 32) | r[2]);
+}
+
 // The high QWORD produced when a signed 64 bit value is sign extended to 128 bit. Mirrors what the
 // integral constructor does, so a reference value can be assembled from the two QWORDs without
 // going through the type under test.
@@ -221,31 +283,6 @@ template <typename T> [[nodiscard]] T static opaque(T x)
 {
     volatile T v = x;
     return v;
-}
-
-// Absolute tolerance for comparing a fixed_point128<I> division result against a double reference.
-//
-// Every other fixed_point128 operation reproduces the double reference bit for bit, so only
-// division needs a tolerance. Two independent error sources contribute to it, and neither one can
-// stand in for the other:
-//
-//   - The type quantizes absolutely. fixed_point128<I> holds 128-I fraction bits and the division
-//     leaves the result within a few units of that last place whatever its magnitude. This term
-//     dominates for a small quotient, which keeps few fraction bits: a result near 2^-50 has only
-//     38 of them left, a relative error near 1e-12 that no sane relative bound would allow.
-//   - The double reference is rounded to 53 significant bits, and so is the conversion of the
-//     result back to double. This term is relative and dominates for a large quotient.
-//
-// Both were measured at exactly 8 units of their respective error, so the 16 below is a factor of
-// two of margin rather than a fitted constant. The resulting bound is around 28000 times tighter
-// than the DOUBLE_REL_EPS comparison it replaced.
-//
-// @tparam I Integer bit count of the fixed_point128 type under test
-// @param reference The double the result is being compared against
-// @return Largest absolute difference to accept.
-template <int32_t I> double static FixedPointDivisionTolerance(double reference)
-{
-    return 16.0 * (ldexp(1.0, I - 128) + fabs(reference) * ldexp(1.0, -52));
 }
 
 #endif  // #ifndef GTEST_SHARED_H

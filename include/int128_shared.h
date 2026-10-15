@@ -203,6 +203,57 @@ private:
 
         return mant;
     }
+    /**
+     * @brief Compares this object with a floating point value exactly, as real numbers.
+     *
+     * Converting the value to int128_base and comparing the two would truncate a fraction away
+     * (2 == 2.5 would hold) and saturate NaN, the infinities and anything else out of range (the
+     * largest value would equal all three). This compares against the value itself instead.<BR>
+     * Out of range values order beyond every value of the type. A value in range truncates
+     * towards zero to an integer t exactly, and t converts back to a double exactly as well, since
+     * truncating cannot add significant bits. No integer lies strictly between the value and t, so
+     * comparing this object with t settles the order whenever the two differ; when they are equal,
+     * the discarded fraction decides it.<BR>
+     * A long double wider than double is compared through double, as the constructor converts it.
+     *
+     * @param x Value to compare with.
+     * @return -1, 0 or 1 when this object is smaller than, equal to or larger than x, and 2 when x
+     *         is a NaN, with which nothing is ordered.
+     */
+    template <typename F> [[nodiscard]] FP128_INLINE constexpr int32_t CompareFloating(F x) const noexcept
+    {
+        const double d = static_cast<double>(x);
+        if (d != d) {
+            return 2;
+        }
+
+        // 2^64 * 2^64 is 2^128, and every factor here is exact in a double
+        constexpr double two_64 = 18446744073709551616.0;
+        if constexpr (is_signed) {
+            constexpr double two_127 = two_64 * 9223372036854775808.0;
+            if (d >= two_127)
+                return -1;
+            if (d < -two_127)
+                return 1;
+        } else {
+            if (d >= two_64 * two_64)
+                return -1;
+            // every unsigned value lies above a negative one, and -0.0 is not negative here
+            if (d < 0)
+                return 1;
+        }
+
+        const int128_base t(d);
+        if (*this != t) {
+            return (*this < t) ? -1 : 1;
+        }
+
+        const double td = static_cast<double>(t);
+        if (d == td)
+            return 0;
+
+        return (d > td) ? -1 : 1;
+    }
 
 public:
     static constexpr bool is_signed = IsSigned;  ///< True when the msb of the high QWORD is a sign bit.
@@ -780,10 +831,18 @@ public:
      * valid for both instantiations for the same reason operator*=(const int128_base&) is: the
      * product is taken modulo 2^128, where the two's complement bits of this object are its value.
      *
+     * Restricted to the arithmetic types. Any other operand used to reach the static_cast to
+     * uint64_t below through a conversion operator and was silently truncated: the other
+     * instantiation (`int128_t(3) * uint128_t(2^64 + 1)` gave 3) and float128 among them. Such an
+     * operand now has to convert to int128_base implicitly or the expression does not compile, as
+     * is already the case for the other mixed arithmetic operators.
+     *
      * @param x Right hand side operand
      * @return This object.
      */
-    template <typename T> FP128_FORCE_INLINE constexpr int128_base& operator*=(T x) noexcept
+    template <typename T>
+        requires std::is_arithmetic_v<T>
+    FP128_FORCE_INLINE constexpr int128_base& operator*=(T x) noexcept
     {
         // floating point values are converted first. Casting them straight to uint64_t below
         // would be undefined behavior for anything at or above 2^64 and would silently drop the
@@ -880,7 +939,7 @@ public:
             // large fits in a single QWORD, so div_128bit fills q[0] and leaves q[1] at zero.
             else {
                 const uint64_t denom[2] = {rhs.low, rhs.high};
-                if (!div_128bit(q, nullptr, nom, denom, array_length(nom))) {
+                if (!div_128bit<array_length(nom)>(q, nullptr, nom, denom)) {
                     FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
                 }
             }
@@ -916,9 +975,11 @@ public:
                 FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
             }
 
-            // floating point values are converted first. Casting them straight to uint64_t below
-            // would be undefined behavior for anything at or above 2^64, and a divisor between zero
-            // and one would truncate to zero and raise a bogus divide by zero.
+            // floating point values are converted first, which truncates them towards zero the way
+            // the constructor does. Casting them straight to uint64_t below would be undefined
+            // behavior for anything at or above 2^64. A divisor whose magnitude is below one
+            // therefore converts to zero and raises the divide by zero exception, as dividing by
+            // the converted value would.
             if constexpr (std::is_floating_point_v<T>) {
                 return operator/=(int128_base(x));
             }
@@ -1012,7 +1073,7 @@ public:
                 // Written into a separate buffer rather than into low and high directly: the
                 // numerator is still being read out of them while the division runs.
                 uint64_t r[2] {};
-                if (!div_128bit(q, r, nom, denom, array_length(nom))) {
+                if (!div_128bit<array_length(nom)>(q, r, nom, denom)) {
                     FP128_INT_DIVIDE_BY_ZERO_EXCEPTION;
                 }
                 low = r[0];
@@ -1231,6 +1292,10 @@ public:
     //
     // Comparison operators
     //
+    // An integral operand is widened to int128_base and compared at 128 bits. A floating point
+    // operand is compared as the real number it is, see CompareFloating(): 2 == 2.5 is false, a
+    // NaN is unordered (only != holds), and values beyond the range order beyond every value.
+    //
     /**
      * @brief Compare logical/bitwise equal.
      * @param rhs Righthand operand
@@ -1242,7 +1307,15 @@ public:
      * @param rhs Righthand operand
      * @return True if this and rhs are equal.
      */
-    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator==(const T& rhs) const noexcept { return *this == int128_base(rhs); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator==(const T& rhs) const noexcept
+    {
+        if constexpr (std::is_floating_point_v<T>) {
+            const int32_t r = CompareFloating(rhs);
+            return r == 0;
+        } else {
+            return *this == int128_base(rhs);
+        }
+    }
     /**
      * @brief Return true when objects are not equal. Can be used as logical XOR.
      * @param rhs Righthand operand.
@@ -1254,7 +1327,15 @@ public:
      * @param rhs Righthand operand.
      * @return True of not equal.
      */
-    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator!=(const T& rhs) const noexcept { return *this != int128_base(rhs); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator!=(const T& rhs) const noexcept
+    {
+        if constexpr (std::is_floating_point_v<T>) {
+            const int32_t r = CompareFloating(rhs);
+            return r != 0;
+        } else {
+            return *this != int128_base(rhs);
+        }
+    }
     /**
      * @brief Return true if this object is small than the rhs
      * @param rhs Righthand operand.
@@ -1279,7 +1360,15 @@ public:
      * @param rhs Righthand operand.
      * @return True when this object is smaller.
      */
-    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator<(const T& rhs) const noexcept { return *this < int128_base(rhs); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator<(const T& rhs) const noexcept
+    {
+        if constexpr (std::is_floating_point_v<T>) {
+            const int32_t r = CompareFloating(rhs);
+            return r == -1;
+        } else {
+            return *this < int128_base(rhs);
+        }
+    }
     /**
      * @brief Return true this object is small or equal than the rhs
      * @param rhs Righthand operand.
@@ -1291,7 +1380,15 @@ public:
      * @param rhs Righthand operand.
      * @return True when this object is smaller or equal.
      */
-    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator<=(const T& rhs) const noexcept { return !(*this > int128_base(rhs)); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator<=(const T& rhs) const noexcept
+    {
+        if constexpr (std::is_floating_point_v<T>) {
+            const int32_t r = CompareFloating(rhs);
+            return r == -1 || r == 0;
+        } else {
+            return !(*this > int128_base(rhs));
+        }
+    }
     /**
      * @brief Return true this object is larger than the rhs
      * @param rhs Righthand operand.
@@ -1316,7 +1413,15 @@ public:
      * @param rhs Righthand operand.
      * @return True when this objext is larger.
      */
-    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator>(const T& rhs) const noexcept { return *this > int128_base(rhs); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator>(const T& rhs) const noexcept
+    {
+        if constexpr (std::is_floating_point_v<T>) {
+            const int32_t r = CompareFloating(rhs);
+            return r == 1;
+        } else {
+            return *this > int128_base(rhs);
+        }
+    }
     /**
      * @brief Return true this object is larger or equal than the rhs
      * @param rhs Righthand operand.
@@ -1328,7 +1433,15 @@ public:
      * @param rhs Righthand operand.
      * @return True when this objext is larger or equal.
      */
-    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator>=(const T& rhs) const noexcept { return !(*this < int128_base(rhs)); }
+    template <typename T> [[nodiscard]] FP128_FORCE_INLINE constexpr bool operator>=(const T& rhs) const noexcept
+    {
+        if constexpr (std::is_floating_point_v<T>) {
+            const int32_t r = CompareFloating(rhs);
+            return r == 0 || r == 1;
+        } else {
+            return !(*this < int128_base(rhs));
+        }
+    }
 
     //
     // useful public functions
@@ -1449,11 +1562,18 @@ public:
     }
     /**
      * @brief Multiplies 2 values and returns the result.
+     *
+     * Only takes part in overload resolution when the matching compound assignment exists, so an
+     * unsupported operand is rejected at the call site rather than inside this body. See
+     * operator*=(T) for which operands those are.
+     *
      * @param lhs left hand side operand
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator*(int128_base lhs, const T& rhs) noexcept
+    template <typename T>
+        requires requires(int128_base l, const T& r) { l *= r; }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator*(int128_base lhs, const T& rhs) noexcept
     {
         lhs *= rhs;
         return lhs;
@@ -1496,7 +1616,7 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator&(int128_base lhs, const T& rhs)
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator&(int128_base lhs, const T& rhs) noexcept
     {
         lhs &= rhs;
         return lhs;
@@ -1507,7 +1627,7 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator|(int128_base lhs, const T& rhs)
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator|(int128_base lhs, const T& rhs) noexcept
     {
         lhs |= rhs;
         return lhs;
@@ -1518,7 +1638,7 @@ public:
      * @param rhs Right hand side operand
      * @return Result of the operation
      */
-    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator^(int128_base lhs, const T& rhs)
+    template <typename T> [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator^(int128_base lhs, const T& rhs) noexcept
     {
         lhs ^= rhs;
         return lhs;
@@ -1572,21 +1692,21 @@ public:
     /// @brief Performs bitwise AND of a scalar and an int128_base. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator&(const T& lhs, const int128_base& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator&(const T& lhs, const int128_base& rhs) noexcept
     {
         return int128_base(lhs) &= rhs;
     }
     /// @brief Performs bitwise OR of a scalar and an int128_base. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator|(const T& lhs, const int128_base& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator|(const T& lhs, const int128_base& rhs) noexcept
     {
         return int128_base(lhs) |= rhs;
     }
     /// @brief Performs bitwise XOR of a scalar and an int128_base. @param lhs Left operand @param rhs Right operand @return Result of the operation
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator^(const T& lhs, const int128_base& rhs)
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int128_base operator^(const T& lhs, const int128_base& rhs) noexcept
     {
         return int128_base(lhs) ^= rhs;
     }
@@ -1628,7 +1748,9 @@ public:
     // expression like (1 == x) has nothing but the builtin comparisons to choose from, and the
     // seven conversion operators of int128_base make every one of them equally good, so the call is
     // ambiguous. Widening the scalar keeps the comparison exact at 128 bits instead of narrowing
-    // the object down to whichever builtin type the compiler happened to pick.
+    // the object down to whichever builtin type the compiler happened to pick. A floating point
+    // scalar is not widened, which would truncate it, but compared as a real number by
+    // CompareFloating(), as the member comparisons do.
     //
 
     /// @brief Compares a scalar and an int128_base for equality. @param lhs Left operand @param rhs Right operand @return True when the two are equal
@@ -1636,42 +1758,78 @@ public:
         requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator==(const T& lhs, const int128_base& rhs) noexcept
     {
-        return int128_base(lhs) == rhs;
+        if constexpr (std::is_floating_point_v<T>) {
+            // r orders rhs against lhs, the reverse of the operands here
+            const int32_t r = rhs.CompareFloating(lhs);
+            return r == 0;
+        } else {
+            return int128_base(lhs) == rhs;
+        }
     }
     /// @brief Compares a scalar and an int128_base for inequality. @param lhs Left operand @param rhs Right operand @return True when the two differ
     template <typename T>
         requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator!=(const T& lhs, const int128_base& rhs) noexcept
     {
-        return int128_base(lhs) != rhs;
+        if constexpr (std::is_floating_point_v<T>) {
+            // r orders rhs against lhs, the reverse of the operands here
+            const int32_t r = rhs.CompareFloating(lhs);
+            return r != 0;
+        } else {
+            return int128_base(lhs) != rhs;
+        }
     }
     /// @brief Returns true when a scalar is smaller than an int128_base. @param lhs Left operand @param rhs Right operand @return True when lhs is smaller
     template <typename T>
         requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<(const T& lhs, const int128_base& rhs) noexcept
     {
-        return int128_base(lhs) < rhs;
+        if constexpr (std::is_floating_point_v<T>) {
+            // r orders rhs against lhs, the reverse of the operands here
+            const int32_t r = rhs.CompareFloating(lhs);
+            return r == 1;
+        } else {
+            return int128_base(lhs) < rhs;
+        }
     }
     /// @brief Returns true when a scalar is smaller or equal to an int128_base. @param lhs Left operand @param rhs Right operand @return True when lhs is smaller or equal
     template <typename T>
         requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator<=(const T& lhs, const int128_base& rhs) noexcept
     {
-        return int128_base(lhs) <= rhs;
+        if constexpr (std::is_floating_point_v<T>) {
+            // r orders rhs against lhs, the reverse of the operands here
+            const int32_t r = rhs.CompareFloating(lhs);
+            return r == 0 || r == 1;
+        } else {
+            return int128_base(lhs) <= rhs;
+        }
     }
     /// @brief Returns true when a scalar is larger than an int128_base. @param lhs Left operand @param rhs Right operand @return True when lhs is larger
     template <typename T>
         requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>(const T& lhs, const int128_base& rhs) noexcept
     {
-        return int128_base(lhs) > rhs;
+        if constexpr (std::is_floating_point_v<T>) {
+            // r orders rhs against lhs, the reverse of the operands here
+            const int32_t r = rhs.CompareFloating(lhs);
+            return r == -1;
+        } else {
+            return int128_base(lhs) > rhs;
+        }
     }
     /// @brief Returns true when a scalar is larger or equal to an int128_base. @param lhs Left operand @param rhs Right operand @return True when lhs is larger or equal
     template <typename T>
         requires std::is_arithmetic_v<T>
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr bool operator>=(const T& lhs, const int128_base& rhs) noexcept
     {
-        return int128_base(lhs) >= rhs;
+        if constexpr (std::is_floating_point_v<T>) {
+            // r orders rhs against lhs, the reverse of the operands here
+            const int32_t r = rhs.CompareFloating(lhs);
+            return r == -1 || r == 0;
+        } else {
+            return int128_base(lhs) >= rhs;
+        }
     }
 
     //
@@ -1997,18 +2155,102 @@ template <bool IsSigned> inline std::ostream& operator<<(std::ostream& os, const
 }
 
 /**
- * @brief Reads a 128 bit integer from a stream.
+ * @brief Reads a 128 bit integer from a stream, the way the builtin integer extractors do.
  *
- * Accepts what the constructor from a string does: an optional sign followed by decimal digits, or
- * a hexadecimal literal after an 0x prefix.
+ * Reads an optional sign and the digits that follow it, and stops at the first character that is
+ * not one, leaving it in the stream: "12,34" gives 12 and leaves ",34". The digits are decimal, or
+ * hexadecimal after an 0x prefix; with std::hex or std::oct set they are read in that base, the
+ * prefix being optional for hex. A minus sign before an unsigned value wraps it around, as
+ * strtoull does.
+ *
+ * Failure sets failbit, as for a builtin integer: no digits at all - "abc", or "0x" with nothing
+ * after it - stores zero, and a value outside the type stores the nearest end of its range, max()
+ * or min(). Leading white space is skipped unless skipws is off. This used to read a whole white
+ * space delimited token through the string constructor, which never failed: "abc" read as zero
+ * and an overflow wrapped silently.
  */
 template <bool IsSigned> inline std::istream& operator>>(std::istream& is, int128_base<IsSigned>& value)
 {
-    std::string token;
-    if (!(is >> token))
+    const std::istream::sentry sentry(is);
+    if (!sentry)
         return is;
 
-    value = int128_base<IsSigned>(token.c_str());
+    using magnitude_type = int128_base<false>;
+    using traits = std::char_traits<char>;
+    std::streambuf* const buffer = is.rdbuf();
+    int c = buffer->sgetc();
+    const auto next = [&]() {
+        buffer->sbumpc();
+        c = buffer->sgetc();
+    };
+    const auto digit_value = [](int ch) -> int {
+        if (ch >= '0' && ch <= '9')
+            return ch - '0';
+        if (ch >= 'a' && ch <= 'f')
+            return ch - 'a' + 10;
+        if (ch >= 'A' && ch <= 'F')
+            return ch - 'A' + 10;
+        return 99;
+    };
+
+    bool negative = false;
+    if (c == '+' || c == '-') {
+        negative = (c == '-');
+        next();
+    }
+
+    const std::ios_base::fmtflags basefield = is.flags() & std::ios_base::basefield;
+    uint32_t base = (basefield == std::ios_base::hex) ? 16u : ((basefield == std::ios_base::oct) ? 8u : 10u);
+    bool any_digit = false;
+    if (base != 8 && c == '0') {
+        // a leading zero is a digit in its own right, unless an x turns it into the hex prefix
+        next();
+        any_digit = true;
+        if (c == 'x' || c == 'X') {
+            next();
+            base = 16;
+            any_digit = false;
+        }
+    }
+
+    // The magnitude may reach 2^127 for a negative signed value and 2^128 - 1 for an unsigned one.
+    const magnitude_type limit = IsSigned ? (negative ? magnitude_type(0, 1ull << 63) : magnitude_type(UINT64_MAX, UINT64_MAX >> 1))
+                                          : magnitude_type(UINT64_MAX, UINT64_MAX);
+    magnitude_type magnitude;
+    bool overflow = false;
+    while (c != traits::eof() && digit_value(c) < static_cast<int>(base)) {
+        const uint32_t digit = static_cast<uint32_t>(digit_value(c));
+        if (!overflow) {
+            if (magnitude > (limit - magnitude_type(digit)) / magnitude_type(base)) {
+                overflow = true;
+            } else {
+                magnitude = magnitude * magnitude_type(base) + magnitude_type(digit);
+            }
+        }
+        any_digit = true;
+        next();
+    }
+    if (c == traits::eof()) {
+        is.setstate(std::ios_base::eofbit);
+    }
+
+    if (!any_digit) {
+        value = int128_base<IsSigned>();
+        is.setstate(std::ios_base::failbit);
+        return is;
+    }
+    if (overflow) {
+        value = (IsSigned && negative) ? int128_base<IsSigned>(0, 1ull << 63) : int128_base<IsSigned>(UINT64_MAX, IsSigned ? (UINT64_MAX >> 1) : UINT64_MAX);
+        is.setstate(std::ios_base::failbit);
+        return is;
+    }
+
+    uint64_t low = 0, high = 0;
+    magnitude.get_components(low, high);
+    if (negative) {
+        twos_complement128(low, high);
+    }
+    value = int128_base<IsSigned>(low, high);
     return is;
 }
 

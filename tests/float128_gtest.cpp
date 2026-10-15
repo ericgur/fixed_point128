@@ -8,11 +8,83 @@
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
+#include <bit>
 #include <ostream>
 #include <ctime>
 #include <cfloat>
 #include <format>
-#include "gtest_shared.h"
+#include <iterator>
+#include <string>
+#include "float128_ref_check.h"
+
+namespace
+{
+/// @brief A value from its encoding, written high QWORD first, the way the bits read.
+[[nodiscard]] float128 Encoded(uint64_t high, uint64_t low)
+{
+    return float128(low, high);
+}
+
+/// @brief 2^e, exactly.
+[[nodiscard]] float128 Pow2(int e)
+{
+    return ldexp(float128::one(), e);
+}
+
+/// @brief A random finite value with a full 113 bit significand and either sign.
+///
+/// A double converted to float128 has 60 trailing zero bits, which keeps every bit the rounding of
+/// a product or a sum depends on out of reach; these operands have none.
+///
+/// @param minBiased Smallest biased exponent to draw, 0 for the subnormals
+/// @param maxBiased Largest biased exponent to draw, at most 0x7FFE
+/// @return The value.
+[[nodiscard]] float128 RandomFinite(uint32_t minBiased = 0, uint32_t maxBiased = 0x7FFE)
+{
+    const uint64_t low = get_uint64_random();
+    const uint64_t high = get_uint64_random() & 0x0000FFFFFFFFFFFFull;
+    const uint32_t biased = minBiased + get_uint32_random() % (maxBiased - minBiased + 1);
+    const uint32_t sign = get_uint32_random() & 1;
+    return float128(low, high, biased, sign);
+}
+
+/// @brief The shortest text of 2^-i, built from the digits of 5^i: 2^-i is 5^i / 10^i.
+///
+/// The shortest form is the fixed one unless the scientific one has fewer characters, which is
+/// the rule std::to_chars applies to a double.
+///
+/// @param i Power, 1 to 27 (5^27 still fits 64 bits)
+/// @return The text.
+[[nodiscard]] std::string ShortestNegativePowerOfTwo(int i)
+{
+    uint64_t power = 1;
+    for (int k = 0; k < i; ++k) {
+        power *= 5;
+    }
+    const std::string digits = std::to_string(power);
+    const std::string fixed = "0." + std::string(static_cast<size_t>(i) - digits.size(), '0') + digits;
+    const int exponent = i - static_cast<int>(digits.size()) + 1;
+    const std::string scientific = digits.substr(0, 1) + (digits.size() > 1 ? "." + digits.substr(1) : "") + std::format("e-{:02d}", exponent);
+    return (scientific.size() < fixed.size()) ? scientific : fixed;
+}
+
+/// @brief EXPECTs that a value made from a builtin scalar compares equal to it, and that its
+///        neighbours on either side compare unequal - which only an exact conversion can satisfy.
+/// @tparam T Builtin arithmetic type
+/// @param value Scalar, inside T's range by construction
+template <typename T> void ExpectNotEqualOnlyToNeighbours(T value)
+{
+    const float128 x(value);
+    EXPECT_FALSE(x != value) << value;
+    EXPECT_FALSE(value != x) << value;
+    EXPECT_TRUE(float128::nextUp(x) != value) << value;
+    EXPECT_TRUE(value != float128::nextDown(x)) << value;
+}
+}  // namespace
+
+/// @brief EXPECT that two values have the same encoding, or are both quiet NaNs.
+#define EXPECT_SAME(actual, expected) \
+    EXPECT_TRUE(f128_ref::SameResult((actual), (expected))) << #actual << ": expected " << f128_ref::Bits(expected) << ", got " << f128_ref::Bits(actual)
 
 /**********************************************************************
  * fixed_point128 tests
@@ -37,10 +109,12 @@ TEST(float128, ConstructorFromFloat)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        float value = (float)get_double_random(-1023, 1022);
-        float128 f = value;
-        float f_value = static_cast<float>(f);
-        EXPECT_FLOAT_EQ(f_value, value) << "value=" << value;
+        // Inside the exponent range of float. The range of double this used to draw from made 87%
+        // of the operands an infinity or a zero by the time they were a float.
+        const float value = static_cast<float>(get_double_random(-126, 127));
+        const float128 f = value;
+        const float f_value = static_cast<float>(f);
+        EXPECT_EQ(std::bit_cast<uint32_t>(f_value), std::bit_cast<uint32_t>(value)) << "value=" << value;
     }
 }
 TEST(float128, ConstructorFromInt32)
@@ -93,8 +167,9 @@ TEST(float128, ConstructorFromString)
             for (j = 2; j < 36; ++j) {
                 str[j] = get_digit_random();
             }
-            // fraction length is based on the value of the first digit
-            switch (str[0]) {
+            // Fraction length is based on the value of the first digit. The digit is a character, which
+            // the labels below never matched before it was converted: every string had one length.
+            switch (str[0] - '0') {
             case 0:
                 break;
             case 1:
@@ -140,50 +215,47 @@ TEST(float128, ConstructorFromString)
         }
     }
 }
+// The copies are compared bit for bit, on values with a full significand: a value converted from a
+// double has the lowest 60 bits of its low QWORD zero, so a copy that lost them compared equal
+// through a double.
 TEST(float128, CopyConstructor)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random();
-        float128 f1 = value;
-        float128 f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
-        ;
+        const float128 f1 = RandomFinite();
+        const float128 f2 = f1;
+        EXPECT_SAME(f2, f1);
     }
 }
 TEST(float128, MoveConstructor)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random();
-        float128 f1 = value;
-        float128 f2(std::move(f1));
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
-        ;
+        const float128 f1 = RandomFinite();
+        float128 source = f1;
+        const float128 f2(std::move(source));
+        EXPECT_SAME(f2, f1);
     }
 }
 TEST(float128, AssignmentOperator)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random();
-        float128 f1 = value;
+        const float128 f1 = RandomFinite();
         float128 f2;
         f2 = f1;
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
-        ;
+        EXPECT_SAME(f2, f1);
     }
 }
 TEST(float128, MoveAssignmentOperator)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-1023, 1022);
-        float128 f1 = value;
+        const float128 f1 = RandomFinite();
+        float128 source = f1;
         float128 f2;
-        f2 = std::move(f1);
-        EXPECT_DOUBLE_EQ(static_cast<double>(f1), static_cast<double>(f2)) << "value=" << value;
-        ;
+        f2 = std::move(source);
+        EXPECT_SAME(f2, f1);
     }
 }
 TEST(float128, AddSameSign)
@@ -264,9 +336,9 @@ TEST(float128, AddUnsignedInt32)
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_uint32_random();
         auto value2 = get_uint32_random();
-        auto res = value1 + value2;
-        if (res < value1 || res < value2)
-            continue;  // wrap around
+        // In 64 bit the sum cannot wrap. Half the iterations used to be skipped for wrapping in 32,
+        // which were exactly the sums that carry into bit 32.
+        const uint64_t res = static_cast<uint64_t>(value1) + value2;
 
         float128 f1 = value1;
         float128 f3 = f1 + value2;
@@ -278,17 +350,14 @@ TEST(float128, AddInt64)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const int64_t value1 = abs(get_int64_random());
-        const int64_t value2 = abs(get_int64_random());
-        // There is no wider type to compute the reference in, so test for the overflow before it
-        // happens. Inspecting the result afterwards would rely on signed overflow, which is
-        // undefined behavior and gets optimized away.
-        if (value1 > INT64_MAX - value2)
-            continue;
-        const int64_t res = value1 + value2;
+        // Two values in [0, 2^63): their sum is below 2^64, so the reference is computed unsigned
+        // and every iteration asserts. Half of them used to be skipped as an int64_t overflow.
+        const int64_t value1 = static_cast<int64_t>(get_uint64_random() >> 1);
+        const int64_t value2 = static_cast<int64_t>(get_uint64_random() >> 1);
+        const uint64_t res = static_cast<uint64_t>(value1) + static_cast<uint64_t>(value2);
         float128 f1 = value1;
         float128 f3 = f1 + value2;
-        auto float128_res = static_cast<int64_t>(f3);
+        auto float128_res = static_cast<uint64_t>(f3);
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
@@ -298,13 +367,14 @@ TEST(float128, AddUnsignedInt64)
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         auto value1 = get_uint64_random();
         auto value2 = get_uint64_random();
-        auto res = value1 + value2;
-        if (res < value1 || res < value2)
-            continue;  // wrap around
         float128 f1 = value1;
         float128 f3 = f1 + value2;
-        auto float128_res = static_cast<uint64_t>(f3);
-        EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
+        // The sum is exact in float128 up to 2^65, past what a uint64_t holds, so it is checked in
+        // two halves that do: half of it, rounded down, and its lowest bit. Half the iterations used
+        // to be skipped as wrapping around, which were exactly the sums that carry into bit 64.
+        const uint64_t half = (value1 >> 1) + (value2 >> 1) + (value1 & value2 & 1);
+        EXPECT_EQ(static_cast<uint64_t>(ldexp(f3, -1)), half) << "value1=" << value1 << ", value2=" << value2;
+        EXPECT_SAME(fmod(f3, float128(2)), float128((value1 ^ value2) & 1)) << " for value1=" << value1 << ", value2=" << value2;
     }
 }
 // IEEE 754 special value rules for addition: a NaN operand propagates, adding infinities of
@@ -580,15 +650,15 @@ TEST(float128, MultiplyByUnsignedInt64)
         EXPECT_EQ(float128_res, res) << "value1=" << value1 << ", value2=" << value2;
     }
 }
-// sqr(x) must be bit identical to x * x for every finite value. operator== on float128 is a
-// raw bit comparison, so this is an exact check.
+// sqr(x) must be bit identical to x * x for every finite value. The operands carry a full 113 bit
+// significand: the square of a double is exact in float128, so the double operands this used to
+// draw never reached the rounding of square(), which is code of its own.
 TEST(float128, SqrMatchesMultiply)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        const double value = get_double_random();
-        const float128 x = value;
-        EXPECT_TRUE(sqr(x) == x * x) << "value=" << value;
+        const float128 x = RandomFinite(0x3FFF - 100, 0x3FFF + 100);
+        EXPECT_SAME(sqr(x), x * x) << " for x=" << f128_ref::Bits(x);
     }
 }
 TEST(float128, SqrExponentOf2)
@@ -1055,62 +1125,52 @@ TEST(float128, CompareUnsignedInt64)
                                          << "value1=" << value1 << ", value2=" << value2;
     }
 }
+// operator== is what most of the assertions in this suite compare with, so it is held to the last
+// bit: a value equals a separately built copy of itself and neither of its neighbours, which
+// differ from it in the lowest bit of the low QWORD. Comparing a value with itself, as these tests
+// used to, passed for an operator== that ignored the whole low QWORD.
 TEST(float128, OperatorEqual)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
-        float128 f1 = value1;
-        bool float128_res = f1 == f1;
-        EXPECT_TRUE(float128_res == true) << "operator==: "
-                                          << "value1=" << value1;
+        const float128 x = RandomFinite();
+        uint64_t low = 0, high = 0;
+        x.get_bits(low, high);
+        const float128 copy(low, high);
+        EXPECT_TRUE(x == copy) << "x=" << f128_ref::Bits(x);
+        EXPECT_FALSE(x == float128::nextUp(x)) << "x=" << f128_ref::Bits(x);
+        EXPECT_FALSE(float128::nextDown(x) == x) << "x=" << f128_ref::Bits(x);
+        EXPECT_EQ(x == -x, x.is_zero()) << "x=" << f128_ref::Bits(x);
     }
 }
 TEST(float128, OperatorNotEqual)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
-        float128 f1 = value1;
-        bool float128_res = f1 != f1;
-        EXPECT_TRUE(float128_res == false) << "operator!=: "
-                                           << "value1=" << value1;
+        const float128 x = RandomFinite();
+        uint64_t low = 0, high = 0;
+        x.get_bits(low, high);
+        const float128 copy(low, high);
+        EXPECT_FALSE(x != copy) << "x=" << f128_ref::Bits(x);
+        EXPECT_TRUE(x != float128::nextUp(x)) << "x=" << f128_ref::Bits(x);
+        EXPECT_TRUE(float128::nextDown(x) != x) << "x=" << f128_ref::Bits(x);
     }
 }
+// The comparison with a builtin scalar converts the scalar to float128, so comparing a value with
+// the scalar it was made from proves little on its own: both sides take the same conversion. The
+// neighbours of the converted value have to compare unequal too, which holds only when the
+// conversion is exact. Every operand is drawn inside its type's range; this used to convert doubles
+// up to 2^63 to int32_t and negative ones to uint64_t, which is undefined behavior.
 TEST(float128, TemplateOperatorNotEqual)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value1 = get_double_random();
-        float128 f1 = value1;
-        bool float128_res = f1 != value1;
-        EXPECT_TRUE(float128_res == false) << "operator!=<double>: "
-                                           << "value1=" << value1;
-
-        f1 = static_cast<float>(value1);
-        float128_res = f1 != static_cast<float>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<float>: "
-                                           << "value1=" << value1;
-
-        f1 = static_cast<uint64_t>(value1);
-        float128_res = f1 != static_cast<uint64_t>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<uint64_t>: "
-                                           << "value1=" << value1;
-
-        f1 = static_cast<int64_t>(value1);
-        float128_res = f1 != static_cast<int64_t>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<int64_t>: "
-                                           << "value1=" << value1;
-
-        f1 = static_cast<uint32_t>(value1);
-        float128_res = f1 != static_cast<uint32_t>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<uint32_t>: "
-                                           << "value1=" << value1;
-
-        f1 = static_cast<int32_t>(value1);
-        float128_res = f1 != static_cast<int32_t>(value1);
-        EXPECT_TRUE(float128_res == false) << "operator!=<int32_t>: "
-                                           << "value1=" << value1;
+        ExpectNotEqualOnlyToNeighbours(get_double_random());
+        ExpectNotEqualOnlyToNeighbours(static_cast<float>(get_double_random(-10, 30)));
+        ExpectNotEqualOnlyToNeighbours(get_uint64_random());
+        ExpectNotEqualOnlyToNeighbours(get_int64_random());
+        ExpectNotEqualOnlyToNeighbours(get_uint32_random());
+        ExpectNotEqualOnlyToNeighbours(get_int32_random());
     }
 }
 TEST(float128, floor)
@@ -1181,9 +1241,7 @@ TEST(float128, fmod_fraction)
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         double value1 = get_double_random();
         double value2 = get_double_random();
-        // check if double precision can produce accurate results
-        if (abs(ilogb(value1) - ilogb(value2)) > 52)
-            continue;
+        // fmod is exact in double as well, whatever the exponents: no operand pair needs skipping.
         double res = ::fmod(value1, value2);
         float128 f1 = value1;
         float128 f2 = value2;
@@ -1290,7 +1348,12 @@ TEST(float128, erfc)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-60, 4);
+        // A double holds erfc(x) as exactly 1 below |x| = 2^-54 and as exactly 2 below x = -5.9, and
+        // there the comparison only checks that the float128 result rounds the same way: one draw in
+        // ten used to land there. The magnitudes start at 2^-50, and the negative ones stay below 4.
+        const int32_t sign = get_random_sign();
+        const double magnitude = fabs(get_double_random(-50, (sign > 0) ? 4 : 2));
+        const double value = sign * magnitude;
         double res = ::erfc(value);
         float128 f1 = value;
         float128 float128_res = erfc(f1);
@@ -1298,17 +1361,25 @@ TEST(float128, erfc)
                                             << "value=" << value;
     }
 }
+// reciprocal() is the correctly rounded 1 / x. Division is held to that bit for bit by the exact
+// tables of float128_ieee_gtest.cpp, so it is the reference here, over the whole range: subnormal
+// arguments, and arguments whose reciprocal is subnormal. The Newton iteration this used to be was
+// an ulp off where the result is subnormal, which a comparison through double could not see.
 TEST(float128, reciprocal)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random();
-        double res = 1.0 / value;
-        float128 f1 = value;
-        float128 float128_res = reciprocal(f1);
-        EXPECT_DOUBLE_EQ(float128_res, res) << "reciprocal: "
-                                            << "value=" << value;
+        const float128 x = RandomFinite(0, 0x7FFE);
+        if (x.is_zero())
+            continue;  // a 2^-112 chance per draw; zero is checked below
+        EXPECT_SAME(reciprocal(x), float128::one() / x) << " for x=" << f128_ref::Bits(x);
     }
+    EXPECT_SAME(reciprocal(Encoded(0x7FFD800000000000, 0)), Encoded(0x0000AAAAAAAAAAAA, 0xAAAAAAAAAAAAAAAB));
+    EXPECT_SAME(reciprocal(float128()), float128::inf());
+    EXPECT_SAME(reciprocal(-float128()), -float128::inf());
+    EXPECT_SAME(reciprocal(-float128::inf()), -float128());
+    EXPECT_SAME(reciprocal(std::numeric_limits<float128>::denorm_min()), float128::inf());
+    EXPECT_TRUE(isnan(reciprocal(float128::signaling_nan())) && !reciprocal(float128::signaling_nan()).is_signaling());
 }
 TEST(float128, hypot)
 {
@@ -1403,7 +1474,10 @@ TEST(float128, exp)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-16, 16);
+        // Inside |x| < 706, where exp(x) is a normal double. Past 709.8 a double overflows and below
+        // -708 it leaves the normal range, and there the comparison only checks that the float128
+        // result is out of a double's range as well: a fifth of the draws over |x| < 65536 used to.
+        const double value = 0.69 * get_double_random(-16, 10);
         double res = exp(value);
         float128 f1 = value;
         float128 float128_res = exp(f1);
@@ -1415,7 +1489,8 @@ TEST(float128, exp2)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-16, 16);  // lower exponent results in lost bits
+        // Inside |x| < 1023, where 2^x is a normal double, for the reason given in the exp test.
+        const double value = 0.999 * get_double_random(-16, 10);
         double res = exp2(value);
         float128 f1 = value;
         float128 float128_res = exp2(f1);
@@ -1427,7 +1502,9 @@ TEST(float128, expm1)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-16, 16);  // lower exponent results in lost bits
+        // Inside |x| < 35.2. Below -37 a double holds expm1(x) as exactly -1, and past 709.8 it
+        // overflows: more than a quarter of the draws over |x| < 65536 used to land in one or the other.
+        const double value = 1.1 * get_double_random(-16, 5);
         double res = expm1(value);
         float128 f1 = value;
         float128 float128_res_ = expm1(f1);
@@ -1458,9 +1535,11 @@ TEST(float128, pow)
 
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        // double value1 = fabs(get_double_random());
+        // |y log2 x| stays below 16 * 63 = 1008, so the result is a normal double. With |y| up to
+        // 65536 a third of the results overflowed or underflowed a double, where the comparison
+        // only checks that the float128 result does too.
         double value1 = fabs(get_double_random());
-        double value2 = get_double_random(-16, 16);  // lower exponent results in lost bits
+        double value2 = get_double_random(-16, 4);
         double res = pow(value1, value2);
         float128 f1 = value1;
         float128 f2 = value2;
@@ -1510,7 +1589,9 @@ TEST(float128, asin)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-60, -1);
+        // |x| up to 1: the largest exponent drawn is one below the second argument, so -1 left out
+        // [0.5, 1), where the function is steepest.
+        double value = get_double_random(-60, 0);
         double res = ::asin(value);
         float128 f1 = value;
         float128 float128_res = asin(f1);
@@ -1522,7 +1603,9 @@ TEST(float128, acos)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-60, -1);
+        // |x| up to 1: the largest exponent drawn is one below the second argument, so -1 left out
+        // [0.5, 1), where the function is steepest.
+        double value = get_double_random(-60, 0);
         double res = acos(value);
         float128 f1 = value;
         float128 float128_res = acos(f1);
@@ -1620,7 +1703,9 @@ TEST(float128, atanh)
 {
     srand(RANDOM_SEED);
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
-        double value = get_double_random(-60, -1);  // must be: -1 < value < 1
+        // -1 < value < 1. The largest exponent drawn is one below the second argument, so -1 left out
+        // [0.5, 1), where atanh switches to its second formula.
+        double value = get_double_random(-60, 0);
         double res = ::atanh(value);
         float128 f1 = value;
         float128 float128_res = atanh(f1);
@@ -1778,43 +1863,33 @@ TEST(float128, FractionDigitsAreExact)
         EXPECT_STREQ(static_cast<char*>(float128(c.text)), c.expected);
     }
 
-    // a power of two reached by shifting has an exact, terminating expansion too
+    // A power of two reached by shifting has an exact, terminating expansion too: 2^-i is 5^i / 10^i.
+    // The expected text used to be the shifted value's own text, which compared the formatter with
+    // itself from the second power on.
     float128 v = 1;
-    std::string expected = "0.5";
     for (int i = 1; i <= 20; ++i) {
         v >>= 1;
-        EXPECT_STREQ(static_cast<char*>(v), expected.c_str()) << "2^-" << i;
-        // 2^-(i+1) is the previous string with its last digit halved, build it the easy way
-        expected = (std::string)(v >> 1);
+        EXPECT_STREQ(static_cast<char*>(v), ShortestNegativePowerOfTwo(i).c_str()) << "2^-" << i;
     }
 }
-// Rounding the multiply and the divide from a single guard bit, with no knowledge of the
-// discarded low words, made ties resolve arbitrarily. With a real sticky bit the operations
-// round half to even, which tightens the decimal round trip.
+// The text a value converts to is the shortest that reads back as that value, so every round trip
+// has to come back bit for bit. This used to require 69%, then 60%, of them to - the share the
+// rounding of the old conversions managed - and checked the rest only to about 16 digits.
 TEST(float128, RoundTripAccuracy)
 {
     srand(RANDOM_SEED);
-    int exact = 0, total = 0;
     for (auto i = 0u; i < RANDOM_TEST_COUNT; ++i) {
         const float128 v(get_uint64_random(), get_uint64_random() & 0xFFFFFFFFFFFFull,
                          0x3FFF + static_cast<int>(get_uint32_random() % 60) - 30, 0);
-        if (v.is_zero() || v.is_special())
-            continue;
-        ++total;
-        const float128 back = ((std::string)v).c_str();
-        if (back == v)
-            ++exact;
-        // whatever else happens, the value must stay in the same neighbourhood
-        EXPECT_NEAR(static_cast<double>(back), static_cast<double>(v), fabs(static_cast<double>(v)) * 1e-30);
+        const std::string text = (std::string)v;
+        const float128 back = text.c_str();
+        EXPECT_SAME(back, v) << " through " << text;
     }
-    // measured at 69% when this was written, well above the 58% the old code managed. The bound
-    // is deliberately loose: it guards against a regression, it is not a precision promise.
-    EXPECT_GT(exact * 100 / total, 60) << exact << " of " << total << " round tripped exactly";
 }
 
 // A float128 shift scales by a power of two. With a scalar on the left the left operand is widened,
 // so the result is a float128 rather than the builtin type of the scalar. The count is the right
-// operand converted to int32_t, which for float128 rounds to nearest.
+// operand converted to int32_t, which for float128 truncates towards zero.
 TEST(float128, ScalarOnTheLeftHandSideShifts)
 {
     EXPECT_DOUBLE_EQ(static_cast<double>(1 << float128(10)), 1024.0);
@@ -1824,10 +1899,10 @@ TEST(float128, ScalarOnTheLeftHandSideShifts)
     EXPECT_DOUBLE_EQ(static_cast<double>(-1 << float128(3)), -8.0);
     EXPECT_DOUBLE_EQ(static_cast<double>(2.5 << float128(2)), 10.0);
 
-    // A fractional shift count goes through operator int32_t, which rounds to nearest here rather
-    // than truncating, so 3.75 shifts by 4. The same overload picked with the float128 on the left
-    // has to agree, both reaching the count the same way.
-    EXPECT_TRUE((1 << float128(3.75)) == (1 << float128(4)));
+    // A fractional shift count goes through operator int32_t, which truncates towards zero as the
+    // builtin conversions do, so 3.75 shifts by 3. The same overload picked with the float128 on the
+    // left has to agree, both reaching the count the same way.
+    EXPECT_TRUE((1 << float128(3.75)) == (1 << float128(3)));
     EXPECT_TRUE((1 << float128(3.25)) == (1 << float128(3)));
     EXPECT_TRUE((1 << float128(3.75)) == (float128(1) << float128(3.75)));
 
@@ -2055,7 +2130,9 @@ TEST(float128, NumericLimits)
 {
     using limits = std::numeric_limits<float128>;
 
-    static_assert(limits::is_specialized && limits::is_signed && limits::is_iec559);
+    static_assert(limits::is_specialized && limits::is_signed);
+    // binary128 throughout, but conformance also needs the environment FP128_IEEE_ENV provides
+    static_assert(limits::is_iec559 == float128::is754version2008());
     static_assert(!limits::is_integer && !limits::is_exact && !limits::is_modulo);
     static_assert(limits::digits == 113 && limits::digits10 == 33 && limits::max_digits10 == 36);
     static_assert(limits::radix == 2);
@@ -2268,17 +2345,18 @@ TEST(float128, Hypot3)
 }
 TEST(float128, Gamma)
 {
-    // the factorials are exact up to 34!
+    // the factorials are exact up to 37!, the largest a binary128 holds
     EXPECT_TRUE(tgamma(float128(1)) == float128::one());
     EXPECT_TRUE(tgamma(float128(5)) == float128(24));
     EXPECT_TRUE(tgamma(float128(11)) == float128(3628800));
+    EXPECT_TRUE(tgamma(float128(38)) == float128("13763753091226345046315979581580902400000000"));
     // lgamma(1) and lgamma(2) are exactly zero rather than merely small
     EXPECT_TRUE(lgamma(float128::one()).is_zero());
     EXPECT_TRUE(lgamma(float128(2)).is_zero());
 
-    // gamma(1/2) is sqrt(pi)
-    const float128 root_pi = tgamma(float128::half());
-    EXPECT_TRUE(fabs(sqr(root_pi) - float128::pi()) < ldexp(float128::one(), -100));
+    // gamma(1/2) is sqrt(pi): its correctly rounded value from mpmath, within the 8 ulp tgamma()
+    // documents for |x| < 32. Comparing the square against pi allowed 2^14 ulp.
+    EXPECT_LE(f128_ref::Saturate64(f128_ref::UlpDistance(tgamma(float128::half()), Encoded(0x3FFFC5BF891B4EF6, 0xAA79C3B0520D5DB9))), 8u);
 
     // the poles, and the alternating sign between them
     EXPECT_TRUE(isinf(tgamma(float128())) && tgamma(float128()).is_positive());
@@ -2328,4 +2406,349 @@ TEST(float128, AbsAlias)
     EXPECT_TRUE(abs(float128(-3)) == float128(3));
     EXPECT_TRUE(abs(float128(3)) == float128(3));
     EXPECT_FALSE(signbit(abs(-float128())));
+}
+
+/**********************************************************************
+ * The last bit, the edges of the range, and the API the tests above leave out
+ *
+ * Expected encodings below come from exact rationals and from mpmath (reviewer D's b128.py,
+ * encodings_for_proposals.py, constants_check.py and gen_exp10_cases.py), never from the library.
+ ***********************************************************************/
+
+TEST(float128, EqualityComparesEveryBit)
+{
+    // Two encodings one bit apart are two different values, whichever bit it is - the sign of a
+    // zero aside. A NaN made by flipping an exponent bit compares unequal for its own reason.
+    const float128 base = Encoded(0x3FFF123456789ABC, 0x8000000000000001);
+    uint64_t baseLow = 0, baseHigh = 0;
+    base.get_bits(baseLow, baseHigh);
+    for (int bit = 0; bit < 128; ++bit) {
+        const uint64_t low = (bit < 64) ? (baseLow ^ (1ull << bit)) : baseLow;
+        const uint64_t high = (bit < 64) ? baseHigh : (baseHigh ^ (1ull << (bit - 64)));
+        const float128 other(low, high);
+        EXPECT_FALSE(base == other) << "bit " << bit;
+        EXPECT_TRUE(base != other) << "bit " << bit;
+    }
+    EXPECT_TRUE(float128() == -float128());
+
+    const float128 one = float128::one();
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 min = std::numeric_limits<float128>::min();
+    const float128 max = std::numeric_limits<float128>::max();
+    for (const float128& x : {one, -one, max, -max, denorm, -denorm, min, min - denorm, base, -base}) {
+        EXPECT_TRUE(x == float128(x)) << f128_ref::Bits(x);
+        EXPECT_FALSE(x == float128::nextUp(x)) << f128_ref::Bits(x);
+        EXPECT_FALSE(x == float128::nextDown(x)) << f128_ref::Bits(x);
+    }
+
+    // the builtin scalar on either side, at run time
+    EXPECT_TRUE(float128(opaque(3)) == 3);
+    EXPECT_FALSE(float128(opaque(3)) == 4);
+    EXPECT_TRUE(3 == float128(opaque(3)));
+    EXPECT_TRUE(opaque(3.0) != float128(4));
+    EXPECT_FALSE(float128(opaque(0.5)) != 0.5);
+    EXPECT_FALSE(float128::nextUp(float128(opaque(0.5))) == 0.5);
+}
+
+TEST(float128, RelationalOperatorsAtTheLastBit)
+{
+    // Values one ulp apart, in every part of the range: both signs, subnormals, the largest
+    // values, and a significand whose bits differ only in the low QWORD.
+    const float128 one = float128::one();
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 min = std::numeric_limits<float128>::min();
+    const float128 max = std::numeric_limits<float128>::max();
+    const float128 base = Encoded(0x3FFF123456789ABC, 0x8000000000000001);
+    for (const float128& x : {one, -one, denorm, -denorm, min, -min, -max, float128::nextDown(max), base, -base}) {
+        const float128 up = float128::nextUp(x);
+        EXPECT_TRUE(x < up && x <= up && !(x > up) && !(x >= up)) << f128_ref::Bits(x);
+        EXPECT_TRUE(up > x && up >= x && !(up < x) && !(up <= x)) << f128_ref::Bits(x);
+        EXPECT_TRUE(!(x < x) && x <= x && !(x > x) && x >= x) << f128_ref::Bits(x);
+        EXPECT_TRUE(isless(x, up) && islessequal(x, up) && isgreater(up, x) && isgreaterequal(up, x)) << f128_ref::Bits(x);
+        EXPECT_TRUE(islessgreater(x, up) && !islessgreater(x, x)) << f128_ref::Bits(x);
+    }
+    // the zeros sit between the smallest subnormals, and are equal to each other
+    EXPECT_TRUE(-denorm < -float128() && -float128() < denorm && float128() < denorm);
+    EXPECT_FALSE(-float128() < -denorm);
+    EXPECT_TRUE(-float128() <= float128() && float128() >= -float128());
+
+    // the builtin scalar on either side, at run time
+    EXPECT_TRUE(float128::nextUp(float128(opaque(2))) > 2);
+    EXPECT_TRUE(2 < float128::nextUp(float128(opaque(2))));
+    EXPECT_TRUE(opaque(2.0) <= float128(2));
+    EXPECT_FALSE(opaque(2u) > float128(2));
+    EXPECT_TRUE(float128::nextDown(float128(opaque(2))) < 2.0f);
+    EXPECT_TRUE(opaque(int64_t {-3}) >= float128(-3));
+}
+
+TEST(float128, ShiftsAndScalingAtTheEdges)
+{
+    const float128 one = float128::one();
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 min = std::numeric_limits<float128>::min();
+    const float128 max = std::numeric_limits<float128>::max();
+
+    // A NaN is quieted by a shift in either direction; an infinity is left alone.
+    EXPECT_TRUE(isnan(float128::signaling_nan() >> 1) && !(float128::signaling_nan() >> 1).is_signaling());
+    EXPECT_SAME(-float128::inf() >> 3, -float128::inf());
+    EXPECT_SAME(float128::inf() << 3, float128::inf());
+    // A count below one does nothing, as documented, rather than scaling the other way.
+    EXPECT_SAME(float128(3) << 0, float128(3));
+    EXPECT_SAME(float128(3) << -2, float128(3));
+    EXPECT_SAME(float128(3) >> -2, float128(3));
+    EXPECT_SAME(-float128() >> 5, -float128());
+    EXPECT_SAME(-float128() << 5, -float128());
+
+    // Into the subnormal range a shift rounds once, ties to even.
+    EXPECT_SAME(denorm >> 1, float128());
+    EXPECT_SAME((denorm * float128(3)) >> 1, Encoded(0, 2));
+    EXPECT_SAME((denorm * float128(5)) >> 1, Encoded(0, 2));
+    EXPECT_SAME(min >> 1, Encoded(0x0000800000000000, 0));
+    EXPECT_SAME(ldexp(max, -32877), Encoded(0, 2));
+
+    // Counts far past the range saturate rather than wrap.
+    EXPECT_SAME(one >> 100000, float128());
+    EXPECT_SAME(-one >> 100000, -float128());
+    EXPECT_SAME(one << 100000, float128::inf());
+    EXPECT_SAME(-one << 100000, -float128::inf());
+    EXPECT_SAME(ldexp(one, INT_MIN), float128());
+    EXPECT_SAME(ldexp(one, INT_MAX), float128::inf());
+    EXPECT_SAME(scalbln(one, LONG_MAX), float128::inf());
+    EXPECT_SAME(scalbln(one, LONG_MIN), float128());
+    EXPECT_SAME(scalbn(denorm, 16494), one);
+}
+
+TEST(float128, IntegerConversionBoundaries)
+{
+    // The C++ conversions truncate, saturate out of range and give zero for a NaN.
+    EXPECT_EQ(static_cast<int32_t>(-Pow2(31)), INT32_MIN);
+    EXPECT_EQ(static_cast<int32_t>(-Pow2(31) - float128(1)), INT32_MIN);
+    EXPECT_EQ(static_cast<int32_t>(-Pow2(31) - float128::half()), INT32_MIN);  // truncates into range
+    EXPECT_EQ(static_cast<int32_t>(Pow2(31) - float128::half()), INT32_MAX);
+    EXPECT_EQ(static_cast<int64_t>(Pow2(63)), INT64_MAX);
+    EXPECT_EQ(static_cast<int64_t>(Pow2(63) - float128(1)), INT64_MAX);
+    EXPECT_EQ(static_cast<uint64_t>(Pow2(64) - float128(1)), UINT64_MAX);
+    EXPECT_EQ(static_cast<uint64_t>(Pow2(64)), UINT64_MAX);
+    EXPECT_EQ(static_cast<uint64_t>(-float128()), 0u);
+    EXPECT_EQ(static_cast<uint32_t>(Pow2(32)), UINT32_MAX);
+    EXPECT_EQ(static_cast<uint32_t>(Pow2(40)), UINT32_MAX);
+    EXPECT_EQ(static_cast<uint32_t>(Pow2(32) - float128::half()), UINT32_MAX);
+    EXPECT_EQ(static_cast<uint32_t>(float128::nan()), 0u);
+    EXPECT_EQ(static_cast<uint32_t>(-float128::inf()), 0u);
+    EXPECT_EQ(static_cast<int32_t>(-std::numeric_limits<float128>::denorm_min()), 0);
+
+    // The C rounding functions give zero out of range, after rounding: lround(2^31 - 0.5) is 2^31.
+    EXPECT_EQ(lrint(Pow2(31)), 0);
+    EXPECT_EQ(lrint(-Pow2(31)), INT32_MIN);
+    EXPECT_EQ(lround(Pow2(31) - float128::half()), 0);
+    EXPECT_EQ(lround(-Pow2(31) - float128::half()), 0);
+    EXPECT_EQ(lround(-Pow2(31)), INT32_MIN);
+    EXPECT_EQ(llround(-Pow2(63)), INT64_MIN);
+    EXPECT_EQ(llround(Pow2(63)), 0);
+    EXPECT_EQ(llround(-Pow2(63) - float128::half()), 0);
+    EXPECT_EQ(lround(float128::half()), 1);
+    EXPECT_EQ(lround(-(float128::half() - Pow2(-60))), 0);
+    EXPECT_EQ(llrint(-float128(3.5)), -4);
+}
+
+TEST(float128, ConstructionHasTheExactEncoding)
+{
+    // The constructors checked against independently computed encodings rather than by a round
+    // trip through the conversion back, which a symmetric error in the two would pass.
+    EXPECT_SAME(float128(std::bit_cast<float>(0x00000001u)), Encoded(0x3F6A000000000000, 0));  // 2^-149
+    EXPECT_SAME(float128(std::bit_cast<double>(0x8000000000000001ull)), Encoded(0xBBCD000000000000, 0));  // -2^-1074
+    EXPECT_SAME(float128(DBL_MAX), Encoded(0x43FEFFFFFFFFFFFF, 0xF000000000000000));
+    EXPECT_SAME(float128(INT64_MIN), Encoded(0xC03E000000000000, 0));
+    EXPECT_SAME(float128(UINT64_MAX), Encoded(0x403EFFFFFFFFFFFF, 0xFFFE000000000000));
+    EXPECT_SAME(float128(static_cast<int8_t>(-128)), Encoded(0xC006000000000000, 0));
+    EXPECT_SAME(float128(static_cast<uint16_t>(65535)), Encoded(0x400EFFFE00000000, 0));
+    EXPECT_SAME(float128('A'), Encoded(0x4005040000000000, 0));
+    EXPECT_SAME(float128(true), float128::one());
+    EXPECT_SAME(float128(-0.0f), -float128());
+    EXPECT_SAME(float128(int32_t {-3}), Encoded(0xC000800000000000, 0));
+    EXPECT_SAME(float128(uint32_t {0xFFFFFFFFu}), Encoded(0x401EFFFFFFFE0000, 0));
+}
+
+TEST(float128, ClassificationOfEveryKind)
+{
+    const float128 inf = float128::inf();
+    const float128 zero;
+    const float128 one = float128::one();
+    const float128 denorm = std::numeric_limits<float128>::denorm_min();
+    const float128 min = std::numeric_limits<float128>::min();
+    const float128 max = std::numeric_limits<float128>::max();
+
+    // get_class(): ten kinds, each different from the other nine. The enumeration is private, so
+    // what a test can state is which values share a class.
+    const float128 kinds[] = {float128::signaling_nan(), float128::nan(), -inf, -one, -denorm, -zero, zero, denorm, one, inf};
+    for (size_t i = 0; i < std::size(kinds); ++i) {
+        for (size_t j = 0; j < std::size(kinds); ++j) {
+            EXPECT_EQ(kinds[i].get_class() == kinds[j].get_class(), i == j) << i << ", " << j;
+        }
+    }
+    EXPECT_EQ(one.get_class(), max.get_class());
+    EXPECT_EQ((-one).get_class(), (-min).get_class());
+    EXPECT_EQ(denorm.get_class(), (min - denorm).get_class());
+    EXPECT_EQ((-inf).get_class(), (-inf).get_class());
+
+    EXPECT_EQ(fpclassify(-denorm), FP_SUBNORMAL);
+    EXPECT_TRUE(issubnormal(-(min - denorm)) && !issubnormal(min) && !issubnormal(-zero));
+    EXPECT_TRUE(isnormal(-max) && !isnormal(-denorm));
+
+    // A zero is not subnormal, and it is an integer; both used to be answered the other way.
+    EXPECT_FALSE(zero.is_subnormal());
+    EXPECT_FALSE((-zero).is_subnormal());
+    EXPECT_TRUE(denorm.is_subnormal() && (-denorm).is_subnormal() && !min.is_subnormal());
+    EXPECT_TRUE(zero.is_int() && (-zero).is_int());
+    EXPECT_FALSE(inf.is_int() || float128::nan().is_int() || denorm.is_int() || float128::half().is_int());
+    EXPECT_TRUE(Pow2(112).is_int() && max.is_int() && float128(-7).is_int());
+
+    // get_fraction(): the part below the binary point, with the sign of the value
+    EXPECT_SAME(float128(-3.25).get_fraction(), float128(-0.25));
+    EXPECT_SAME(denorm.get_fraction(), denorm);
+    EXPECT_SAME((Pow2(120) + Pow2(9)).get_fraction(), zero);
+    EXPECT_SAME(inf.get_fraction(), zero);
+    EXPECT_SAME((one + Pow2(-112)).get_fraction(), Pow2(-112));
+}
+
+TEST(float128, NamedConstantsAreCorrectlyRounded)
+{
+    // The binary128 nearest to each constant, from mpmath at 600 bits.
+    const struct {
+        float128 actual;
+        float128 expected;
+        const char* name;
+    } constants[] = {
+        {float128::pi(), Encoded(0x4000921FB54442D1, 0x8469898CC51701B8), "pi"},
+        {float128::half_pi(), Encoded(0x3FFF921FB54442D1, 0x8469898CC51701B8), "half_pi"},
+        {float128::quarter_pi(), Encoded(0x3FFE921FB54442D1, 0x8469898CC51701B8), "quarter_pi"},
+        {float128::two_pi(), Encoded(0x4001921FB54442D1, 0x8469898CC51701B8), "two_pi"},
+        {float128::e(), Encoded(0x40005BF0A8B14576, 0x95355FB8AC404E7A), "e"},
+        {float128::sqrt_2(), Encoded(0x3FFF6A09E667F3BC, 0xC908B2FB1366EA95), "sqrt_2"},
+        {float128::sqrt_3(), Encoded(0x3FFFBB67AE8584CA, 0xA73B25742D7078B8), "sqrt_3"},
+        {float128::tenth(), Encoded(0x3FFB999999999999, 0x999999999999999A), "tenth"},
+        {float128::inv_pi(), Encoded(0x3FFD45F306DC9C88, 0x2A53F84EAFA3EA6A), "inv_pi"},
+        {float128::inv_sqrt_pi(), Encoded(0x3FFE20DD750429B6, 0xD11AE3A914FED7FE), "inv_sqrt_pi"},
+        {float128::ln2(), Encoded(0x3FFE62E42FEFA39E, 0xF35793C7673007E6), "ln2"},
+        {float128::ln10(), Encoded(0x400026BB1BBB5551, 0x582DD4ADAC5705A6), "ln10"},
+        {float128::log2_e(), Encoded(0x3FFF71547652B82F, 0xE1777D0FFDA0D23A), "log2_e"},
+        {float128::log10_e(), Encoded(0x3FFDBCB7B1526E50, 0xE32A6AB7555F5A68), "log10_e"},
+        {float128::log10_2(), Encoded(0x3FFD34413509F79F, 0xEF311F12B35816F9), "log10_2"},
+        {float128::inv_sqrt_3(), Encoded(0x3FFE279A74590331, 0xC4D218F81E4AFB25), "inv_sqrt_3"},
+        {float128::egamma(), Encoded(0x3FFE2788CFC6FB61, 0x8F49A37C7F0202A6), "egamma"},
+        {float128::phi(), Encoded(0x3FFF9E3779B97F4A, 0x7C15F39CC0605CEE), "phi"},
+    };
+    for (const auto& c : constants) {
+        EXPECT_SAME(c.actual, c.expected) << " for " << c.name;
+    }
+}
+
+TEST(float128, SqrMatchesMultiplyAtTheEdges)
+{
+    // sqr() has to round like the multiply where the square is subnormal, and overflow where it does.
+    srand(RANDOM_SEED);
+    for (auto i = 0u; i < RANDOM_TEST_COUNT / 4; ++i) {
+        const float128 tiny = RandomFinite(0x3FFF - 8260, 0x3FFF - 8190);
+        EXPECT_SAME(sqr(tiny), tiny * tiny) << " for x=" << f128_ref::Bits(tiny);
+        const float128 huge = RandomFinite(0x3FFF + 8180, 0x3FFF + 8200);
+        EXPECT_SAME(sqr(huge), huge * huge) << " for x=" << f128_ref::Bits(huge);
+    }
+}
+
+TEST(float128, ScalarOnTheLeftArithmeticAtRunTime)
+{
+    // The constexpr tests check these forms at compile time; division is not constexpr, and a
+    // scalar divided by a float128 was not checked anywhere.
+    EXPECT_SAME(opaque(7) / float128(2), float128(3.5));
+    EXPECT_SAME(opaque(1) / float128(4), Pow2(-2));
+    EXPECT_SAME(opaque(1.0) / float128(3), Encoded(0x3FFD555555555555, 0x5555555555555555));
+    EXPECT_SAME(opaque(int64_t {-9}) / float128(-3), float128(3));
+    EXPECT_SAME(opaque(3.0) * float128(2), float128(6));
+    EXPECT_SAME(opaque(10u) - float128(3), float128(7));
+    EXPECT_SAME(opaque(2.5f) + float128(1), float128(3.5));
+    static_assert(std::is_same_v<decltype(1.0 / float128(3)), float128>);
+    static_assert(std::is_same_v<decltype(2u * float128(3)), float128>);
+}
+
+TEST(float128, ConstexprContract)
+{
+    // Everything the class documentation lists as constexpr has to stay usable in a constant
+    // expression; these are the ones no other test evaluates at compile time.
+    constexpr float128 one = float128::one();
+    constexpr float128 two_and_a_half = float128(5) >> 1;
+    constexpr float128 denorm = std::numeric_limits<float128>::denorm_min();
+    static_assert(rint(two_and_a_half) == float128(2) && nearbyint(-two_and_a_half) == float128(-2));
+    static_assert(scalbn(one, 3) == float128(8) && scalbln(one, -1L) == float128::half());
+    static_assert(nextafter(one, float128(2)) == float128::nextUp(one) && nexttoward(one, float128()) == float128::nextDown(one));
+    static_assert(float128::nextUp(-float128::inf()) == -std::numeric_limits<float128>::max());
+    static_assert(float128::nextDown(-one) < -one && float128::nextUp(-denorm).is_zero());
+    static_assert(totalorder(-float128(), float128()) && !totalorder(float128(), -float128()) && totalordermag(-one, float128(2)));
+    static_assert(fmaxmag(float128(-3), float128(2)) == float128(-3) && fminmag(float128(-3), float128(2)) == float128(2));
+    static_assert(issubnormal(denorm) && !issubnormal(float128()) && iszero(-float128()) && issignaling(float128::signaling_nan()));
+    static_assert(iscanonical(one) && fpclassify(one) == FP_NORMAL && isnormal(-one) && signbit(-one) && isfinite(one));
+    static_assert(isunordered(float128::nan(), one) && isless(one, float128(2)) && islessequal(one, one));
+    static_assert(isgreater(float128(2), one) && isgreaterequal(one, one) && islessgreater(one, float128(2)));
+    static_assert(std::bit_cast<uint32_t>(static_cast<float>(-float128::inf())) == 0xFF800000u);
+    static_assert(float128().is_int() && !float128().is_subnormal() && denorm.is_subnormal());
+    static_assert(ilogb(denorm) == -16494 && ldexp(denorm, 16494) == one);
+    static_assert(float128::exp10(-10) == float128(0xAB7D6AE6881CB511, 0x3FDDB7CDFD9D7BDB));
+
+    // and the same at run time, from values the optimizer cannot see
+    EXPECT_SAME(rint(float128(opaque(5)) >> 1), float128(2));
+    EXPECT_SAME(nextafter(float128(opaque(1)), float128(2)), float128::nextUp(one));
+    EXPECT_EQ(ilogb(ldexp(float128(opaque(1)), -16494)), -16494);
+}
+
+TEST(float128, Exp10IsCorrectlyRounded)
+{
+    // 10^e rounded to nearest, from exact rationals, across the range: exact up to 10^48, rounded
+    // above it and for every negative e, subnormal below 10^-4931, and past both ends.
+    const struct {
+        int32_t e;
+        uint64_t high, low;
+    } cases[] = {
+        {-4966, 0x0000000000000000, 0x0000000000000000},
+        {-4965, 0x0000000000000000, 0x0000000000000002},
+        {-4950, 0x0000000000000000, 0x00057C9647E1A018},
+        {-4931, 0x00027CB6CDD979C1, 0x6F61C65C8726B012},
+        {-4000, 0x0C17387AE70C9E70, 0x0B8049732D11A23D},
+        {-100, 0x3EB2BFF2EE48E052, 0xFD7AB2F0FC572779},
+        {-48, 0x3F5F7624F8A762FD, 0x82B2AAC18030B01B},
+        {-10, 0x3FDDB7CDFD9D7BDB, 0xAB7D6AE6881CB511},
+        {-1, 0x3FFB999999999999, 0x999999999999999A},
+        {0, 0x3FFF000000000000, 0x0000000000000000},
+        {1, 0x4002400000000000, 0x0000000000000000},
+        {48, 0x409E5E531A0A1C87, 0x2BAD2CE16256FE82},
+        {49, 0x40A1B5E7E08CA3A8, 0xF6987819BAECBE22},
+        {100, 0x414B249AD2594C37, 0xCEB0B2784C4CE0BF},
+        {4000, 0x73E6A3750647FCAB, 0x18C21AB905450CC3},
+        {4932, 0x7FFEAE596552B8FD, 0xED99D037E3D04B75},
+        {4933, 0x7FFF000000000000, 0x0000000000000000},
+    };
+    for (const auto& c : cases) {
+        EXPECT_SAME(float128::exp10(c.e), Encoded(c.high, c.low)) << " for e=" << c.e;
+    }
+}
+
+TEST(float128, DoubleFactorial)
+{
+    const float128 one = float128::one();
+    EXPECT_SAME(double_factorial(0), one);
+    EXPECT_SAME(double_factorial(1), one);
+    EXPECT_SAME(double_factorial(5), float128(15));
+    EXPECT_SAME(double_factorial(6), float128(48));
+    EXPECT_SAME(double_factorial(10), float128(3840));
+    // exact while the products fit the significand: every odd x to 51, every even x to 74
+    EXPECT_SAME(double_factorial(51), Encoded(0x406E25DF877E79C4, 0x044894056A942AA6));
+    EXPECT_SAME(double_factorial(74), Encoded(0x40B33C0011ED1BEA, 0x0C8EF5B41E71FFE8));
+    // rounded beyond that, within an ulp of the correctly rounded value: 99!! happens to be it
+    EXPECT_SAME(double_factorial(99), Encoded(0x410378975494DFC4, 0xF16E16C11655BD38));
+    EXPECT_LE(f128_ref::Saturate64(f128_ref::UlpDistance(double_factorial(98), Encoded(0x41007A88E4484BE3, 0xB6B92EB2FA9C6C08))), 1u);
+    // (-1)!! is the empty product; the other negative arguments have no value. Negative arguments
+    // used to read before the start of the table.
+    EXPECT_SAME(double_factorial(-1), one);
+    EXPECT_TRUE(isnan(double_factorial(-2)));
+    EXPECT_TRUE(isnan(double_factorial(-7)));
+    EXPECT_TRUE(isnan(double_factorial(INT_MIN)));
+    EXPECT_SAME(double_factorial(100), float128::inf());
 }

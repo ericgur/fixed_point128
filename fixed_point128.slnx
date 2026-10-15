@@ -14,6 +14,7 @@
     <File Path="README.md" />
   </Folder>
   <Project Path="msvc/bench.vcxproj" Id="16ba4eff-3569-418b-82bf-f2b5deb3d612" />
+  <Project Path="msvc/fixed_point128_env_tests.vcxproj" Id="8f0e3c1a-5b2d-4e7f-9a61-3d4c2b1e0f75" />
   <Project Path="msvc/fixed_point128_tests.vcxproj" Id="6468231d-bbb6-4478-a65c-2a26d1e667c3" />
   <Project Path="msvc/googletest.vcxproj" Id="2c43c518-cd01-49ee-8385-1e85a0da3e97" />
 </Solution>

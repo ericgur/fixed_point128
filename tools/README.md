@@ -1,14 +1,20 @@
 # Maintenance tools
 
-Two things live here, both concerned with `log2()` - the one in `fixed_point128` and the one in
-`float128`, which share their reduction tables. Neither is part of the library or of a normal build.
+None of these is part of the library or of a normal build. They are run by hand, when the code they
+check is touched.
 
 | | what it is |
 | --- | --- |
 | `gen_log2_tables.py` | generates - or verifies - the constant tables `log2()` reduces with |
 | `log2_ulp_dump.cpp` + `log2_ulp_check.py` | measures the error of `log2()` in ulps against a high precision reference |
+| `ieee_probe.cpp` + `ieee_check.py` | checks the correctly rounded `float128` operations bit for bit, in every rounding direction |
+| `gen_two_over_pi.py` | generates - or verifies - the 2/pi table the trigonometric functions reduce large arguments with |
+| `gen_ref_vectors.py` | generates the reference tables the test suite checks against, `tests/float128_ref_data.h` |
 
-Both Python scripts need [mpmath](https://mpmath.org/):
+The first two are concerned with `log2()` - the one in `fixed_point128` and the one in `float128`,
+which share their reduction tables. The rest concern `float128` alone.
+
+The Python scripts need [mpmath](https://mpmath.org/):
 
 ```sh
 pip install mpmath
@@ -113,3 +119,48 @@ output, which is what matters here) are worthless.
 `log2_ulp_dump` is excluded from the default build. Either name the target explicitly, as above, or
 configure with `-DFP128_BUILD_TOOLS=ON`. It is only wired into the CMake build - the MSVC solution
 in `msvc/` does not carry a project for it, since these are run occasionally and from a shell.
+
+## The IEEE 754 differential check
+
+IEEE 754 requires addition, subtraction, multiplication, division, square root, fused multiply-add
+and the conversions to be correctly rounded: the result has to be the exact one, rounded once, in
+the current rounding direction. A comparison within an ulp cannot tell that apart from an almost
+right implementation, and a random operand rarely lands where the difference shows - next to a tie,
+a sticky bit away from one, in the subnormal range. `ieee_check.py` aims its operands at exactly
+those places, has `ieee_probe` run each operation, and compares every bit of the result with a
+reference computed on exact rationals. The sign of a zero counts, and so does the quiet bit of a NaN.
+
+The test suite carries a few hundred such cases per operation (`tests/float128_ieee_gtest.cpp`). This
+draws tens of thousands afresh from a seed, and is the thing to run after touching the arithmetic.
+
+```sh
+cmake --build out/build/msvc/tools --config Release --target ieee_probe ieee_probe_env
+python tools/ieee_check.py --probe out/build/msvc/bin/Release/ieee_probe.exe
+python tools/ieee_check.py --probe out/build/msvc/bin/Release/ieee_probe_env.exe --env
+```
+
+```
+ok   add:nearest                   0/2302
+ok   div:nearest                   0/2502
+...
+ok   sqrt:downward                 0/300
+```
+
+`ieee_probe_env` is the same program built with `FP128_IEEE_ENV`; with `--env` every operation runs
+in all four rounding directions, and the exception flags it raised are compared too. `--count` sets
+the draws per operation and direction, `--seed` the seed. It exits non zero on any mismatch.
+
+(The Visual Studio generator cannot build these through `cmake --build --preset ... --target`, which
+looks for the project at the top of the build tree; building from the `tools` directory of the build
+tree, as above, works for every generator.)
+
+## The 2/pi table
+
+`sin`, `cos` and `tan` reduce an argument above 2^60 by multiplying it with a 384 bit window of the
+binary expansion of 2/pi, read as deep as the argument's exponent requires - about 16650 bits for one
+near the top of the range. The expansion is `two_over_pi_bits` in `include/float128.h`:
+
+```sh
+python tools/gen_two_over_pi.py --check   # verify the table in the header
+python tools/gen_two_over_pi.py           # print it, to paste over the array
+```

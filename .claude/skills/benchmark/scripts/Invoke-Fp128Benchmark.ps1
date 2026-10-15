@@ -40,7 +40,8 @@
     Which configurations to measure. Default both.
 
 .PARAMETER SaveBaseline
-    Promote the run just measured to the baseline, replacing whatever was there.
+    Promote the run just measured to the baseline, replacing whatever was there. The report is
+    written first, so it compares the run against the baseline it replaces.
 
 .PARAMETER NoBuild
     Measure the binaries already in the build tree instead of rebuilding first.
@@ -383,25 +384,33 @@ function Enable-ClangToolchain {
 function Build-BenchTarget {
     param([Parameter(Mandatory)][hashtable]$Config)
 
-    $buildTree = Join-Path $repoRoot ('out\build\{0}' -f $Config.ConfigurePreset)
-    if (-not (Test-Path (Join-Path $buildTree 'CMakeCache.txt'))) {
-        Write-Host ("Configuring preset '{0}'..." -f $Config.ConfigurePreset)
-        & cmake --preset $Config.ConfigurePreset | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "cmake --preset $($Config.ConfigurePreset) failed"
+    # cmake looks for CMakePresets.json in the current directory, so the presets are only this
+    # repository's when the script runs from its root. Started anywhere else, it configured and built
+    # whatever tree the caller was in, while the measurement below still read $repoRoot\out\build.
+    Push-Location $repoRoot
+    try {
+        $buildTree = Join-Path $repoRoot ('out\build\{0}' -f $Config.ConfigurePreset)
+        if (-not (Test-Path (Join-Path $buildTree 'CMakeCache.txt'))) {
+            Write-Host ("Configuring preset '{0}'..." -f $Config.ConfigurePreset)
+            & cmake --preset $Config.ConfigurePreset | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "cmake --preset $($Config.ConfigurePreset) failed"
+            }
         }
-    }
 
-    Write-Host ("Building preset '{0}'..." -f $Config.BuildPreset)
-    # Merging stderr into the output stream would otherwise raise a terminating NativeCommandError
-    # under ErrorActionPreference = Stop, and MSBuild writes to stderr on builds that succeed.
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $output = & cmake --build --preset $Config.BuildPreset --target bench 2>&1
-    $ErrorActionPreference = $previousPreference
-    if ($LASTEXITCODE -ne 0) {
-        $output | ForEach-Object { Write-Host $_ }
-        throw "cmake --build --preset $($Config.BuildPreset) failed"
+        Write-Host ("Building preset '{0}'..." -f $Config.BuildPreset)
+        # Merging stderr into the output stream would otherwise raise a terminating NativeCommandError
+        # under ErrorActionPreference = Stop, and MSBuild writes to stderr on builds that succeed.
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $output = & cmake --build --preset $Config.BuildPreset --target bench 2>&1
+        $ErrorActionPreference = $previousPreference
+        if ($LASTEXITCODE -ne 0) {
+            $output | ForEach-Object { Write-Host $_ }
+            throw "cmake --build --preset $($Config.BuildPreset) failed"
+        }
+    } finally {
+        Pop-Location
     }
 }
 
@@ -1239,19 +1248,6 @@ if (-not $ReportOnly) {
     }
 }
 
-if ($SaveBaseline) {
-    foreach ($config in $selected) {
-        foreach ($target in $coreTargets) {
-            $name = Get-ResultFileName -ToolchainName $config.Name -CoreLabel $target.Label
-            $source = Join-Path $currentDir $name
-            if (Test-Path $source) {
-                Copy-Item $source (Join-Path $baselineDir $name) -Force
-            }
-        }
-    }
-    Write-Host ('Baseline updated from this run: {0}' -f $baselineDir)
-}
-
 $cores = [ordered]@{}
 foreach ($target in $coreTargets) {
     $comparisons = [ordered]@{}
@@ -1346,3 +1342,20 @@ foreach ($label in $cores.Keys) {
 }
 Write-Host ''
 Write-Host ('Report: {0}' -f $reportPath)
+
+# Promoted only once the report is written, so that the report compares this run against the
+# baseline it replaces. Promoting first made every -SaveBaseline report compare the run with itself.
+if ($SaveBaseline) {
+    $promoted = 0
+    foreach ($config in $selected) {
+        foreach ($target in $coreTargets) {
+            $name = Get-ResultFileName -ToolchainName $config.Name -CoreLabel $target.Label
+            $source = Join-Path $currentDir $name
+            if (Test-Path $source) {
+                Copy-Item $source (Join-Path $baselineDir $name) -Force
+                $promoted++
+            }
+        }
+    }
+    Write-Host ('Baseline updated from this run ({0} files): {1}' -f $promoted, $baselineDir)
+}

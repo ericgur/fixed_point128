@@ -71,12 +71,14 @@
 #ifndef FP128_FIXED_POINT128_T_H
 #define FP128_FIXED_POINT128_T_H
 
+#include <cmath>       // std::sqrt, std::ldexp, std::frexp, FP_ILOGB0
 #include <format>      // std::formatter
 #include <functional>  // std::hash
 #include <limits>
 #include <istream>
 #include <ostream>
 #include "fp128_shared.h"
+#include "fp128_decimal.h"
 
 namespace fp128
 {
@@ -139,6 +141,77 @@ template <int32_t I> [[nodiscard]] fixed_point128<I> reciprocal(const fixed_poin
 template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcept;
 /// @}
 
+/**
+ * @brief Divides a 256 bit numerator by a 128 bit divisor: the one call of div_128bit() in this header.
+ *
+ * The long division, the remainder and the integer square root of fixed_point128 all divide by a
+ * divisor that needs both QWORDs, and all of them come through here. The word count is fixed at four
+ * by the template argument of div_128bit<4>(), so its loops are unrolled for this shape whether the
+ * compiler inlines it or not. That used to depend on inlining: with the count an ordinary argument
+ * and callers in int128_shared.h and float128.h sharing one out of line copy, clang++ compiled a
+ * generic division and the long division here lost 15%.
+ *
+ * @param q (output) Quotient, three words, q[0] lowest.
+ * @param r (output, optional) Remainder, two words. Can be nullptr.
+ * @param u Numerator, four words, u[0] lowest.
+ * @param v Divisor, two words; v[1] must not be zero.
+ * @return true on success, false when v[1] is zero or a pointer is null.
+ */
+[[nodiscard]] inline bool Divide256By128(uint64_t* q, uint64_t* r, const uint64_t* u, const uint64_t* v) noexcept
+{
+    return div_128bit<4>(q, r, u, v);
+}
+
+/**
+ * @brief 1 / (n(n+1)) for n = 1..40, with 125 fraction bits rounded to nearest, {high, low}.
+ *
+ * The ratio of consecutive terms of the sine and cosine series: the sine term after x^n / n! is the
+ * previous one times x^2 / ((n+1)(n+2)), entries 2, 4, 6, ... of this table, and the cosine terms use
+ * entries 1, 3, 5, ... Generated with Python fractions (exact), see fixed_point128::TrigSeries().
+ */
+inline constexpr uint64_t fp128_trig_series_table[][2] = {
+    {0x1000000000000000ull, 0x0000000000000000ull},  // 1 / (1 * 2)
+    {0x0555555555555555ull, 0x5555555555555555ull},  // 1 / (2 * 3)
+    {0x02AAAAAAAAAAAAAAull, 0xAAAAAAAAAAAAAAABull},  // 1 / (3 * 4)
+    {0x0199999999999999ull, 0x999999999999999Aull},  // 1 / (4 * 5)
+    {0x0111111111111111ull, 0x1111111111111111ull},  // 1 / (5 * 6)
+    {0x00C30C30C30C30C3ull, 0x0C30C30C30C30C31ull},  // 1 / (6 * 7)
+    {0x0092492492492492ull, 0x4924924924924925ull},  // 1 / (7 * 8)
+    {0x0071C71C71C71C71ull, 0xC71C71C71C71C71Cull},  // 1 / (8 * 9)
+    {0x005B05B05B05B05Bull, 0x05B05B05B05B05B0ull},  // 1 / (9 * 10)
+    {0x004A7904A7904A79ull, 0x04A7904A7904A790ull},  // 1 / (10 * 11)
+    {0x003E0F83E0F83E0Full, 0x83E0F83E0F83E0F8ull},  // 1 / (11 * 12)
+    {0x0034834834834834ull, 0x8348348348348348ull},  // 1 / (12 * 13)
+    {0x002D02D02D02D02Dull, 0x02D02D02D02D02D0ull},  // 1 / (13 * 14)
+    {0x0027027027027027ull, 0x0270270270270270ull},  // 1 / (14 * 15)
+    {0x0022222222222222ull, 0x2222222222222222ull},  // 1 / (15 * 16)
+    {0x001E1E1E1E1E1E1Eull, 0x1E1E1E1E1E1E1E1Eull},  // 1 / (16 * 17)
+    {0x001AC5701AC5701Aull, 0xC5701AC5701AC570ull},  // 1 / (17 * 18)
+    {0x0017F405FD017F40ull, 0x5FD017F405FD017Full},  // 1 / (18 * 19)
+    {0x00158ED2308158EDull, 0x2308158ED2308159ull},  // 1 / (19 * 20)
+    {0x0013813813813813ull, 0x8138138138138138ull},  // 1 / (20 * 21)
+    {0x0011BB4A4046ED29ull, 0x011BB4A4046ED290ull},  // 1 / (21 * 22)
+    {0x00103091B51F5E1Aull, 0x4EECC652F8EAC041ull},  // 1 / (22 * 23)
+    {0x000ED7303B5CC0EDull, 0x7303B5CC0ED7303Bull},  // 1 / (23 * 24)
+    {0x000DA740DA740DA7ull, 0x40DA740DA740DA74ull},  // 1 / (24 * 25)
+    {0x000C9A633FCD9673ull, 0x00C9A633FCD96730ull},  // 1 / (25 * 26)
+    {0x000BAB656100BAB6ull, 0x56100BAB656100BBull},  // 1 / (26 * 27)
+    {0x000AD602B580AD60ull, 0x2B580AD602B580ADull},  // 1 / (27 * 28)
+    {0x000A16B312EA8FC3ull, 0x77CD8E80A16B312Full},  // 1 / (28 * 29)
+    {0x00096A850096A850ull, 0x096A850096A85009ull},  // 1 / (29 * 30)
+    {0x0008CF008CF008CFull, 0x008CF008CF008CF0ull},  // 1 / (30 * 31)
+    {0x0008421084210842ull, 0x1084210842108421ull},  // 1 / (31 * 32)
+    {0x0007C1F07C1F07C1ull, 0xF07C1F07C1F07C1Full},  // 1 / (32 * 33)
+    {0x00074D1E92F0074Dull, 0x1E92F0074D1E92F0ull},  // 1 / (33 * 34)
+    {0x0006E25006E25006ull, 0xE25006E25006E250ull},  // 1 / (34 * 35)
+    {0x0006806806806806ull, 0x8068068068068068ull},  // 1 / (35 * 36)
+    {0x000626703D806267ull, 0x03D80626703D8062ull},  // 1 / (36 * 37)
+    {0x0005D392C1005D39ull, 0x2C1005D392C1005Dull},  // 1 / (37 * 38)
+    {0x0005871513005871ull, 0x5130058715130058ull},  // 1 / (38 * 39)
+    {0x0005405405405405ull, 0x4054054054054054ull},  // 1 / (39 * 40)
+    {0x0004FEC04FEC04FEull, 0xC04FEC04FEC04FECull},  // 1 / (40 * 41)
+};
+
 /***********************************************************************************
  *                                  Main Code
  ************************************************************************************/
@@ -170,7 +243,7 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  * The bound is the smallest <B>I</B> that works, not a safe margin:
  * <UL>
  * <LI><B>I >= 2</B>: pi(), e(), and the exponential family exp(), exp2(), expm1(), pow() and
- *     tanh(), which reach e() or - for tanh - form e^x + e^-x, never below 2.</LI>
+ *     tanh(), which all reach e().</LI>
  * <LI><B>I >= 3</B>: pi2(), which is 6.28.</LI>
  * <LI><B>I >= 4</B>: the trigonometric group sin1(), cos1(), sin(), cos(), tan(), asin(), acos(),
  *     atan(), atan2(), and the hyperbolic sinh() and cosh().</LI>
@@ -187,6 +260,11 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  *     comparisons and the bitwise operators are the plain 128 bit integer operations and there is
  *     no negative zero to normalize away.</LI>
  * <LI>Multiplication and division work on magnitudes internally and restore the sign afterwards.</LI>
+ * <LI><B>Rounding:</B> every result that does not fit the grid is rounded to the nearest grid value,
+ *     and an exact tie goes away from zero (the magnitude is rounded half up). This holds for the
+ *     multiplication, the division by a fixed_point128 or by an integer, the right shifts, and the
+ *     conversion to an instantiation with more integer bits. The conversion from a floating point
+ *     value is the exception: it truncates towards zero, as the conversion to an integer does.</LI>
  * <LI>A fixed_point128 object is not thread safe. Accessing a const object from multiple threads is safe.</LI>
  * <LI>fixed_point128 is <B>conditionally safe</B>, 2 different non const objects can be accessed concurrently.</LI>
  * <LI>Only 64 bit builds are supported.</LI>
@@ -217,8 +295,8 @@ template <int32_t I> void fact_reciprocal(int x, fixed_point128<I>& res) noexcep
  *     bound by the rest of this list.</LI>
  * <LI>Function local statics, which a constexpr function may not declare. The transcendental
  *     constants (pi, e, sqrt_2, ...) and the factorial reciprocal table are parsed from strings
- *     into them, and reciprocal holds its bounds the same way. sqrt is doubly out, it calls the
- *     CRT's sqrt() for its initial estimate.</LI>
+ *     into them. reciprocal is a division. sqrt and hypot seed their integer square root with the
+ *     CRT's sqrt().</LI>
  * </UL>
  */
 template <int32_t I> class fixed_point128
@@ -230,6 +308,8 @@ template <int32_t I> class fixed_point128
     // friends
     template <int32_t I2> friend class fixed_point128;  // this class is a friend of all its template instances. Avoids awkward getter/setter functions.
     friend class fp128_gtest;
+    // the stream extractor reads with ParseDecimal(), which reports a value out of range
+    template <int32_t J> friend std::istream& operator>>(std::istream& is, fixed_point128<J>& value);
 
 private:
     /// @name Data Members
@@ -250,9 +330,107 @@ private:
     static inline const double lower_unity_l = ::pow(2, -F);             ///< Scale factor for lower QWORD (low 32 bits) to double.
     static inline const double lower_unity_h = ::pow(2, 32 - F);         ///< Scale factor for lower QWORD (high 32 bits) to double.
     static constexpr uint64_t int_mask = UINT64_MAX << upper_frac_bits;  ///< Bitmask for the sign and integer bits in the upper QWORD.
-    static constexpr int32_t max_frac_digits = (int)(F / 3.3);           ///< Maximum meaningful base-10 fractional digits.
+    /// Decimal places the text form shows: ceil(F * log10(2)), the fewest that tell every pair of
+    /// neighbouring values apart, 10^-max_frac_digits being the first power of ten below the grid
+    /// spacing 2^-F. F * log10(2) is never an integer, so the floor plus one is that ceiling. It used
+    /// to be F / 3.3, one short for most I: 1 - epsilon printed as 1 and max() as 2^I.
+    static constexpr int32_t max_frac_digits = static_cast<int32_t>(F * 0.30102999566398119521) + 1;
+    /// Fraction digits the string constructor reads. A point halfway between two grid values has F + 1
+    /// decimal places, so 130 settle every rounding; the digits after them cannot reach a halfway
+    /// point and, ties going away from zero, cannot change the outcome at one either.
+    static constexpr int32_t parsed_frac_digits = 130;
     static constexpr uint64_t sign_mask = 1ull << 63;                    ///< Bitmask of the sign bit within the upper QWORD.
     /// @}
+
+    /**
+     * @brief Reads a decimal number to the nearest grid value, a tie going away from zero.
+     *
+     * Grammar: an optional sign, decimal digits, and an optional point followed by more digits; at
+     * least one digit in all. The integer part is kept modulo 2^64, which is all that reaches the
+     * 128 bit result: shifted into place it is the integer part modulo 2^(I+1). The fraction is
+     * kept exactly, as the integer N of its first parsed_frac_digits digits over 10^D, and rounded
+     * as q = floor(N * 2^(F+1) / 10^D), the grid value being (q + 1) / 2 rounded down, which
+     * rounds half away from zero. Both steps are exact big integer arithmetic.
+     *
+     * @param first Start of the text, at the sign or the first digit
+     * @param last One past the end of the text
+     * @param l Receives the low QWORD of the raw value, wrapped modulo 2^128
+     * @param h Receives the high QWORD
+     * @param end Receives a pointer past the last character read, first when nothing was read
+     * @return 0 when there were no digits (the value is zero), 1 when the value is in range, 2 when
+     *         it is outside [lowest(), max()] and wrapped.
+     */
+    [[nodiscard]] static int32_t ParseDecimal(const char* first, const char* last, uint64_t& l, uint64_t& h, const char*& end) noexcept
+    {
+        l = h = 0;
+        end = first;
+        const char* p = first;
+        bool negative = false;
+        if (p < last && (*p == '-' || *p == '+')) {
+            negative = (*p == '-');
+            ++p;
+        }
+
+        // The integer part, modulo 2^64, and whether it reached 2^64 at all.
+        uint64_t integer = 0;
+        bool integer_overflow = false;
+        bool any_digit = false;
+        while (p < last && *p >= '0' && *p <= '9') {
+            const uint64_t digit = static_cast<uint64_t>(*p - '0');
+            if (integer > (UINT64_MAX - digit) / 10) {
+                integer_overflow = true;
+            }
+            integer = integer * 10 + digit;
+            any_digit = true;
+            ++p;
+        }
+
+        // The fraction as an exact integer over 10^digits.
+        detail::big_uint fraction;
+        int32_t digits = 0;
+        if (p < last && *p == '.') {
+            ++p;
+            while (p < last && *p >= '0' && *p <= '9') {
+                if (digits < parsed_frac_digits) {
+                    fraction.mul_small(10u);
+                    fraction.add_small(static_cast<uint32_t>(*p - '0'));
+                    ++digits;
+                }
+                any_digit = true;
+                ++p;
+            }
+        }
+        if (!any_digit)
+            return 0;
+        end = p;
+
+        // q = floor(fraction * 2^(F+1) / 10^digits), below 2^(F+1), so it fits the 128 bits read out.
+        bool remainder = false;
+        fraction.shift_left(F + 1);
+        fraction.div_pow10(digits, remainder);
+        uint64_t q_low = static_cast<uint64_t>(fraction.at(0)) | (static_cast<uint64_t>(fraction.at(1)) << 32);
+        uint64_t q_high = static_cast<uint64_t>(fraction.at(2)) | (static_cast<uint64_t>(fraction.at(3)) << 32);
+        // (q + 1) / 2: half away from zero, applied to the magnitude
+        const uint8_t carry = addcarryx_u64(0, q_low, 1, &q_low);
+        addcarryx_u64(carry, q_high, 0, &q_high);
+        shift_right128_inplace(q_low, q_high, 1);
+
+        // magnitude = integer * 2^F + fraction, which F >= 64 puts in the upper QWORD for the integer
+        uint64_t m_low = q_low, m_high = 0;
+        const uint8_t carry2 = addcarryx_u64(0, q_high, integer << upper_frac_bits, &m_high);
+        // Out of range: an integer part above 2^I can only wrap; at 2^I and below the 128 bit
+        // magnitude is exact and compares against 2^127 - 1, or 2^127 for a negative value.
+        const bool integer_too_large = integer_overflow || integer > (1ull << I);
+        const uint64_t limit_high = negative ? (1ull << 63) : (UINT64_MAX >> 1);
+        const uint64_t limit_low = negative ? 0 : UINT64_MAX;
+        const bool too_large = integer_too_large || carry2 != 0 || m_high > limit_high || (m_high == limit_high && m_low > limit_low);
+        if (negative) {
+            twos_complement128(m_low, m_high);
+        }
+        l = m_low;
+        h = m_high;
+        return too_large ? 2 : 1;
+    }
 
     /**
      * @brief Reads the magnitude of this object into a QWORD pair.
@@ -315,6 +493,29 @@ private:
         const uint64_t sign_bits = static_cast<uint64_t>(static_cast<int64_t>(high) >> 63);
         NegateIf(sign_bits);
         return sign_bits;
+    }
+
+    /**
+     * @brief The decimal digit that ten times a fraction carries into the integer part.
+     *
+     * Ten times a value below one needs four integer bits, which fixed_point128<1> to <3> do not
+     * have: their multiply by ten wraps the integer part away. The digit is therefore read from the
+     * full 192 bit product of the raw fraction and ten, and truncated - a digit is the floor of the
+     * product, never rounded, or 0.25 would print as 0.35 and 0.96 would produce the character after
+     * '9'.
+     *
+     * @param low Low QWORD of the fraction, a non negative value below one.
+     * @param high High QWORD of the fraction.
+     * @return floor(10 * fraction), in [0, 9].
+     */
+    [[nodiscard]] FP128_INLINE static constexpr uint64_t DigitTimesTen(uint64_t low, uint64_t high) noexcept
+    {
+        uint64_t carry_low = 0, carry_high = 0;
+        (void)mulx_u64(low, 10ull, &carry_low);
+        uint64_t middle = mulx_u64(high, 10ull, &carry_high);
+        const uint64_t top = carry_high + addcarryx_u64(0, middle, carry_low, &middle);
+        // the product carries F fraction bits; what is above them is the digit
+        return shift_right128(middle, top, upper_frac_bits);
     }
 
     /**
@@ -396,7 +597,8 @@ public:
     FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128& rhs) noexcept : low(rhs.low), high(rhs.high) {}
     /**
      * @brief cross-template Copy constructor, can be used between two different fixed_point128 templates
-     * A value too large for the destination wraps silently, as everywhere else in this class.
+     * A value too large for the destination wraps silently, as everywhere else in this class. Fraction
+     * bits the destination cannot hold are rounded to nearest, a tie going away from zero.
      * @param rhs fixed_point128 instance with from a different template instance.
      */
     template <int32_t I2> FP128_FORCE_INLINE constexpr fixed_point128(const fixed_point128<I2>& rhs) noexcept
@@ -414,7 +616,8 @@ public:
         }
         // rhs has more integer bits and less fraction bits
         else {  // I > I2
-            // shift right by I - I2 bits, replicating the sign bit so a negative value stays negative
+            // shift right by I - I2 bits, replicating the sign bit so a negative value stays negative,
+            // and round the dropped fraction bits to nearest
             constexpr int shift = I - I2;
             low = rhs.low;
             high = rhs.high;
@@ -541,120 +744,35 @@ public:
     }
     /**
      * @brief Constructor from const char* (C string).
-     * Accurate up to 37 digits after the decimal point.
-     * Allows creating very high precision values. Much slower than the rhs constructors.
-     * A value too large for the type wraps silently, which unlike the saturation the double
-     * constructor performs can land on either sign.
+     *
+     * Reads optional leading white space, an optional sign, decimal digits and an optional point
+     * followed by more digits, and stops at the first character that is not part of that. The value
+     * is the grid value nearest the decimal one, a tie going away from zero - correctly rounded
+     * for any number of digits and any I, which is what lets every value survive the trip through
+     * its own text form.
+     *
+     * The digits after the point are read as one exact integer and scaled by 2^F / 10^digits in big
+     * integer arithmetic, see ParseDecimal(). They used to be summed as a series of powers of ten held
+     * to 126 bits each, which was 22.8 ulp off at I = 1 and 3 ulp off at I = 4.
+     *
+     * Much slower than the other constructors. A value too large for the type wraps silently, modulo
+     * 2^(I+1) in its integer part, which unlike the saturation the double constructor performs can
+     * land on either sign; the stream extractor reports it instead.
      * @param x Input string
      */
     fixed_point128(const char* x) noexcept
     {
-        // 10^-n in fixed_point128<1> form, which holds 126 fraction bits whatever I is
-        static fixed_point128<1> base10_table[] = {
-            //  {low QWORD,             high QWORD}
-            {0x0000000000000000ull, 0x4000000000000000ull},  // 10^0, not used, makes the code simpler
-            {0x6666666666666666ull, 0x0666666666666666ull},  // 10^-1
-            {0x0A3D70A3D70A3D71ull, 0x00A3D70A3D70A3D7ull},  // 10^-2
-            {0xE76C8B4395810625ull, 0x0010624DD2F1A9FBull},  // 10^-3
-            {0xCA57A786C226809Dull, 0x0001A36E2EB1C432ull},  // 10^-4
-            {0xE108C3F3E0370CDDull, 0x000029F16B11C6D1ull},  // 10^-5
-            {0x634DAD31FCD24E16ull, 0x00000431BDE82D7Bull},  // 10^-6
-            {0xBD215E1E99483B02ull, 0x0000006B5FCA6AF2ull},  // 10^-7
-            {0x461CEFCFDC20D2B3ull, 0x0000000ABCC77118ull},  // 10^-8
-            {0x6D694B2E62D01512ull, 0x0000000112E0BE82ull},  // 10^-9
-            {0xD7BDBAB7D6AE6882ull, 0x000000001B7CDFD9ull},  // 10^-10
-            {0x2F2C92ABFBDE3DA7ull, 0x0000000002BFAFFCull},  // 10^-11
-            {0x04B7A84465FC9FC4ull, 0x0000000000465E66ull},  // 10^-12
-            {0x9A125DA07099432Dull, 0x0000000000070970ull},  // 10^-13
-            {0xDC35095CD80F5385ull, 0x000000000000B424ull},  // 10^-14
-            {0xAF9EE756159B21F4ull, 0x0000000000001203ull},  // 10^-15
-            {0x2B297D889BC2B698ull, 0x00000000000001CDull},  // 10^-16
-            {0x1DEA8C8DA92D1242ull, 0x000000000000002Eull},  // 10^-17
-            {0x9C97747490EAE83Aull, 0x0000000000000004ull},  // 10^-18
-            {0x760F253EDB4AB0D3ull, 0x0000000000000000ull},  // 10^-19
-            {0x0BCE5086492111AFull, 0x0000000000000000ull},  // 10^-20
-            {0x012E3B40A0E9B4F8ull, 0x0000000000000000ull},  // 10^-21
-            {0x001E392010175EE6ull, 0x0000000000000000ull},  // 10^-22
-            {0x000305B66802564Aull, 0x0000000000000000ull},  // 10^-23
-            {0x00004D5F0A66A23Bull, 0x0000000000000000ull},  // 10^-24
-            {0x000007BCB43D769Full, 0x0000000000000000ull},  // 10^-25
-            {0x000000C612062576ull, 0x0000000000000000ull},  // 10^-26
-            {0x00000013CE9A36F2ull, 0x0000000000000000ull},  // 10^-27
-            {0x00000001FB0F6BE5ull, 0x0000000000000000ull},  // 10^-28
-            {0x0000000032B4BDFDull, 0x0000000000000000ull},  // 10^-29
-            {0x0000000005121300ull, 0x0000000000000000ull},  // 10^-30
-            {0x000000000081CEB3ull, 0x0000000000000000ull},  // 10^-31
-            {0x00000000000CFB12ull, 0x0000000000000000ull},  // 10^-32
-            {0x0000000000014C4Full, 0x0000000000000000ull},  // 10^-33
-            {0x000000000000213Bull, 0x0000000000000000ull},  // 10^-34
-            {0x0000000000000353ull, 0x0000000000000000ull},  // 10^-35
-            {0x0000000000000055ull, 0x0000000000000000ull},  // 10^-36
-            {0x0000000000000009ull, 0x0000000000000000ull},  // 10^-37
-            {0x0000000000000001ull, 0x0000000000000000ull}   // 10^-38
-        };
-        constexpr uint64_t base10_table_size = array_length(base10_table);
-        static_assert(max_frac_digits < base10_table_size);
-
         low = high = 0;
         if (x == nullptr)
             return;
 
-        const auto x_len = 1 + strlen(x);
-        // make_unique_for_overwrite throws bad_alloc, which this noexcept constructor must not
-        // propagate. The nothrow form reports a failed allocation as a null pointer instead.
-        auto str_ptr = std::unique_ptr<char[]>(new (std::nothrow) char[x_len]);
-        char* p = str_ptr.get();
-        if (p == nullptr)
-            return;
-        strnlwr(p, x, x_len);
-
         // skip leading white space. The cast keeps a negative char from reaching isspace, which
         // only accepts values representable as unsigned char (or EOF).
-        while (*p && isspace(static_cast<unsigned char>(*p)))
-            ++p;
+        while (*x && isspace(static_cast<unsigned char>(*x)))
+            ++x;
 
-        if (*p == '\0') {
-            *this = fixed_point128();
-            return;
-        }
-
-        // note a negative sign if present. The magnitude is built first and negated at the end.
-        bool negative = false;
-        if (*p == '-') {
-            negative = true;
-            ++p;
-        } else if (*p == '+')
-            ++p;
-
-        char* dec = strchr(p, '.');
-        // number is an integer
-        if (dec == nullptr) {
-            high = std::strtoull(p, nullptr, 10) << upper_frac_bits;
-            if (negative)
-                Negate();
-            return;
-        }
-
-        // number is a float, get the integer part using strtoull()
-        *dec = '\0';
-        const uint64_t int_val = std::strtoull(p, nullptr, 10) << upper_frac_bits;
-
-        p = dec + 1;
-        uint32_t digits = 0;
-        fixed_point128<1> frac;
-        // multiply each digits by 10^-n
-        while (++digits < base10_table_size && isdigit(static_cast<unsigned char>(*p))) {
-            uint32_t d = static_cast<uint64_t>(p[0] - '0');
-            frac += base10_table[digits] * d;
-            ++p;
-        }
-
-        // the fraction was accumulated with 126 bits of it, this instantiation keeps F of them
-        frac >>= (I - 1);
-        low = frac.low;
-        high = frac.high + int_val;
-        if (negative)
-            Negate();
+        const char* end = nullptr;
+        (void)ParseDecimal(x, x + strlen(x), low, high, end);
     }
     /**
      * @brief Constructor from std::string.
@@ -704,6 +822,8 @@ public:
     }
     /**
      * @brief cross-template assignment operator, can be used between two different fixed_point128 templates
+     * Behaves as the cross-template constructor: a value too large for this instantiation wraps, and
+     * fraction bits it cannot hold are rounded to nearest, a tie going away from zero.
      * @param rhs fixed_point128 instance with from a different template instance.
      * @return This object.
      */
@@ -722,7 +842,7 @@ public:
         }
         // rhs has more integer bits and less fraction bits
         else {  // I > I2
-            // shift right by I - I2 bits, replicating the sign bit
+            // shift right by I - I2 bits, replicating the sign bit and rounding to nearest
             constexpr int shift = I - I2;
             low = rhs.low;
             high = rhs.high;
@@ -869,13 +989,10 @@ public:
         }
         // the faster way, requires temp *= 10 not overflowing
         int digits = 0;
-        uint64_t res[2] {};
         while (digits++ < max_frac_digits && temp) {
             if constexpr (I < 4) {
-                res[0] = mulx_u64(temp.high, 10ull, &res[1]);  // multiply by 10
-                // extract the integer part
-                integer = shift_right128_round(res[0], res[1], upper_frac_bits);
-                temp *= 10;  // move another digit to the integer area
+                integer = DigitTimesTen(temp.low, temp.high);
+                temp *= 10;  // move another digit to the integer area, the integer part wraps
             } else {
                 temp *= 10;  // move another digit to the integer area
                 integer = FP128_GET_BITS(temp.high, upper_frac_bits, I + 1);
@@ -888,8 +1005,7 @@ public:
         if (temp) {
             uint64_t next_digit;
             if constexpr (I < 4) {
-                res[0] = mulx_u64(temp.high, 10ull, &res[1]);
-                next_digit = shift_right128_round(res[0], res[1], upper_frac_bits);
+                next_digit = DigitTimesTen(temp.low, temp.high);
             } else {
                 fixed_point128 t = temp;
                 t *= 10;
@@ -1192,17 +1308,18 @@ public:
     }
     /**
      * @brief Divide this object by x.
+     * The quotient is rounded to nearest, a tie going away from zero, whichever of the three paths
+     * below computes it.
      * @param rhs Right hand side operator (denominator)
      * @return this object.
-     * @throws std::logic_error when rhs is zero, leaving this object in an unspecified state - the
-     *         magnitude of what it held, the sign not yet put back.
+     * @throws std::logic_error when rhs is zero - zero divided by zero included - leaving this object
+     *         in an unspecified state: the magnitude of what it held, the sign not yet put back.
      */
     FP128_INLINE fixed_point128& operator/=(const fixed_point128& rhs)
     {
         bool need_rounding = false;
-        // trivial case, this object is zero
-        if (!*this)
-            return *this;
+        // A zero numerator needs no shortcut: every path below produces zero for it. Taking one here
+        // used to return zero for 0 / 0 too, where the division by zero has to throw.
 
         // The sign of the quotient is settled here and everything below works on magnitudes: the
         // shift, div_64bit and the long division are all unsigned. Taking the magnitude of the
@@ -1227,7 +1344,9 @@ public:
             const uint64_t denom = denom_high >> upper_frac_bits;
             uint64_t r;
             if (div_64bit((uint64_t*)q, &r, (uint64_t*)nom, denom, 2)) {
-                need_rounding = r > (denom >> 1);
+                // round half up on the magnitude, the rule the long division and the multiply use:
+                // 2r >= denom, spelled so that it cannot overflow
+                need_rounding = r >= denom - r;
                 high = q[1];
                 low = q[0];
             } else {  // error
@@ -1316,8 +1435,11 @@ public:
     }
     /**
      * @brief Divide this object by x.
+     * The quotient is rounded to nearest, a tie going away from zero: the same result as dividing by
+     * fixed_point128(x), which the integer divisor only makes cheaper.
      * @param x Denominator.
      * @return This object.
+     * @throws std::logic_error when x is zero.
      */
     template <> FP128_INLINE fixed_point128& operator/= <uint64_t>(uint64_t x)
     {
@@ -1329,49 +1451,60 @@ public:
 
         const uint64_t nom[2] = {low, high};
         // div_64bit shortcuts a numerator that is smaller than the divisor and returns without
-        // writing the quotient at all, so the destination has to start at zero. Otherwise a value
-        // whose raw 128 bit form is below the divisor would be left completely unchanged.
-        low = high = 0;
-        // the results is stored in low and high, the function fails on a divide by zero or overflow
-        if (!div_64bit(&low, nullptr, (uint64_t*)nom, x, 2)) {
-            low = high = 0;
-        } else {
-            NegateIf(sign_bits);
-        }
+        // writing the quotient at all, so the quotient has to start at zero. Otherwise a value whose
+        // raw 128 bit form is below the divisor would be left completely unchanged.
+        uint64_t q[2] {};
+        uint64_t r = 0;
+        // x is not zero and the pointers are valid, which are the only ways div_64bit can fail
+        (void)div_64bit(q, &r, nom, x, 2);
 
+        // round half up on the magnitude: 2r >= x, spelled so that it cannot overflow
+        low = q[0];
+        high = q[1];
+        FP128_ADD_ROUND_BIT(low, high, r >= x - r);
+        NegateIf(sign_bits);
         return *this;
     }
     /**
-     * @brief %= operator
+     * @brief %= operator, the remainder of a truncating division: x - y * trunc(x / y).
+     *
+     * The result is exact and keeps the sign of the numerator, as fmod() does. Two values on the same
+     * grid of 2^-F are integers scaled by the same power of two, so their remainder is the remainder
+     * of the raw 128 bit integers, scaled the same way: no quotient is formed, so it can neither
+     * overflow nor be rounded onto the wrong integer.
+     *
      * @param rhs Modulo operand.
      * @return This object.
+     * @throws std::logic_error when rhs is zero, zero modulo zero included.
      */
     FP128_INLINE fixed_point128& operator%=(const fixed_point128& rhs)
     {
-        // trivial cases, this object is zero or the rhs is zero
-        if (!*this)
-            return *this;
         if (!rhs)
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
 
-        // simple case, both are integers (fractions is zero)
-        if (is_int() && rhs.is_int()) {
-            return operator=(static_cast<int64_t>(*this) % static_cast<int64_t>(rhs));
-        }
-        // num or denom are fractions
-        // x mod y =  x - y * trunc(x/y)
-        fixed_point128 x_div_y = *this / rhs;
-        // Integer result - remainder is zero.
-        // Avoid the extra computation and precision loss with the standard equation.
-        if (x_div_y.is_int()) {
-            *this = 0;
-        }
-        // Fraction result - remainder is non zero.
-        else {
-            *this -= rhs * trunc(x_div_y);
+        // magnitudes, the remainder takes the sign of this object. lowest() has the magnitude 2^127,
+        // which an unsigned QWORD pair holds as it is.
+        uint64_t denom_low = 0, denom_high = 0;
+        (void)rhs.GetMagnitude(denom_low, denom_high);
+        const uint64_t sign_bits = TakeMagnitude();
+
+        uint64_t rem[2] {};
+        if (denom_high != 0) {
+            // a divisor that needs both QWORDs; the numerator is widened to the four words
+            // Divide256By128() takes, which costs two passes over leading zero words
+            const uint64_t nom[4] = {low, high, 0, 0};
+            const uint64_t denom[2] = {denom_low, denom_high};
+            uint64_t q[3] {};
+            (void)Divide256By128(q, rem, nom, denom);
+        } else {
+            const uint64_t nom[2] = {low, high};
+            uint64_t q[2] {};
+            (void)div_64bit(q, rem, nom, denom_low, 2);
         }
 
-        // the result keeps the sign of the numerator, as fmod() does
+        low = rem[0];
+        high = rem[1];
+        NegateIf(sign_bits);
         return *this;
     }
     /**
@@ -1384,8 +1517,14 @@ public:
     /**
      * @brief Shift right this object.
      * The shift is arithmetic: the sign bit is replicated, so the result is the value divided by
-     * 2^shift and rounded to nearest, with a tie going to the even neighbour.
-     * @param shift Bits to shift. Negative or very high values cause undefined behavior.
+     * 2^shift and rounded to nearest, a tie going away from zero - the rounding rule of the multiply
+     * and the divisions.
+     *
+     * That rule makes +-epsilon() a fixed point of a shift by one: epsilon() >> 1 is exactly half an
+     * epsilon, a tie, and rounds back up to epsilon(). A loop that halves a value until it reaches
+     * zero has to bound its iterations or test for epsilon() instead.
+     * @param shift Bits to shift. A negative count causes undefined behavior; 128 or more leaves
+     *              zero, apart from lowest() >> 128, which is the tie -epsilon() / 2 and so -epsilon().
      * @return This object.
      */
     FP128_FORCE_INLINE constexpr fixed_point128& operator>>=(int32_t shift) noexcept
@@ -1683,6 +1822,237 @@ private:
      */
     static constexpr int32_t LOG2_TERMS = (F + 8 + log2_reduction_bits - 1) / log2_reduction_bits;
 
+    /// @brief ln(2) as a 128 bit fraction, {high, low}: round(ln(2) * 2^128). The decimal string it
+    ///        replaces had wrong 35th and 36th digits.
+    static constexpr uint64_t ln2_fraction[2] = {0xB17217F7D1CF79ABull, 0xC9E3B39803F2F6AFull};
+    /// @brief log10(2) as a 128 bit fraction, {high, low}: round(log10(2) * 2^128). The decimal
+    ///        string it replaces had lost a digit, an error of 4e-35.
+    static constexpr uint64_t log10_2_fraction[2] = {0x4D104D427DE7FBCCull, 0x47C4ACD605BE48BCull};
+
+    /**
+     * @brief Multiplies this object by a constant in [0, 1) held as a 128 bit fraction.
+     *
+     * The full 256 bit product of the magnitude and the constant is formed and its upper half kept,
+     * rounded to nearest with a tie going away from zero. The constant therefore contributes 2^-128
+     * of relative error instead of the 2^-F a fixed_point128 of this instantiation would carry, which
+     * matters once the other factor is large: log() multiplies a log2 of up to 63 by ln(2).
+     *
+     * @param c_low Low QWORD of the constant, scaled by 2^128.
+     * @param c_high High QWORD of the constant.
+     * @return This object times the constant.
+     */
+    [[nodiscard]] FP128_INLINE constexpr fixed_point128 MulByFraction128(uint64_t c_low, uint64_t c_high) const noexcept
+    {
+        uint64_t l = 0, h = 0;
+        const uint64_t sign_bits = GetMagnitude(l, h);
+
+        uint64_t r1 = 0, r2 = 0, r3 = 0;
+        (void)mulx_u64(l, c_low, &r1);  // only its carry into r1 matters
+        r2 = mulx_u64(h, c_high, &r3);
+        uint64_t cross_high = 0;
+        uint64_t cross_low = mulx_u64(l, c_high, &cross_high);
+        uint8_t carry = addcarryx_u64(0, r1, cross_low, &r1);
+        carry = addcarryx_u64(carry, r2, cross_high, &r2);
+        addcarryx_u64(carry, r3, 0, &r3);
+        cross_low = mulx_u64(h, c_low, &cross_high);
+        carry = addcarryx_u64(0, r1, cross_low, &r1);
+        carry = addcarryx_u64(carry, r2, cross_high, &r2);
+        addcarryx_u64(carry, r3, 0, &r3);
+
+        // the product is scaled by 2^128 too much: keep r3:r2, rounded by the highest bit of r1
+        fixed_point128 res(r2, r3);
+        FP128_ADD_ROUND_BIT(res.low, res.high, (r1 >> 63) != 0);
+        res.NegateIf(sign_bits);
+        return res;
+    }
+
+    /// @brief 1/sqrt(2) as a 128 bit fraction, {high, low}: round(2^-0.5 * 2^128).
+    static constexpr uint64_t inv_sqrt2_fraction[2] = {0xB504F333F9DE6484ull, 0x597D89B3754ABE9Full};
+
+    /**
+     * @brief sqrt((1 - x) / 2) for x in [1/2, 1], the argument asin() and acos() reduce to.
+     * Formed as sqrt(1 - x) / sqrt(2): 1 - x is exact and the root correctly rounded, where halving
+     * 1 - x first would drop its last bit and the root would magnify that near x = 1.
+     * @param x Value in [1/2, 1].
+     * @return sqrt((1 - x) / 2), in [0, 1/2].
+     */
+    [[nodiscard]] FP128_INLINE static fixed_point128 RootOfHalfComplement(const fixed_point128& x) noexcept
+    {
+        return sqrt(fixed_point128::one() - x).MulByFraction128(inv_sqrt2_fraction[1], inv_sqrt2_fraction[0]);
+    }
+
+    /**
+     * @brief asin(x) for x in [0, 1/2], by Newton's method on sin().
+     *
+     *              sin(Xn) - a
+     * Xn+1 = Xn - -------------
+     *                cos(Xn)
+     * where 'a' is the argument, starting from the double precision asin(). The cosine stays above
+     * 0.86 on this range, so the iteration converges quadratically. A step is only taken when it
+     * moves sin(Xn) closer to the argument: a correction below the precision of sin() is noise, and
+     * the guard keeps the iteration from wandering on it. The converged case leaves before evaluating
+     * sin(candidate), so the guard costs close to nothing.
+     *
+     * @param x Value in [0, 1/2].
+     * @return asin(x).
+     */
+    [[nodiscard]] static fixed_point128 AsinNewton(const fixed_point128& x) noexcept
+    {
+        constexpr fixed_point128 eps = fixed_point128::epsilon() << 1;
+        constexpr int max_iterations = 6;
+        fixed_point128 res = ::asin(static_cast<double>(x));
+        fixed_point128 sin_res = sin(res);
+        fixed_point128 residual = fabs(sin_res - x);
+        for (int i = 0; i < max_iterations; ++i) {
+            const fixed_point128 e = (sin_res - x) / cos(res);
+            const fixed_point128 candidate = res - e;
+            // a step of a couple of ulp has converged; taking it unchecked skips the sin() below
+            if (fabs(e) <= eps) {
+                res = candidate;
+                break;
+            }
+
+            const fixed_point128 sin_candidate = sin(candidate);
+            const fixed_point128 candidate_residual = fabs(sin_candidate - x);
+            // the step made the estimate worse, or no better: it is noise, so keep what we have
+            if (candidate_residual >= residual)
+                break;
+
+            res = candidate;
+            sin_res = sin_candidate;
+            residual = candidate_residual;
+        }
+        return res;
+    }
+
+    /// @brief e^-1 as a 128 bit fraction, {high, low}: round(e^-1 * 2^128).
+    static constexpr uint64_t inv_e_fraction[2] = {0x5E2D58D8B3BCDF1Aull, 0xBADEC7829054F90Eull};
+
+    /**
+     * @brief Converts a constant in [0, 1) held as a 128 bit fraction to this instantiation.
+     * @param high High QWORD of the fraction, scaled by 2^128.
+     * @param low Low QWORD of the fraction.
+     * @return The constant, rounded to nearest.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr fixed_point128 FromFraction128(uint64_t high, uint64_t low) noexcept
+    {
+        // 128 fraction bits down to F is a right shift by I + 1, rounded
+        shift_right128_inplace_safe(low, high, I + 1);
+        return fixed_point128(low, high);
+    }
+
+    /**
+     * @brief sqrt(x^2 + 1), or sqrt(x^2 - 1) for |x| >= 1, rounded to nearest.
+     *
+     * The square is formed as an exact 256 bit integer and the root taken with RoundedSqrt256(), so
+     * neither function forms x^2 in this type. That matters twice over: x^2 overflows once |x|
+     * reaches 2^(I/2), and x^2 - 1 for an x just above one is a tiny value whose rounding error the
+     * root magnifies - acosh() was out by 5e8 ulp at fixed_point128<1> and by 1e4 ulp at I = 63.
+     *
+     * @param x The value to square.
+     * @param minus True for x^2 - 1, which needs |x| >= 1; false for x^2 + 1.
+     * @return The root. A result of 2^I or more wraps like any overflow.
+     */
+    [[nodiscard]] FP128_INLINE static fixed_point128 RootOfSquareAndOne(const fixed_point128& x, bool minus) noexcept
+    {
+        uint64_t l = 0, h = 0;
+        (void)x.GetMagnitude(l, h);
+        uint64_t s[4] {};
+        Square256(l, h, s);
+
+        // one is 2^F in raw units, so its square is the single bit 2F of the 256 bit square
+        uint64_t one_square[4] {};
+        one_square[(2 * F) / 64] = 1ull << ((2 * F) % 64);
+        uint8_t carry = 0;
+        for (int32_t i = 0; i < 4; ++i) {
+            carry = (minus) ? subborrow_u64(carry, s[i], one_square[i], &s[i]) : addcarryx_u64(carry, s[i], one_square[i], &s[i]);
+        }
+
+        fixed_point128 res;
+        RoundedSqrt256(s, res.low, res.high);
+        return res;
+    }
+
+    /**
+     * @brief log(x + r) for the magnitude x and the root r that asinh() and acosh() add to it.
+     *
+     * The sum reaches 2^I once x reaches 2^(I-1). It used to wrap there, into a negative value that
+     * made log() throw out of the two noexcept functions and terminate the process. A sum beyond the
+     * range is now formed in 129 bits, divided by four, and log(4) added back to its logarithm.
+     *
+     * @param x_low Low QWORD of the magnitude of x, read as unsigned: 2^127 for lowest().
+     * @param x_high High QWORD of the magnitude of x.
+     * @param r The root, read as an unsigned raw value too: for lowest() it is a little above 2^127.
+     * @return log(x + r).
+     */
+    [[nodiscard]] FP128_INLINE static fixed_point128 LogOfSum(uint64_t x_low, uint64_t x_high, const fixed_point128& r)
+    {
+        uint64_t s_low = 0, s_high = 0;
+        const uint8_t carry = addcarryx_u64(addcarryx_u64(0, x_low, r.low, &s_low), x_high, r.high, &s_high);
+        if (carry == 0 && (s_high >> 63) == 0) {
+            return log(fixed_point128(s_low, s_high));
+        }
+
+        // a quarter of the 129 bit sum, rounded half up, is below 2^126 and fits every instantiation
+        const uint64_t round_bit = (s_low >> 1) & 1;
+        s_low = (s_low >> 2) | (s_high << 62);
+        s_high = (s_high >> 2) | (static_cast<uint64_t>(carry) << 62);
+        s_high += addcarryx_u64(0, s_low, round_bit, &s_low);
+        const fixed_point128 ln2 = FromFraction128(ln2_fraction[0], ln2_fraction[1]);
+        return log(fixed_point128(s_low, s_high)) + ln2 + ln2;
+    }
+
+    /**
+     * @brief Maclaurin series of the sine or the cosine of an argument in [0, pi/2].
+     *
+     * Each term is the previous one times x^2 / (n(n+1)), the ratio read from fp128_trig_series_table,
+     * so no power of x and no factorial is ever formed on its own. The whole series runs in
+     * fixed_point128<2>, which has 125 fraction bits whatever I is: x^2 reaches 2.47, beyond the range
+     * of fixed_point128<1>, while every term and partial sum stays at or below one in magnitude for the
+     * cosine and below pi/2 for the sine. The caller rounds the sum to its own grid once, at the end.
+     *
+     * The earlier evaluation raised x to the n-th power and multiplied by 1/n! in the caller's own
+     * instantiation: x^25 is 8e4 for x = pi/2 and wrapped in fixed_point128<16>, and 1/n! held to F bits
+     * lost most of its digits in a wide instantiation. cos(0) came out 7026 ulp short of one at I = 63
+     * and every cosine was 8e-21 off at I = 16.
+     *
+     * The series stops once a term drops below an eighth of the caller's last place - the rest of it
+     * adds up to less than that - so a narrow instantiation evaluates more terms than a wide one.
+     *
+     * @param x Argument in [0, pi/2].
+     * @param cosine True for the cosine series, false for the sine series.
+     * @return The sum of the series, in fixed_point128<2>.
+     */
+    [[nodiscard]] static FP128_INLINE fixed_point128<2> TrigSeries(const fixed_point128<2>& x, bool cosine) noexcept
+    {
+        using work_t = fixed_point128<2>;
+        // this instantiation's last place is 2^(I-2) units of the 2^-125 grid; an eighth of it
+        // (one unit at I = 4, where an eighth would be below the grid)
+        constexpr uint64_t cutoff = 1ull << ((I >= 5) ? (I - 5) : 0);
+
+        const work_t xx = sqr(x);
+        work_t term = (cosine) ? work_t::one() : x;
+        work_t sum = term;
+        bool subtract = true;
+        // the cosine multiplies by 1/(1*2), 1/(3*4), ... and the sine by 1/(2*3), 1/(4*5), ...
+        for (size_t n = (cosine) ? 0 : 1; n < array_length(fp128_trig_series_table); n += 2) {
+            term *= xx;
+            term *= work_t(fp128_trig_series_table[n][1], fp128_trig_series_table[n][0]);
+            uint64_t term_low = 0, term_high = 0;
+            term.get_components(term_low, term_high);
+            if (term_high == 0 && term_low < cutoff) {
+                break;
+            }
+            if (subtract) {
+                sum -= term;
+            } else {
+                sum += term;
+            }
+            subtract = !subtract;
+        }
+        return sum;
+    }
+
     /**
      * @brief Reads entry n of log2_inv_n_table as a fixed_point128<1>.
      *
@@ -1840,7 +2210,7 @@ private:
 
         // A divisor small enough to fit in one QWORD is div_64bit's job; div_128bit rejects it
         // rather than handle a case that has a cheaper route. Both fill the same first words of q.
-        const bool ok = (denom_high != 0) ? div_128bit(q, nullptr, nom, denom, array_length(nom))
+        const bool ok = (denom_high != 0) ? Divide256By128(q, nullptr, nom, denom)
                                           : div_64bit(q, nullptr, nom, denom_low, array_length(nom));
         if (!ok) {
             FP128_FLOAT_DIVIDE_BY_ZERO_EXCEPTION;
@@ -1861,6 +2231,135 @@ private:
         }
 
         return need_rounding;
+    }
+
+    /**
+     * @brief Squares an unsigned 128 bit integer into its full 256 bit product.
+     * @param l Low QWORD of the value
+     * @param h High QWORD of the value
+     * @param r Receives the product, r[0] lowest.
+     */
+    FP128_INLINE static constexpr void Square256(uint64_t l, uint64_t h, uint64_t (&r)[4]) noexcept
+    {
+        r[0] = mulx_u64(l, l, &r[1]);
+        r[2] = mulx_u64(h, h, &r[3]);
+
+        // the cross product l * h appears twice: it is added doubled, a 129 bit value, at bit 64
+        uint64_t cross_high = 0;
+        const uint64_t cross_low = mulx_u64(l, h, &cross_high);
+        const uint64_t doubled_low = cross_low << 1;
+        const uint64_t doubled_high = (cross_high << 1) | (cross_low >> 63);
+        const uint64_t doubled_top = cross_high >> 63;
+        uint8_t carry = addcarryx_u64(0, r[1], doubled_low, &r[1]);
+        carry = addcarryx_u64(carry, r[2], doubled_high, &r[2]);
+        addcarryx_u64(carry, r[3], doubled_top, &r[3]);
+    }
+
+    /**
+     * @brief Compares two unsigned 256 bit integers.
+     * @param a Left hand side, a[0] lowest
+     * @param b Right hand side, b[0] lowest
+     * @return Negative, zero or positive as a is below, equal to or above b.
+     */
+    [[nodiscard]] FP128_INLINE static constexpr int32_t Compare256(const uint64_t (&a)[4], const uint64_t (&b)[4]) noexcept
+    {
+        for (int32_t i = 3; i >= 0; --i) {
+            if (a[i] != b[i]) {
+                return (a[i] < b[i]) ? -1 : 1;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * @brief Square root of an unsigned 256 bit integer, rounded to the nearest integer.
+     *
+     * A double precision estimate of the root, nudged above it, seeds the integer Newton iteration
+     * r' = floor((r + floor(s / r)) / 2), which never drops below floor(sqrt(s)) once it starts above
+     * it. The estimate is good to about 44 bits, so two steps leave r at floor(sqrt(s)) or one above
+     * it. Comparing s with r^2 - r and r^2 + r then settles the rounded root exactly: it is r when
+     * r^2 - r < s <= r^2 + r, the integer form of (r - 1/2)^2 <= s < (r + 1/2)^2. A root exactly
+     * halfway between two integers is impossible, so there is no tie to break.
+     *
+     * Two 256 by 128 bit divisions do the work, the cost of the three Newton steps of the fixed point
+     * iteration this replaced. The result no longer depends on how far the argument had to be
+     * normalized: the old form shifted bits of a large argument away before taking the root and
+     * shifted the root left afterwards, which lost up to half of the integer bits.
+     *
+     * @param s Radicand, s[0] lowest. At most 2^255, so the root fits in 128 bits.
+     * @param res_low Receives the low QWORD of the rounded root.
+     * @param res_high Receives the high QWORD of the rounded root.
+     */
+    FP128_INLINE static void RoundedSqrt256(const uint64_t (&s)[4], uint64_t& res_low, uint64_t& res_high) noexcept
+    {
+        res_low = res_high = 0;
+        int32_t top = 3;
+        while (top >= 0 && s[top] == 0) {
+            --top;
+        }
+        if (top < 0) {
+            return;
+        }
+
+        // s is about lead * 2^k, lead holding its 64 leading bits
+        const int32_t lz = static_cast<int32_t>(lzcnt64(s[top]));
+        uint64_t lead = s[top] << lz;
+        if (lz != 0 && top != 0) {
+            lead |= s[top - 1] >> (64 - lz);
+        }
+        const int32_t k = 64 * top - lz;
+        // k >> 1 rounds towards minus infinity and k & 1 is the matching remainder, so the split is
+        // right for a negative k as well. The factor puts the estimate safely above the root.
+        const double estimate = std::ldexp(std::sqrt(std::ldexp(static_cast<double>(lead), k & 1)), k >> 1) * (1.0 + 0x1p-45);
+
+        uint64_t r_low = 0, r_high = 0;
+        if (estimate < 0x1p64) {
+            r_low = static_cast<uint64_t>(estimate) + 2;  // makes up for the truncation, and then some
+        } else {
+            int exponent = 0;
+            const double mantissa = std::frexp(estimate, &exponent);  // estimate = mantissa * 2^exponent
+            r_low = static_cast<uint64_t>(std::ldexp(mantissa, 64));  // exact, it has 53 significant bits
+            shift_left128_inplace_safe(r_low, r_high, exponent - 64);
+            r_high += addcarryx_u64(0, r_low, 1, &r_low);
+        }
+
+        // Two Newton steps from above. The quotient fits in 128 bits: r stays at or above
+        // floor(sqrt(s)), so s / r is at most two above it.
+        for (int32_t i = 0; i < 2; ++i) {
+            uint64_t q[4] {};
+            if (r_high != 0) {
+                const uint64_t divisor[2] = {r_low, r_high};
+                (void)Divide256By128(q, nullptr, s, divisor);
+            } else {
+                (void)div_64bit(q, nullptr, s, r_low, 4);
+            }
+            // (r + q) / 2, the carry out of the sum shifted back in at the top
+            const uint8_t sum_carry = addcarryx_u64(addcarryx_u64(0, r_low, q[0], &r_low), r_high, q[1], &r_high);
+            r_low = (r_low >> 1) | (r_high << 63);
+            r_high = (r_high >> 1) | (static_cast<uint64_t>(sum_carry) << 63);
+        }
+
+        // r is floor(sqrt(s)) or one more, so the rounded root is r - 1, r or r + 1
+        uint64_t square[4] {};
+        Square256(r_low, r_high, square);
+        uint64_t below[4] {}, above[4] {};  // r^2 - r and r^2 + r
+        uint8_t borrow = subborrow_u64(0, square[0], r_low, &below[0]);
+        borrow = subborrow_u64(borrow, square[1], r_high, &below[1]);
+        borrow = subborrow_u64(borrow, square[2], 0, &below[2]);
+        (void)subborrow_u64(borrow, square[3], 0, &below[3]);
+        uint8_t carry = addcarryx_u64(0, square[0], r_low, &above[0]);
+        carry = addcarryx_u64(carry, square[1], r_high, &above[1]);
+        carry = addcarryx_u64(carry, square[2], 0, &above[2]);
+        (void)addcarryx_u64(carry, square[3], 0, &above[3]);
+
+        if (Compare256(s, below) <= 0) {
+            r_high -= subborrow_u64(0, r_low, 1, &r_low);
+        } else if (Compare256(s, above) > 0) {
+            r_high += addcarryx_u64(0, r_low, 1, &r_low);
+        }
+
+        res_low = r_low;
+        res_high = r_high;
     }
 
     /// @}
@@ -2276,10 +2775,14 @@ private:
     }
     /**
      * @brief Retrieves an integer that represents the base-2 exponent of the specified value.
+     * floor(log2(|x|)), as the C function: the sign of x makes no difference.
      * @param x The specified value.
-     * @return Integer value, rounded towards the nearest integer.
+     * @return The exponent. FP_ILOGB0 for zero, which is what the C function returns for it.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t ilogb(const fixed_point128& x) noexcept { return x.get_exponent(); }
+    [[nodiscard]] friend FP128_FORCE_INLINE constexpr int32_t ilogb(const fixed_point128& x) noexcept
+    {
+        return (x.is_zero()) ? FP_ILOGB0 : x.get_exponent();
+    }
     /**
      * @brief returns the value of x with the sign of y.
      * @param x The value that's returned as the magnitude of the result.
@@ -2292,10 +2795,12 @@ private:
         return (y.is_negative()) ? -magnitude : magnitude;
     }
     /**
-     * @brief Performs the fmod() function, similar to libc's fmod(), returns the remainder of a division x/root.
+     * @brief Performs the fmod() function, similar to libc's fmod(): x - y * trunc(x / y).
+     * Exact, and the result keeps the sign of x. See operator%=().
      * @param x Numerator
      * @param y Denominator
      * @return A fixed_point128 holding the modulo value.
+     * @throws std::logic_error when y is zero. This type has no NaN to return instead.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 fmod(const fixed_point128& x, const fixed_point128& y) { return x % y; }
     /**
@@ -2341,11 +2846,35 @@ private:
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 fmax(const fixed_point128& x, const fixed_point128& y) noexcept { return (x > y) ? x : y; }
     /**
      * @brief Calculates the hypotenuse. i.e. sqrt(x^2 + y^2)
+     *
+     * Correctly rounded, and free of intermediate overflow: hypot(x, y) * 2^F is the square root of
+     * the sum of the squared raw values, which is formed as an exact 256 bit integer. Spelled as
+     * sqrt(sqr(x) + sqr(y)) instead, it overflowed as soon as |x| or |y| reached 2^(I/2), long before
+     * the result itself leaves the range.
+     *
      * @param x First value
      * @param y Second value
-     * @return sqrt(x^2 + y^2).
+     * @return sqrt(x^2 + y^2), rounded to nearest. A result of 2^I or more wraps, like any overflow.
      */
-    [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 hypot(const fixed_point128& x, const fixed_point128& y) noexcept { return sqrt(sqr(x) + sqr(y)); }
+    [[nodiscard]] friend FP128_INLINE fixed_point128 hypot(const fixed_point128& x, const fixed_point128& y) noexcept
+    {
+        uint64_t x_low = 0, x_high = 0, y_low = 0, y_high = 0;
+        (void)x.GetMagnitude(x_low, x_high);
+        (void)y.GetMagnitude(y_low, y_high);
+
+        // each magnitude is at most 2^127, so the sum of the squares is at most 2^255
+        uint64_t sum[4] {}, y_square[4] {};
+        Square256(x_low, x_high, sum);
+        Square256(y_low, y_high, y_square);
+        uint8_t carry = 0;
+        for (int32_t i = 0; i < 4; ++i) {
+            carry = addcarryx_u64(carry, sum[i], y_square[i], &sum[i]);
+        }
+
+        fixed_point128 res;
+        RoundedSqrt256(sum, res.low, res.high);
+        return res;
+    }
     /**
      * @brief Calculates the square of a value. i.e. x^2
      *
@@ -2370,53 +2899,46 @@ private:
         return (h != 0) ? lzcnt64(h) : 64 + lzcnt64(l);
     }
     /**
-     * @brief Calculates the square root using Newton's method.
-     * Based on the book "Math toolkit for real time programming" by Jack W. Crenshaw
+     * @brief Calculates the square root, correctly rounded.
+     *
+     * sqrt(x) * 2^F is the square root of the raw value scaled up by another F bits, which makes it
+     * the integer square root of a 256 bit number: RoundedSqrt256() computes it rounded to nearest,
+     * so the result is the representable value closest to the exact root at every I and every
+     * magnitude. (A tie between two representable values cannot occur.)
+     *
      * @param x Value to calculate the root of
-     * @param iterations how many iterations to perform (more is more accurate). Sensible values are 0-5.
+     * @param iterations Ignored. It used to set the step count of an iterative refinement, which lost
+     *        up to half of the integer bits for a large argument; it is kept so that existing calls
+     *        still compile.
      * @return Square root of (x), zero when x <= 0.
      */
-    [[nodiscard]] friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x, uint32_t iterations = 3) noexcept
+    [[nodiscard]] friend FP128_INLINE fixed_point128 sqrt(const fixed_point128& x, [[maybe_unused]] uint32_t iterations = 3) noexcept
     {
-        static const fixed_point128 factor = "0.70710678118654752440084436210484903928483593768847403658833981";  // sqrt(2) / 2
         if (x.is_negative() || !x)
             return 0;
 
-        // normalize the input to the range [0.5, 1)
-        int32_t expo = x.get_exponent() + 1;
-        fixed_point128 norm_x = (expo > 0) ? x >> expo : x << -expo;
-
-        // use existing HW to provide an excellent first estimate.
-        fixed_point128 root = ::sqrt(static_cast<double>(norm_x));
-
-        // iterate several times via Newton's method
-        //                  X
-        //   Xn+1 = 0.5 * (---- + Xn )
-        //                  Xn
-        // Dividing beats multiplying by a reciprocal here, and did not before div_128bit: the
-        // reciprocal is a Newton loop of its own, so the old spelling ran an inner iteration per
-        // outer one. float128::sqrt() has always been written this way.
-        for (auto i = iterations; i != 0; --i) {
-            root = (norm_x / root + root) >> 1;
+        // raw * 2^F: F is 64 + upper_frac_bits, so the raw value moves up one QWORD and that many bits
+        uint64_t s[4] {};
+        if constexpr (upper_frac_bits == 0) {
+            s[1] = x.low;
+            s[2] = x.high;
+        } else {
+            s[1] = x.low << upper_frac_bits;
+            s[2] = (x.high << upper_frac_bits) | (x.low >> (64 - upper_frac_bits));
+            s[3] = x.high >> (64 - upper_frac_bits);
         }
 
-        if (expo & 1) {
-            root *= factor;
-            ++expo;
-        }
-
-        // Denormalize the result
-        if (expo > 0)
-            root <<= (expo + 1) / 2;
-        else if (expo < 0)
-            root >>= -expo / 2;
-
+        fixed_point128 root;
+        RoundedSqrt256(s, root.low, root.high);
         return root;
     }
     /**
      * @brief Factorial reciprocal (inverse). Calculates 1 / x!
      * Maximum value of x that may produce non zero values is 34.
      * This value depends on the amount of fraction bits.
+     * The table is parsed from decimal strings, so it carries the accuracy of the string constructor:
+     * within 0.5 + 23 / 2^(I-1) ulp of the exact 1 / x!, measured 17.5 ulp at I = 1 and 0.5 from
+     * I = 16 up.
      * @param x Input value
      * @param res Result of the function
      */
@@ -2469,49 +2991,47 @@ private:
     }
     /**
      * @brief Calculates the reciprocal of a value. y = 1 / x
-     * Using newton iterations: Yn+1 = Yn(2 - x * Yn)
+     *
+     * Correctly rounded: the quotient comes from the same long division operator/=() uses, rounded to
+     * nearest with a tie going away from zero. The division is the faster of the two since
+     * div_128bit, and the Newton refinement of a double estimate this replaced lost accuracy as 1 / x
+     * grew - tens of thousands of ulp at fixed_point128<16>. It is called directly rather than
+     * through operator/=(), which divides by multiplying with this function when
+     * FP128_USE_RECIPROCAL_FOR_DIVISION is set.
+     *
      * @param x Input value
-     * @return 1 / x. Returns zero on overflow or division by zero
+     * @return 1 / x. Zero when x is zero or when 1 / x does not fit the range [-2^I, 2^I), that is
+     *         for |x| < 2^-I and for x == 2^-I; x == -2^-I gives lowest().
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 reciprocal(const fixed_point128& x) noexcept
     {
-        static const fixed_point128 one = 1, two = 2;
-        static const fixed_point128 xy_max = one + (fixed_point128::epsilon() << 2);
-        static const fixed_point128 xy_min = one - (fixed_point128::epsilon() << 2);
-        constexpr int max_iterations = 3;
-        constexpr int debug = false;
-        // 1/0 is infinity, which the double constructor saturates to the largest representable
-        // value rather than zero. Catch it here so the documented result actually holds.
-        if (!x)
+        uint64_t l = 0, h = 0;
+        const uint64_t sign_bits = x.GetMagnitude(l, h);
+        if ((l | h) == 0) {
             return fixed_point128(0);
-
-        fixed_point128 y = 1.0 / static_cast<double>(x);
-
-        if (!y)
-            return y;
-
-        fixed_point128 xy, y_prev;
-        // Newton iterations:
-        int i = 0;
-        for (; i < max_iterations && (y_prev != y) && (xy < xy_min || xy > xy_max); ++i) {
-            y_prev = y;
-            xy = x * y;
-            // y = y * (two - x * y);
-            y *= two - xy;
         }
 
-        if constexpr (debug) {
-            static int debug_max_iter = 0;
-            if (i > debug_max_iter || i == max_iterations) {
-                debug_max_iter = i;
-                printf("reciprocal took %i iterations for %.10lf\n", i, static_cast<double>(x));
-            }
+        // |x| = 2^(msb - F) and up, so 1 / |x| reaches 2^I exactly when msb is F - I or below.
+        const int32_t msb = 127 - static_cast<int32_t>(lzcnt128(l, h));
+        if (msb < F - I) {
+            return fixed_point128(0);
+        }
+        if (msb == F - I && popcnt128(l, h) == 1) {
+            // exactly 2^-I: the reciprocal is 2^I, which only the negative side of the range holds
+            return (sign_bits != 0) ? fixed_point128(0, 1ull << 63) : fixed_point128(0);
         }
 
-        return y;
+        fixed_point128 res = one();
+        const bool need_rounding = res.DivideMagnitude(l, h);
+        FP128_ADD_ROUND_BIT(res.low, res.high, need_rounding);
+        res.NegateIf(sign_bits);
+        return res;
     }
     /**
      * @brief Calculate Sine and Cosine using CORDIC using a limited range of [-pi/2, pi/2]
+     * 64 iterations, one per entry of the arctangent table, which give an absolute accuracy of about
+     * 2^-63: measured within 1.1e-19 of mpmath for |x| < 1. The table used to skip arctan(2^-62),
+     * which held the error near 1.8e-19. Not used by tan(), which divides sin() by cos().
      * @param x
      * @param sin_x Result of the Sine of x.
      * @param cos_x Result of the Cosine of x.
@@ -2583,6 +3103,7 @@ private:
             "0.0000000000000000017347234759768070944119",  // arctan(2^-59)
             "0.0000000000000000008673617379884035472059",  // arctan(2^-60)
             "0.0000000000000000004336808689942017736029",  // arctan(2^-61)
+            "0.0000000000000000002168404344971008868015",  // arctan(2^-62)
             "0.0000000000000000001084202172485504434007",  // arctan(2^-63)
             //"0.0000000000000000000542101086242752217003", // arctan(2^-64)
             //"0.0000000000000000000271050543121376108501", // arctan(2^-65)
@@ -2613,7 +3134,7 @@ private:
         int32_t base = 0;
         auto angle = angles[0];
 
-        for (auto j = 1; j <= angles_count; ++j) {
+        for (uint32_t j = 1; j <= angles_count; ++j) {
             if (x.is_positive()) {  // positive sigma
                 fixed_point128 s2 = sin_x + (cos_x >> base);
                 fixed_point128 c2 = cos_x - (sin_x >> base);
@@ -2657,47 +3178,46 @@ private:
      *              x^3   x^5   x^7
      * sin(x) = x - --- + --- - --- + ...
      *               3!    5!    7!
+     * The series runs in a wider fraction than this instantiation has, see TrigSeries().
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
-     * @return Sine of x
+     * @return Sine of x. See sin() for the accuracy.
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 sin1(fixed_point128 x) noexcept
     {
-        static_assert(I >= 4, "sin1() needs template parameter <I> to be at least 4: the series it evaluates carries powers of the argument!");
+        static_assert(I >= 4, "sin1() needs template parameter <I> to be at least 4: its callers reduce the argument with pi, which needs more than one integer bit!");
         assert(fabs(x) <= fixed_point128::half_pi());
 
-        // first part of the series is just 'x'
-        const fixed_point128 xx = sqr(x);
-        fixed_point128 elem_denom, elem_nom = x;
-
-        // compute the rest of the series, starting with: -(x^3 / 3!)
-        for (int i = 3, sign = 1;; i += 2, sign = 1 - sign) {
-            elem_nom *= xx;
-            fact_reciprocal(i, elem_denom);
-            fixed_point128 elem = elem_nom * elem_denom;  // next element in the series
-            // precision limit has been hit
-            if (!elem)
-                break;
-            x += (sign) ? -elem : elem;
-        }
-
-        return x;
+        // sine is odd: the series runs on the magnitude, which keeps every term non negative
+        const bool negative = x.is_negative();
+        const fixed_point128 res(TrigSeries(fixed_point128<2>(fabs(x)), false));
+        return (negative) ? -res : res;
     }
     /**
      * @brief Calculate the cosine function over a limited range [-0.5pi, 0.5pi]
-     * Since the sin1 function converges faster, call it with the modified angle.
+     * Using the Maclaurin series expansion, the formula is:
+     *              x^2   x^4   x^6
+     * cos(x) = 1 - --- + --- - --- + ...
+     *               2!    4!    6!
+     * Evaluated directly rather than as sin1(pi/2 - x), which carried the rounding error of pi/2 into
+     * every result; cos1(0) is now exactly one. See TrigSeries().
      * @param x value in Radians in the range [-0.5pi, 0.5pi]
-     * @return Cosine of x
+     * @return Cosine of x. See cos() for the accuracy.
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 cos1(const fixed_point128& x) noexcept
     {
-        static_assert(I >= 4, "cos1() needs template parameter <I> to be at least 4: it evaluates sin1()!");
-        static const fixed_point128& half_pi = fixed_point128::half_pi();
-        assert(fabs(x) <= half_pi);
-        return (x.is_positive()) ? sin1(half_pi - x) : -sin1(-half_pi - x);
+        static_assert(I >= 4, "cos1() needs template parameter <I> to be at least 4: its callers reduce the argument with pi, which needs more than one integer bit!");
+        assert(fabs(x) <= fixed_point128::half_pi());
+        // cosine is even
+        return fixed_point128(TrigSeries(fixed_point128<2>(fabs(x)), true));
     }
     /**
      * @brief Calculate the Sine function
-     * Ultimately uses sin() with a reduced range of [-pi/4, pi/4]
+     * Ultimately uses sin1() or cos1() with a reduced range of [-pi/4, pi/4].
+     *
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within 2.5 ulp
+     * for |x| < 4 (1.4 ulp from I = 16 up). Beyond that the reduction x - n * pi/2 adds n times the
+     * rounding error of pi/2 in this instantiation, at most |x| / 3 ulp more: 320 ulp for |x| near
+     * 1000 at I = 32.
      * @param x value in Radians
      * @return Sine of x
      */
@@ -2724,71 +3244,39 @@ private:
     }
     /**
      * @brief Calculate the inverse sine function
-     * Uses Newton's method to converge quickly.
+     * Newton's method on sin() for |x| up to one half, see AsinNewton(). Beyond that the identity
+     * asin(x) = pi/2 - 2 asin(sqrt((1 - x) / 2)) keeps the iteration away from pi/2, where the
+     * derivative it divides by vanishes and the refinement stalled at double precision: asin(1) was
+     * 4e16 ulp off at fixed_point128<16>. The square root is correctly rounded, so the identity costs
+     * a few ulp at most.
+     *
+     * Accuracy, measured against mpmath at I = 4, 16, 32, 62 and 63: within 3.5 ulp.
      * @param x value in radians in the range [-1,1]
-     * @return Inverse sine of x
+     * @return Inverse sine of x, zero outside [-1,1]
      */
     [[nodiscard]] friend fixed_point128 asin(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "asin() needs template parameter <I> to be at least 4: it evaluates sin() and cos()!");
-        static const fixed_point128 eps = fixed_point128::epsilon() << 1;
-        constexpr int max_iterations = 6;
         if (x < -1 || x > 1)
             return 0;
 
-        //              sin(Xn) - a
-        // Xn+1 = Xn - -------------
-        //                cos(Xn)
-        // where 'a' is the argument, each iteration will converge on the result if the initial
-        //  estimate is close enough.
-        //
-        // A step is only taken when it moves sin(Xn) closer to the argument. Newton's method needs
-        // that guard here because the derivative it divides by vanishes at the ends of the domain:
-        // asin(1) starts at pi/2, where cos(Xn) is ~6.1e-17 while the numerator is nothing but the
-        // error of sin(). Dividing the one by the other produces a correction of ~7e-5 to an
-        // estimate that was already good to the last bits, and the iteration never recovers.
-        // The guard is close to free: sin(candidate) is the value the next iteration needs anyway,
-        // and the converged case below leaves before evaluating it at all, so the whole function
-        // measures ~1% slower than the unguarded loop it replaced.
         const bool negative = x.is_negative();
         x = fabs(x);
-        fixed_point128 res = ::asin(static_cast<double>(x));
-        fixed_point128 sin_res = sin(res);
-        fixed_point128 residual = fabs(sin_res - x);
-        for (int i = 0; i < max_iterations; ++i) {
-            const fixed_point128 cos_res = cos(res);
-            // the derivative vanished. Dividing by it would throw out of this noexcept function,
-            // and there is nothing left to refine anyway.
-            if (!cos_res)
-                break;
-
-            const fixed_point128 e = (sin_res - x) / cos_res;
-            const fixed_point128 candidate = res - e;
-            // A step of a couple of ulp has converged and cannot be the runaway case, so it is
-            // taken without checking it. Leaving now also skips the sin() below, which is what
-            // keeps the guard from costing an extra evaluation per call.
-            if (fabs(e) <= eps) {
-                res = candidate;
-                break;
-            }
-
-            const fixed_point128 sin_candidate = sin(candidate);
-            const fixed_point128 candidate_residual = fabs(sin_candidate - x);
-            // the step made the estimate worse, or no better: it is noise, so keep what we have
-            if (candidate_residual >= residual)
-                break;
-
-            res = candidate;
-            sin_res = sin_candidate;
-            residual = candidate_residual;
+        fixed_point128 res;
+        if (x <= fixed_point128::half()) {
+            res = AsinNewton(x);
+        } else {
+            res = fixed_point128::half_pi() - (AsinNewton(RootOfHalfComplement(x)) << 1);
         }
-
         return (negative) ? -res : res;
     }
     /**
      * @brief Calculate the cosine function
-     * Ultimately uses sin1() with a reduced range of [-pi/4, pi/4]
-     * Sine's Maclaurin series converges faster than Cosine's.
+     * Ultimately uses sin1() or cos1() with a reduced range of [-pi/4, pi/4]. cos(0) is exactly one.
+     *
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within 1.8 ulp
+     * for |x| < 4 (1.3 ulp from I = 16 up), plus at most |x| / 3 ulp of argument reduction beyond, see
+     * sin().
      * @param x value in Radians
      * @return Cosine of x
      */
@@ -2815,60 +3303,35 @@ private:
     }
     /**
      * @brief Calculate the inverse cosine function
-     * Uses Newton's method to converge quickly.
+     * pi/2 - asin(x) for |x| up to one half. Beyond that acos(x) = 2 asin(sqrt((1 - x) / 2)) for a
+     * positive x and pi - 2 asin(sqrt((1 + x) / 2)) for a negative one, which keep Newton's method
+     * away from the ends of the domain: acos(-1) was 8e16 ulp off at fixed_point128<16>.
+     *
+     * Accuracy, measured against mpmath at I = 4, 16, 32, 62 and 63: within 4 ulp.
      * @param x value in radians in the range [-1,1]
-     * @return Inverse cosine of x
+     * @return Inverse cosine of x, zero outside [-1,1]
      */
     [[nodiscard]] friend fixed_point128 acos(fixed_point128 x) noexcept
     {
         static_assert(I >= 4, "acos() needs template parameter <I> to be at least 4: it evaluates sin() and cos()!");
-        static const fixed_point128 eps = fixed_point128::epsilon() << 1;
-        constexpr int max_iterations = 6;
         if (x < -1 || x > 1)
             return 0;
-        //              cos(Xn) - a           a - cos(Xn)
-        // Xn+1 = Xn - ------------- = Xn -  ------------
-        //                -sin(Xn)              sin(Xn)
-        // where 'a' is the argument, each iteration will converge on the result if the initial
-        //  estimate is close enough.
-        // A step is only taken when it moves cos(Xn) closer to the argument, for the reason spelled
-        // out at asin(): at the ends of the domain the derivative divided by is all but zero, and
-        // an unguarded step there destroys an estimate that was already correct.
-        fixed_point128 res = ::acos(static_cast<double>(x));
-        fixed_point128 cos_res = cos(res);
-        fixed_point128 residual = fabs(cos_res - x);
-        for (int i = 0; i < max_iterations; ++i) {
-            const fixed_point128 sin_res = sin(res);
-            // At the ends of the domain the derivative vanishes: acos(1) starts at res == 0 where
-            // sin is exactly zero. Dividing by it would throw out of this noexcept function, and
-            // there is nothing left to refine anyway.
-            if (!sin_res)
-                break;
 
-            const fixed_point128 e = (x - cos_res) / sin_res;
-            const fixed_point128 candidate = res - e;
-            // as in asin(): a converged step is taken unchecked, which also skips the cos() below
-            if (fabs(e) <= eps) {
-                res = candidate;
-                break;
-            }
-
-            const fixed_point128 cos_candidate = cos(candidate);
-            const fixed_point128 candidate_residual = fabs(cos_candidate - x);
-            // the step made the estimate worse, or no better: it is noise, so keep what we have
-            if (candidate_residual >= residual)
-                break;
-
-            res = candidate;
-            cos_res = cos_candidate;
-            residual = candidate_residual;
+        const fixed_point128 magnitude = fabs(x);
+        if (magnitude <= fixed_point128::half()) {
+            const fixed_point128 res = AsinNewton(magnitude);
+            return fixed_point128::half_pi() + ((x.is_negative()) ? res : -res);
         }
 
-        return res;
+        const fixed_point128 twice = AsinNewton(RootOfHalfComplement(magnitude)) << 1;
+        return (x.is_negative()) ? fixed_point128::pi() - twice : twice;
     }
     /**
      * @brief Calculate the tangent function
      * tan(x) = sin(x)/cos(x)
+     *
+     * The error of the cosine is divided by the cosine itself, so it grows towards the poles. Measured
+     * against mpmath for |x| < 4 at I = 4, 16, 32, 62 and 63: within 45 * max(1, |tan(x)|) ulp.
      * @param x value
      * @return Tangent of x. Zero at the poles (odd multiples of pi/2), where the true value is
      *         unbounded and the cosine comes out exactly zero.
@@ -2895,6 +3358,7 @@ private:
     }
     /**
      * @brief Calculate the inverse tangent function
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within 2.2 ulp.
      * @param x value
      * @return Arctangent of x
      */
@@ -2942,6 +3406,7 @@ private:
     }
     /**
      * @brief Calculate the inverse tangent function of the ratio y / x
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within 3.3 ulp.
      * @param y value
      * @param x value
      * @return Arctangent of y / x in the range [-pi, pi]
@@ -2964,23 +3429,21 @@ private:
         if (!y)
             return (x.is_negative()) ? pi : fixed_point128(0);
 
-        fixed_point128 res;
-        // save the signs of x, y
-        bool comp = fabs(y) > fabs(x);
-        fixed_point128 ratio;
+        // The ratio is kept at or below one in magnitude. Steeper than the diagonal, the angle is
+        // +-pi/2 - atan(x / y) with the sign of y, in every quadrant. That used to take its sign
+        // from atan(x / y) instead, which lost it whenever x / y rounded to zero: atan2(1000, -1e-30)
+        // came out as 3pi/2 at fixed_point128<16>.
+        if (fabs(y) > fabs(x)) {
+            return ((y.is_negative()) ? -half_pi : half_pi) - atan(x / y);
+        }
 
-        // calculate the ratio keeping it below 1.0
-        ratio = (comp) ? x / y : y / x;
-        res = atan(ratio);
-
-        if (comp)
-            res = (res.is_negative()) ? -half_pi - res : half_pi - res;
-
-        if (x > 0)
+        // flatter than the diagonal: atan(y / x), moved into the left half plane when x is negative
+        const fixed_point128 res = atan(y / x);
+        if (x.is_positive()) {
             return res;
+        }
 
-        // x < 0
-        return (y < 0) ? res - pi : res + pi;
+        return (y.is_negative()) ? res - pi : res + pi;
     }
     /**
      * @brief Calculate the hyperbolic sine function
@@ -2988,6 +3451,9 @@ private:
      *           e^x - e^(-x)
      * sinh(x) = ------------
      *                2
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within
+     * 10 * max(1, |sinh(x)|) ulp at I = 4 and 3 * max(1, |sinh(x)|) ulp from I = 16 up. e^x itself has
+     * to fit the range, so a result between 2^(I-1) and 2^I overflows.
      * @param x value
      * @return Sine of x
      */
@@ -3027,24 +3493,30 @@ private:
      * @brief Calculates the inverse hyperbolic sine
      * For positive x:
      * asinh(x) = log(x + sqrt(x^2 + 1))
-     * For negative x, the function returns the result with the sign inverted
+     * For negative x, the function returns the result with the sign inverted.
+     * The root is exact before it is rounded (RootOfSquareAndOne()) and the sum is kept from overflowing
+     * (LogOfSum()), so every argument works, lowest() included. Accuracy, measured against mpmath at
+     * I = 1, 2, 4, 16, 32, 62 and 63 over the whole range: within 2.8 ulp.
      * @param x value
      * @return Inverse hyperbolic sine of x
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 asinh(const fixed_point128& x) noexcept
     {
-        fixed_point128 absx = fabs(x);
-        fixed_point128 res = log(absx + sqrt(sqr(absx) + fixed_point128::one()));
-
-        return (x.is_positive()) ? res : -res;
+        uint64_t l = 0, h = 0;
+        (void)x.GetMagnitude(l, h);
+        const fixed_point128 res = LogOfSum(l, h, RootOfSquareAndOne(x, false));
+        return (x.is_negative()) ? -res : res;
     }
     /**
-     * @brief Calculate the hyperbolic cosine function over a limited range [-0.5pi, 0.5pi]
+     * @brief Calculate the hyperbolic cosine function
      *           e^x + e^(-x)
      * cosh(x) = ------------
      *                2
-     * @param x value in Radians in the range [-0.5pi, 0.5pi]
-     * @return Cosine of x
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within
+     * 10 * max(1, cosh(x)) ulp at I = 4 and 3 * max(1, cosh(x)) ulp from I = 16 up. e^|x| itself has to
+     * fit the range, see sinh().
+     * @param x value
+     * @return Hyperbolic cosine of x
      */
     [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 cosh(const fixed_point128& x) noexcept
     {
@@ -3079,6 +3551,8 @@ private:
      * For x >= 1:
      * acosh(x) = log(x + sqrt(x^2 - 1))
      * For x < 1, the function return zero
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 over the whole range: within
+     * 2.9 ulp. It was out by up to 5e8 ulp just above one, where x^2 - 1 cancels.
      * @param x value in the range [1, inf]
      * @return Inverse hyperbolic cosine of x
      */
@@ -3087,45 +3561,62 @@ private:
         if (x < 1)
             return 0;
 
-        fixed_point128 res = log(x + sqrt(sqr(x) - fixed_point128::one()));
-        return res;
+        // The root of x^2 - 1 is exact before rounding, see RootOfSquareAndOne(): formed in this type
+        // the difference cancels for an x near one and the root magnifies its rounding error. The sum
+        // is kept from overflowing by LogOfSum().
+        return LogOfSum(x.low, x.high, RootOfSquareAndOne(x, true));
     }
     /**
      * @brief Calculates the hyperbolic tangent
-     *           e^x - e^(-x)
-     * tanh(x) = ------------
-     *           e^x + e^(-x)
+     *           e^x - e^(-x)     1 - e^(-2|x|)
+     * tanh(x) = ------------ = ---------------, with the sign of x
+     *           e^x + e^(-x)     1 + e^(-2|x|)
+     * The second form is the one evaluated, for every argument. Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists:
+     * within 4.2 ulp.
      * @param x value
      * @return hyperbolic tangent of x
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 tanh(const fixed_point128& x) noexcept
     {
-        // e^x + e^-x never goes below 2, so one integer bit cannot hold the denominator for any argument
-        static_assert(I >= 2, "tanh() needs template parameter <I> to be at least 2: e^x + e^-x is never below 2!");
-        fixed_point128 ex = exp(x);     // e^x
-        fixed_point128 exm1 = exp(-x);  // e^(-x)
-        //
-        //           e^x - e^(-x)
-        // tanh(x) = ------------
-        //           e^x + e^(-x)
-        //
-        return (ex - exm1) / (ex + exm1);
+        static_assert(I >= 2, "tanh() needs template parameter <I> to be at least 2: it evaluates exp()!");
+        // (1 - e^(-2|x|)) / (1 + e^(-2|x|)) with the sign of x: only e^(-2|x|), which is at most one,
+        // is ever formed. The quotient of e^x - e^-x and e^x + e^-x this replaced overflowed with e^x,
+        // which happens once |x| reaches I ln(2) - tanh(12) was garbage at fixed_point128<16>.
+        const fixed_point128 magnitude = fabs(x);
+        fixed_point128 e2;
+        if (magnitude.is_positive() && magnitude.get_exponent() < I - 1) {
+            e2 = exp(-(magnitude << 1));
+        } else {
+            // 2|x| does not fit the range (lowest() included, whose fabs() wraps): square e^-|x| instead
+            e2 = sqr(exp(-magnitude));
+        }
+        const fixed_point128 res = (fixed_point128::one() - e2) / (fixed_point128::one() + e2);
+        return (x.is_negative()) ? -res : res;
     }
     /**
      * @brief Calculates the inverse hyperbolic tangent
      *                       1 + x
-     * atanh(x) = 0.5 * log( -----)
+     * atanh(x) = 0.5 * log( -----) = 0.5 * (log(1 + x) - log(1 - x))
      *                       1 - x
+     * The second form is the one evaluated. Both of its logarithms take an argument in (0, 2), inside
+     * the range of every instantiation, while the quotient of the first form leaves the range as x
+     * approaches one - beyond 0.88 at fixed_point128<4>, within 2^-15 of one at fixed_point128<16> -
+     * and the wrapped value made log() throw out of this noexcept function, terminating the process.
+     * Accuracy, measured against mpmath at I = 4, 16, 32, 62 and 63: within 1.4 ulp. Below I = 4 the
+     * same holds where log(1 - x) fits the range, which log() needs for its log2 (see log()): for
+     * |x| up to 0.75 at I = 1 and 0.9375 at I = 2.
      * @param x value in the range (-1, 1)
-     * @return Inverse hyperbolic tangent of x
+     * @return Inverse hyperbolic tangent of x, zero outside (-1, 1). A result beyond the range of the
+     *         instantiation, which only a narrow one can meet, wraps like any overflow.
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 atanh(const fixed_point128& x) noexcept
     {
-        auto one = fixed_point128::one();
-        if (fabs(x) >= 1)
+        const fixed_point128 one = fixed_point128::one();
+        // compared without fabs(), which leaves lowest() negative
+        if (x <= -one || x >= one)
             return 0;
 
-        return log((one + x) / (one - x)) >> 1;
+        return (log(one + x) - log(one - x)) >> 1;
     }
     /**
      *                                       x
@@ -3143,6 +3634,11 @@ private:
      * Where ix is the integer part of x and fx is the fraction part.
      * ix is computed via multiplications which won't overflow if the result value can be held.
      * fx is computed via Maclaurin series expansion, but since fx < 1, it won't overflow.
+     * A negative x works with 1/e and the alternating series of e^-fx, so it never forms e^|x|.
+     *
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within
+     * 6.2 * max(1, e^x) ulp. The argument itself is only known to half an ulp, which alone moves a
+     * large result by e^x / 2 ulp.
      * @param x A number specifying a power.
      * @return Exponent of x
      */
@@ -3150,53 +3646,53 @@ private:
     {
         static_assert(I >= 2, "exp() needs template parameter <I> to be at least 2: it multiplies by e(), which needs 2 integer bits!");
         static const fixed_point128 e = fixed_point128::e();
-        fixed_point128 _ix, exp_ix;  // integer part of x
-        fixed_point128 fx = modf(fabs(x), &_ix);
-        uint64_t ix = static_cast<uint64_t>(_ix);  // 64 bit is an overkill to hold the exponent
-        fixed_point128 res;
+        // A negative exponent works with 1/e and an alternating series rather than inverting e^|x|:
+        // e^|x| overflows long before e^-|x| leaves the grid - exp(-12) needs e^12 = 162755, beyond
+        // the range of fixed_point128<16>, and came out as garbage.
+        const bool negative = x.is_negative();
+        fixed_point128 int_part;
+        const fixed_point128 fx = modf(fabs(x), &int_part);  // fraction part of |x|
+        uint64_t ix = static_cast<uint64_t>(int_part);        // 64 bit is an overkill to hold the exponent
 
-        // compute e^ix (integer part of x)
-        if (ix > 0) {
-            exp_ix = 1;            // result
-            fixed_point128 b = e;  // value of e^1
-            while (ix > 0) {
-                if (ix & 1)
-                    exp_ix *= b;
-                ix >>= 1;
+        // e^ix, or e^-ix, by binary powering
+        fixed_point128 exp_ix = fixed_point128::one();
+        fixed_point128 b = (negative) ? FromFraction128(inv_e_fraction[0], inv_e_fraction[1]) : e;
+        while (ix > 0) {
+            if (ix & 1) {
+                exp_ix *= b;
+            }
+            ix >>= 1;
+            if (ix > 0) {
                 b.square();
             }
-        } else {
-            exp_ix = 1;
         }
 
-        // compute e^fx (fraction part of x)
-        if (fx) {
-            fixed_point128 exp_fx = fixed_point128::one() + fx;  // first and second elements of the series
-            fixed_point128 elem_denom, elem_nom = fx;
+        // e^fx, or e^-fx, by the Maclaurin series: fx < 1, so the terms shrink and none overflows
+        if (!fx)
+            return exp_ix;
 
-            for (int i = 2;; ++i) {
-                elem_nom *= fx;
-                fact_reciprocal(i, elem_denom);
-                fixed_point128 elem = elem_nom * elem_denom;
-                if (!elem)
-                    break;
-                exp_fx += elem;  // next element in the series
+        fixed_point128 exp_fx = (negative) ? fixed_point128::one() - fx : fixed_point128::one() + fx;
+        fixed_point128 elem_denom, elem_nom = fx;
+        for (int i = 2;; ++i) {
+            elem_nom *= fx;
+            fact_reciprocal(i, elem_denom);
+            const fixed_point128 elem = elem_nom * elem_denom;
+            if (!elem)
+                break;
+            if (negative && (i & 1)) {
+                exp_fx -= elem;
+            } else {
+                exp_fx += elem;
             }
-
-            res = exp_ix * exp_fx;
-        } else {
-            res = exp_ix;
         }
 
-        // A negative exponent inverts the result. The zero is guarded rather than divided: this type
-        // has no infinity, so reciprocal() answers zero there and operator/= throws instead.
-        if (x.is_positive() || !res)
-            return res;
-
-        return one() / res;
+        return exp_ix * exp_fx;
     }
     /**
      * @brief Calculates the exponent of x and reduces 1 from the result: (e^x) - 1
+     * Evaluated as exp(x) - 1, which in a fixed point type loses nothing to cancellation: the
+     * absolute error is that of exp(), within 9.3 * max(1, |e^x - 1|) ulp measured at I = 4 and
+     * 6.2 * max(1, e^x) ulp from I = 16 up.
      * @param x A number specifying a power.
      * @return Exponent of x
      */
@@ -3207,6 +3703,8 @@ private:
     }
     /**
      * @brief Computes 2 to the power of x
+     * exp(x * ln(2)), the constant applied with 128 fraction bits. Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists:
+     * within 5.5 * max(1, 2^x) ulp.
      * @param x Exponent value
      * @return 2^x
      */
@@ -3219,14 +3717,17 @@ private:
         // y = log(2)
         // 2^x = e^(y*x) = exp(y*x)
         //
-        static const fixed_point128 lan2 = "0.693147180559945309417232121458176575";
-        return exp(x * lan2);
+        return exp(x.MulByFraction128(ln2_fraction[1], ln2_fraction[0]));
     }
     /**
      * @brief Computes x to the power of y
+     * exp(y * log(x)). Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within
+     * 7.3 * max(1, x^y) ulp at I = 4 and 4.4 * max(1, x^y) ulp from I = 16 up. Exact powers are not
+     * exact: pow(2, 3) is 8 - 15 ulp at I = 16. y * log(x) has to fit the range.
      * @param x Base value, must be positive
      * @param y Exponent value
-     * @return x^y
+     * @return x^y, one when x is one, zero when x is negative, and for x = 0 one when y = 0 and zero
+     *         otherwise
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 pow(const fixed_point128& x, const fixed_point128& y) noexcept
     {
@@ -3245,14 +3746,21 @@ private:
         if (x.is_zero())
             return (y.is_zero()) ? fixed_point128::one() : fixed_point128(0);
 
-        fixed_point128 lan_x = log(x);
+        // log(1) is zero, and so is the log of a value within an ulp or two of one: x^y is one there
+        // for every y. Returning the zero itself, as this used to, made pow(1, y) zero.
+        const fixed_point128 lan_x = log(x);
         if (!lan_x)
-            return lan_x;
+            return fixed_point128::one();
 
         return exp(y * lan_x);
     }
     /**
      * @brief Calculates the Log base 2 of x: y = log2(x)
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within 2 ulp
+     * at I = 1, 1.7 ulp at I = 2 and 1.1 ulp from I = 4 up. The compile time evaluation takes a
+     * different, bitwise path that truncates instead: it can be one ulp below the runtime result.
+     * A result outside the range wraps, which a narrow instantiation meets for small arguments:
+     * log2(x) needs x >= 2^(-2^I).
      * @param x The number to perform log2 on.
      * @return log2(x)
      */
@@ -3292,25 +3800,31 @@ private:
     }
     /**
      * @brief Calculates the natural Log (base e) of x: log(x)
+     * log2(x) * ln(2), the constant applied with 128 fraction bits by MulByFraction128() - a constant
+     * held to this instantiation's F bits, multiplied by a log2 of up to 63, would cost tens of ulp.
+     * Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists: within 1.9 ulp.
+     * log2(x) has to fit the range as well, so a narrow instantiation cannot take the log of an
+     * argument below 2^(-2^I) even when its log would fit: at I = 1 that is x below 0.25.
      * @param x The number to perform log on.
      * @return log(x)
+     * @throws std::domain_error when x is zero or negative.
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 log(fixed_point128 x)
     {
-        static const fixed_point128 inv_log2_e = "0.693147180559945309417232121458176575";
         if (x.is_zero() || x.is_negative()) {
             throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
         }
         if (x == 1)
             return 0;
 
-        fixed_point128 y = log2(x);
-        return y * inv_log2_e;
+        return log2(x).MulByFraction128(ln2_fraction[1], ln2_fraction[0]);
     }
     /**
      * @brief Calculates the natural Log (base e) of 1 + x: log(1 + x)
      * Not noexcept: it forwards to log(), which rejects a non positive argument. Marking it
-     * noexcept would turn that domain_error into a call to std::terminate.
+     * noexcept would turn that domain_error into a call to std::terminate. 1 + x is exact in a fixed
+     * point type, so the error is that of log(): within 1.2 ulp measured, with log()'s limit on small
+     * arguments at I < 7.
      * @param x The number to perform log on.
      * @return log1p(x)
      * @throws std::domain_error when x is -1 or below.
@@ -3318,12 +3832,13 @@ private:
     [[nodiscard]] friend FP128_FORCE_INLINE fixed_point128 log1p(fixed_point128 x) { return log(fixed_point128::one() + x); }
     /**
      * @brief Calculates Log base 10 of x: log10(x)
+     * log2(x) * log10(2), the constant applied with 128 fraction bits, see log(). Accuracy, measured against mpmath at I = 1, 2, 4, 16, 32, 62 and 63 where the function exists:
+     * within 1 ulp, with log()'s limit on small arguments at I < 7.
      * @param x The number to perform log on.
      * @return log10(x)
      */
     [[nodiscard]] friend FP128_INLINE fixed_point128 log10(fixed_point128 x)
     {
-        static const fixed_point128 inv_log2_10 = "0.301029995663981195213738894724493068";
         if (x.is_zero() || x.is_negative()) {
             throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
         }
@@ -3331,19 +3846,23 @@ private:
         if (x == 1)
             return 0;
 
-        fixed_point128 y = log2(x);
-        return y * inv_log2_10;
+        // log2(x) * log10(2), the constant applied with 128 fraction bits, see log()
+        return log2(x).MulByFraction128(log10_2_fraction[1], log10_2_fraction[0]);
     }
     /**
      * @brief Calculates Log base 2 of x as an integer ignoring the sign of x.
-     * Similar to: floor(log2(fabs(x)))
+     * floor(log2(fabs(x))), as the C function: logb(-8) is 3. A narrow instantiation cannot hold the
+     * exponent of its smallest values - logb(epsilon()) is -126 for fixed_point128<1> - and the result
+     * then wraps like any other overflow.
      * @param x The number to perform log on.
      * @return logb(x)
+     * @throws std::domain_error when x is zero. The C function returns minus infinity for it, which
+     *         this type cannot represent.
      */
     [[nodiscard]] friend FP128_FORCE_INLINE constexpr fixed_point128 logb(fixed_point128 x)
     {
-        if (x.is_zero() || x.is_negative()) {
-            throw std::domain_error("Math domain error! Function accepts positive, non-zero values only.");
+        if (x.is_zero()) {
+            throw std::domain_error("Math domain error! logb() of zero is minus infinity.");
         }
 
         return x.get_exponent();
@@ -3379,16 +3898,61 @@ template <int32_t I> inline std::ostream& operator<<(std::ostream& os, const fix
 }
 
 /**
- * @brief Reads a fixed_point128 from a stream, accepting what the constructor from a string does.
+ * @brief Reads a fixed_point128 from a stream, the way the builtin arithmetic extractors do.
+ *
+ * Reads what the constructor from a string reads - an optional sign, digits, an optional point and
+ * more digits - correctly rounded to the grid, and stops at the first character that is not part
+ * of it, leaving it in the stream: "2.5,3" gives 2.5 and leaves ",3".
+ *
+ * Failure sets failbit: no digits at all stores zero, and a value outside [lowest(), max()] stores
+ * the nearer of the two. Leading white space is skipped unless skipws is off. This used to read a
+ * whole white space delimited token through the string constructor, which never failed: "xyz" read
+ * as zero and an overflow wrapped silently.
  * @tparam I Integer bit count of the type
  */
 template <int32_t I> inline std::istream& operator>>(std::istream& is, fixed_point128<I>& value)
 {
-    std::string token;
-    if (!(is >> token))
+    const std::istream::sentry sentry(is);
+    if (!sentry)
         return is;
 
-    value = fixed_point128<I>(token.c_str());
+    using traits = std::char_traits<char>;
+    std::streambuf* const buffer = is.rdbuf();
+    std::string text;
+    int c = buffer->sgetc();
+    const auto take = [&]() {
+        text += traits::to_char_type(c);
+        buffer->sbumpc();
+        c = buffer->sgetc();
+    };
+    if (c == '+' || c == '-') {
+        take();
+    }
+    while (c != traits::eof() && c >= '0' && c <= '9') {
+        take();
+    }
+    if (c == '.') {
+        take();
+        while (c != traits::eof() && c >= '0' && c <= '9') {
+            take();
+        }
+    }
+    if (c == traits::eof()) {
+        is.setstate(std::ios_base::eofbit);
+    }
+
+    uint64_t low = 0, high = 0;
+    const char* end = nullptr;
+    const int32_t status = fixed_point128<I>::ParseDecimal(text.data(), text.data() + text.size(), low, high, end);
+    if (status == 0) {
+        value = fixed_point128<I>();
+        is.setstate(std::ios_base::failbit);
+    } else if (status == 2) {
+        value = (!text.empty() && text[0] == '-') ? std::numeric_limits<fixed_point128<I>>::lowest() : std::numeric_limits<fixed_point128<I>>::max();
+        is.setstate(std::ios_base::failbit);
+    } else {
+        value = fixed_point128<I>(low, high);
+    }
     return is;
 }
 
@@ -3432,11 +3996,19 @@ public:
     static constexpr bool has_denorm_loss = false;
     static constexpr float_denorm_style has_denorm = denorm_absent;
     FP128_SUPPRESS_DEPRECATED_END
-    /// @brief Multiplication, division and the right shift round to the nearest grid value.
+    /// @brief Multiplication, division (by a fixed_point128 or an integer), the right shift and the
+    ///        narrowing conversions round to the nearest grid value, a tie going away from zero.
     static constexpr float_round_style round_style = round_to_nearest;
     static constexpr bool is_iec559 = false;
     static constexpr bool is_bounded = true;
-    static constexpr bool is_modulo = false;
+    /**
+     * @brief +, - and * wrap around: they keep the low 128 bits of the two's complement result,
+     *        which differs from the exact one by a multiple of 2^(I+1) = max() - lowest() + epsilon().
+     *
+     * As for int128_t, whose builtin counterparts report false only because their overflow is
+     * undefined. Here it is defined: max() + epsilon() is lowest(). This used to say false.
+     */
+    static constexpr bool is_modulo = true;
     /// @brief Division by zero throws std::logic_error rather than producing a value.
     static constexpr bool traps = true;
     static constexpr bool tinyness_before = false;

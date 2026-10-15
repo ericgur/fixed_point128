@@ -131,6 +131,73 @@ private:
     size_t worstIndex = 0;        ///< Table index that produced it.
 };
 
+/// @brief True when both encodings are identical, or both are quiet NaNs.
+///
+/// The operations IEEE 754 requires to be correctly rounded are held to this rather than to an ulp
+/// bound: the distance between +0 and -0 is zero ulp, and a sign of zero is part of the answer.
+[[nodiscard]] inline bool SameResult(const float128& actual, const float128& expected) noexcept
+{
+    if (isnan(expected))
+        return isnan(actual) && !actual.is_signaling();
+    uint64_t al = 0, ah = 0, el = 0, eh = 0;
+    actual.get_bits(al, ah);
+    expected.get_bits(el, eh);
+    return al == el && ah == eh;
+}
+
+/// @brief Counts the mismatches of a correctly rounded operation against its table, reporting the
+///        first few in full.
+class ExactTracker
+{
+public:
+    explicit ExactTracker(const char* name) noexcept : funcName(name) {}
+
+    /// @brief Compares one result against its reference bit for bit.
+    void Check(const float128& actual, const float128& expected, size_t index)
+    {
+        if (SameResult(actual, expected))
+            return;
+        if (++failures <= 5)
+            ADD_FAILURE() << funcName << "[" << index << "]: expected " << Bits(expected) << ", got " << Bits(actual);
+    }
+
+    /// @brief Fails the test when any case mismatched.
+    void Expect() const { EXPECT_EQ(failures, 0u) << funcName << " is not correctly rounded"; }
+
+private:
+    const char* funcName;  ///< Name of the operation under test, for messages.
+    size_t failures = 0;   ///< Mismatches seen so far.
+};
+
+/// @brief Runs a correctly rounded single argument operation over its reference table, bit for bit.
+template <size_t N, typename Fn> inline void CheckExactUnary(const char* name, const ref_unary (&table)[N], Fn fn)
+{
+    ExactTracker tracker(name);
+    for (size_t i = 0; i < N; ++i)
+        tracker.Check(fn(float128(table[i].xl, table[i].xh)), float128(table[i].rl, table[i].rh), i);
+    tracker.Expect();
+}
+
+/// @brief Runs a correctly rounded two argument operation over its reference table, bit for bit.
+template <size_t N, typename Fn> inline void CheckExactBinary(const char* name, const ref_binary (&table)[N], Fn fn)
+{
+    ExactTracker tracker(name);
+    for (size_t i = 0; i < N; ++i)
+        tracker.Check(fn(float128(table[i].xl, table[i].xh), float128(table[i].yl, table[i].yh)), float128(table[i].rl, table[i].rh), i);
+    tracker.Expect();
+}
+
+/// @brief Runs a correctly rounded three argument operation over its reference table, bit for bit.
+template <size_t N, typename Fn> inline void CheckExactTernary(const char* name, const ref_ternary (&table)[N], Fn fn)
+{
+    ExactTracker tracker(name);
+    for (size_t i = 0; i < N; ++i) {
+        tracker.Check(fn(float128(table[i].xl, table[i].xh), float128(table[i].yl, table[i].yh), float128(table[i].zl, table[i].zh)),
+                      float128(table[i].rl, table[i].rh), i);
+    }
+    tracker.Expect();
+}
+
 /// @brief Runs a single argument function over its reference table.
 /// @tparam N Table size, deduced
 /// @tparam Fn Callable taking a float128

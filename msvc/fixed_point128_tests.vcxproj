@@ -118,6 +118,7 @@
     <ClCompile Include="$(FP128Root)tests\float128_gtest.cpp" />
     <ClCompile Include="$(FP128Root)tests\float128_accuracy_gtest.cpp" />
     <ClCompile Include="$(FP128Root)tests\float128_format_gtest.cpp" />
+    <ClCompile Include="$(FP128Root)tests\float128_ieee_gtest.cpp" />
     <ClCompile Include="$(FP128Root)tests\int128_t_gtest.cpp" />
     <ClCompile Include="$(FP128Root)tests\uint128_t_gtest.cpp" />
   </ItemGroup>
