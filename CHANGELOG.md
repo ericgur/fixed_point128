@@ -9,6 +9,19 @@ exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The headers no longer change the warning settings of the program that includes them** under
+  MSVC:
+  - `float128.h` raised C4201 (nameless struct/union) at `/W4` in every translation unit that
+    included it. The warning is now turned off around the declaration of float128's storage alone.
+    The project's own builds no longer suppress C4201 everywhere, so a new occurrence is reported.
+  - `fp128_shared.h` turned C4996 off for the rest of every translation unit, which hid deprecation
+    warnings in the program's own code. Nothing in the library needs it any more, and it is gone.
+  - `fixed_point128.h` pushed the warning state without popping it, so its code analysis
+    suppressions (C26408, C26446, C26472, C26481, C26482, C26485) also applied to the code that
+    followed it. The header now restores the state at its end.
+
 ## [1.0.1.0] - 2026-10-16
 
 ### Fixed

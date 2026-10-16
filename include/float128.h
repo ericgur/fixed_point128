@@ -716,6 +716,13 @@ class FP128_ALIGN16 float128
         positiveInfinity    ///< Positive infinity.
     };
 
+    // An anonymous struct is a language extension that MSVC, Clang and GCC all accept. MSVC reports it
+    // at /W4 (C4201) in every translation unit that includes this header, so the warning is turned off
+    // for this declaration only and stays on for the consumer's own code.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4201)  // nonstandard extension used: nameless struct/union
+#endif
     /// @brief Internal storage: 128-bit value split into low and high QWORDs.
     struct {
         uint64_t low;  ///< Lower 64 bits of the float128 encoding.
@@ -724,6 +731,9 @@ class FP128_ALIGN16 float128
             _float128_bits high_bits;   ///< Upper 64 bits (bit-field view).
         };
     };
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 public:
     /**

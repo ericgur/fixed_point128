@@ -284,8 +284,6 @@ static constexpr bool FP128_CPP_STYLE_MODULO = true;  ///< Use C++ modulo semant
 // MSVC specific section - keep intrinsics as-is
 //
 #if defined(FP128_MSVC)
-#pragma warning(disable : 4996)
-
 #include <intrin.h>
 #include <immintrin.h>
 

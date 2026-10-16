@@ -57,7 +57,7 @@
 
 #pragma once
 
-// override some static analysis checks
+// override some static analysis checks for this header; the matching pop is at the end of the file
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 26472)  // Don't use a static_cast for arithmetic conversions. Use brace initialization
@@ -4143,3 +4143,7 @@ template <int32_t I> struct formatter<fp128::fixed_point128<I>, char>
 }  // namespace std
 
 #endif  // FP128_FIXED_POINT128_T_H
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
