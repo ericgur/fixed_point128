@@ -9,6 +9,15 @@ exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Qt projects could not include the library.** The decimal formatter in `fp128_decimal.h` named a
+  local lambda `emit`, which Qt defines as an empty macro, so every header that includes the
+  formatter failed to compile in a Qt project. The lambda is renamed. `tests/qt_keywords_gtest.cpp`
+  now builds every header with each unprefixed Qt macro (`emit`, `signals`, `slots`, `foreach`,
+  `forever`, `SIGNAL`, `qDebug`, `M_PI` and the rest) defined as a compile error, so a library
+  identifier that matches one of them fails the build.
+
 ## [1.0.0.0] - 2026-10-15
 
 ### Fixed

@@ -16,6 +16,21 @@
 - Write verbose documentation for class headers.
 - Use PascalCase for global functions, private and protected class/struct methods.
 - Use camelCase for global functions that start with the letter 'q'. i.e. QT style.
+- Never name anything after a Qt keyword or macro: no variable, parameter, lambda, function, type,
+  member, namespace, enumerator or macro. Qt projects define these names as macros before they include
+  our headers, so any library identifier that matches one breaks their build. A local lambda named
+  `emit` did exactly that. The names, taken from the Qt 6 public headers:
+  - Keywords: `signals`, `slots`, `emit`, `foreach`, `forever`.
+  - Meta-object: `SIGNAL`, `SLOT`, `METHOD`.
+  - Logging: `qDebug`, `qInfo`, `qWarning`, `qCritical`, `qFatal`, `qErrnoWarning`, `qCDebug`,
+    `qCInfo`, `qCWarning`, `qCCritical`, `qCFatal`.
+  - Other: `qPrintable`, `qUtf8Printable`, `qUtf16Printable`, `qMove`, `qApp`, `qGuiApp`.
+  - Math constants from qmath.h: `M_E`, `M_LOG2E`, `M_LOG10E`, `M_LN2`, `M_LN10`, `M_PI`, `M_PI_2`,
+    `M_PI_4`, `M_1_PI`, `M_2_PI`, `M_2_SQRTPI`, `M_SQRT2`, `M_SQRT1_2`. Avoid every `M_` name.
+  - Prefixes: no identifier may start with `Q_`, `QT_` or `qt_`. Qt names its own macros that way.
+
+  `tests/qt_keywords_gtest.cpp` defines each listed name as a compile error. When this list
+  changes, change that test to match.
 - Use camelCase for public methods, struct methods/data members and local variables.
 - Private and protected class/struct data members use camelCase. Example: "dataMember".
 - No newlines before the opening curly brace of any code block, just a single space  
