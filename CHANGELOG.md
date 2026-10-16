@@ -7,6 +7,17 @@ and this project adheres to a four-part `MAJOR.MINOR.PATCH.BUILD` version scheme
 exposed through the `FP128_VERSION*` macros and the `fp128::version*` constants in
 [`include/fp128_shared.h`](include/fp128_shared.h).
 
+## [1.0.1.0] - 2026-10-16
+
+### Fixed
+
+- **Qt projects could not include the library.** The decimal formatter in `fp128_decimal.h` named a
+  local lambda `emit`, which Qt defines as an empty macro, so every header that includes the
+  formatter failed to compile in a Qt project. The lambda is renamed. `tests/qt_keywords_gtest.cpp`
+  now builds every header with each unprefixed Qt macro (`emit`, `signals`, `slots`, `foreach`,
+  `forever`, `SIGNAL`, `qDebug`, `M_PI` and the rest) defined as a compile error, so a library
+  identifier that matches one of them fails the build.
+
 ## [1.0.0.0] - 2026-10-15
 
 ### Fixed
@@ -521,6 +532,7 @@ up to it.
 - clang compatibility for `fixed_point128` and for the benchmark's add/sub/mul/div
   conditions.
 
+[1.0.1.0]: https://github.com/ericgur/fixed_point128/releases/tag/v1.0.1.0
 [1.0.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v1.0.0.0
 [0.12.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.12.0.0
 [0.11.0.0]: https://github.com/ericgur/fixed_point128/releases/tag/v0.11.0.0

@@ -434,7 +434,7 @@ inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, 
     bool rest_nonzero = false;
     bool seen_significant = integer_digits > 0;
 
-    const auto emit = [&](char digit) {
+    const auto append_digit = [&](char digit) {
         if (emitted < requested)
             digits[emitted++] = digit;
         else if (!have_rounding_digit) {
@@ -446,7 +446,7 @@ inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, 
     };
 
     for (int32_t i = integer_digits - 1; i >= 0; --i)
-        emit(reversed[i]);
+        append_digit(reversed[i]);
 
     // Fraction digits, nine at a time, until the request and its rounding digit are both covered.
     while (!fraction.is_zero() && (emitted < requested || !have_rounding_digit)) {
@@ -464,7 +464,7 @@ inline int32_t to_decimal_digits(uint64_t mantissa_low, uint64_t mantissa_high, 
                 }
                 seen_significant = true;
             }
-            emit(block_digits[i]);
+            append_digit(block_digits[i]);
         }
     }
     // Anything still left in the buffer sits below every digit produced.

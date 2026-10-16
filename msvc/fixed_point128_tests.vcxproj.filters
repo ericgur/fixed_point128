@@ -20,6 +20,9 @@
     <ClCompile Include="$(FP128Root)tests\int128_t_gtest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="$(FP128Root)tests\qt_keywords_gtest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="$(FP128Root)tests\uint128_t_gtest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

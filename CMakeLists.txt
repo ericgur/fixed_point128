@@ -32,7 +32,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(fixed_point128
-        VERSION 1.0.0
+        VERSION 1.0.1
         DESCRIPTION "128 bit integer, fixed-point and floating-point arithmetic types"
         HOMEPAGE_URL "https://github.com/ericgur/fixed_point128"
         LANGUAGES CXX)

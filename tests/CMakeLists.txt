@@ -17,6 +17,7 @@ add_executable(fixed_point128_tests
     float128_format_gtest.cpp
     float128_ieee_gtest.cpp
     int128_t_gtest.cpp
+    qt_keywords_gtest.cpp
     uint128_t_gtest.cpp
     gtest_shared.h
     float128_ref_check.h
