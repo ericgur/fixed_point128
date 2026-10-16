@@ -71,8 +71,8 @@
  *  @{
  */
 #define FP128_VERSION_MAJOR 1  ///< Breaking changes to the public interface.
-#define FP128_VERSION_MINOR 1  ///< Backwards compatible additions.
-#define FP128_VERSION_PATCH 0  ///< Fixes that change neither.
+#define FP128_VERSION_MINOR 0  ///< Backwards compatible additions.
+#define FP128_VERSION_PATCH 1  ///< Fixes that change neither.
 #define FP128_VERSION_BUILD 0  ///< Rebuild of an unchanged source tree.
 
 /// @brief Packs a four component version into one integer, so two versions compare with `<` and `>=`.
